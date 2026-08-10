@@ -1,5 +1,7 @@
 # TmuxDeck
 
+*[English](README.md) · [简体中文](README.zh-CN.md)*
+
 A desktop dashboard for tmux sessions that run AI coding agents.
 
 TmuxDeck turns your tmux sessions into a visual dashboard. Each session is a card showing what is running in every pane, when it was last active, and whether it is still live. One click reattaches to a session in your terminal of choice.
