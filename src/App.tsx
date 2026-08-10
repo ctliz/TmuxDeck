@@ -1,22 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Terminal,
   Plus,
-  RefreshCw,
-  Play,
-  Trash2,
-  Edit2,
   Folder,
-  CheckCircle2,
   Search,
-  LayoutGrid,
   Zap,
   Bot,
   Copy,
   Check,
-  ChevronDown,
   Settings,
 } from "lucide-react";
 import { t, tPlural, translateName, translateError } from "./i18n";
@@ -97,8 +91,26 @@ export default function App() {
   const [renamingSession, setRenamingSession] = useState<string | null>(null);
   const [renamedName, setRenamedName] = useState("");
 
-  // Terminal Selector Menu
-  const [activeTerminalDropdown, setActiveTerminalDropdown] = useState<string | null>(null);
+  // Terminal Icons Cache State
+  const [terminalIconUrls, setTerminalIconUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!env || !env.terminals) return;
+    env.terminals.forEach((term) => {
+      if (terminalIconUrls[term.id]) return;
+      invoke<number[]>("get_terminal_icon", { terminalId: term.id })
+        .then((bytes) => {
+          if (!bytes || bytes.length === 0) return;
+          const binary = String.fromCharCode(...new Uint8Array(bytes));
+          const base64 = btoa(binary);
+          const dataUrl = `data:image/png;base64,${base64}`;
+          setTerminalIconUrls((prev) => ({ ...prev, [term.id]: dataUrl }));
+        })
+        .catch(() => {
+          // Fallback to SVG icon in public/terminal-icons/
+        });
+    });
+  }, [env]);
 
   const getSessionActivityInfo = (session: TmuxSession) => {
     if (session.attached) {
@@ -216,6 +228,12 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+
+    const unlistenPromise = listen("trigger-new-workspace", () => {
+      setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
+      setShowCreateModal(true);
+    });
+
     const sessionTimer = setInterval(() => {
       loadData();
     }, 4000);
@@ -261,6 +279,7 @@ export default function App() {
     }, 8000);
 
     return () => {
+      unlistenPromise.then((unlisten) => unlisten());
       clearInterval(sessionTimer);
       clearInterval(captureTimer);
     };
@@ -317,7 +336,6 @@ export default function App() {
     const targetTerminal = termId || selectedTerminal || (env?.terminals[0]?.id || "terminal");
     try {
       await invoke("open_session", { name: sessionName, terminalId: targetTerminal });
-      setActiveTerminalDropdown(null);
     } catch (err: any) {
       alert(t("val.openTerminalFailed") + ": " + translateError(err));
     }
@@ -470,80 +488,19 @@ export default function App() {
   const currentAgentObj = env?.agents.find((a) => a.id === selectedAgent) || env?.agents[0];
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans select-none">
-      {/* App Header */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20">
-            <LayoutGrid className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                {t("app.title")}
-              </h1>
-              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">
-                {t("app.version")}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              {t("app.subtitle")}
-            </p>
-          </div>
-        </div>
-
-        {/* Environment Status Indicator */}
-        <div className="hidden md:flex items-center space-x-4 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
-          <div className="flex items-center space-x-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-slate-300 font-medium">{t("env.tmux_ok")}</span>
-          </div>
-          <span className="text-slate-700">|</span>
-          <div className="flex items-center space-x-2 text-slate-400">
-            <span>{tPlural("env.terminals", env?.terminals.length || 0)}</span>
-            <span>·</span>
-            <span>{tPlural("env.agents", env?.agents.length || 0)}</span>
-          </div>
-        </div>
-
-        {/* Top Header Actions */}
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={loadData}
-            disabled={loading}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 transition disabled:opacity-50 cursor-pointer"
-            title={t("btn.refresh")}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
-          <button
-            onClick={() => {
-              setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
-              setShowCreateModal(true);
-            }}
-            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium shadow-lg shadow-cyan-500/25 transition text-sm cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{t("btn.newWorkspace")}</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Search & Statistics Bar */}
-      <div className="flex items-center justify-between px-6 py-3 bg-slate-900/40 border-b border-slate-800/60">
-        <div className="relative w-72">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/60 text-slate-100 font-sans select-none overflow-hidden">
+      {/* Floating Centered Liquid Glass Search Pill */}
+      <div className="flex items-center justify-center pt-6 pb-2 px-6 shrink-0">
+        <div className="relative group w-full max-w-xs transition-all duration-300 focus-within:max-w-sm">
+          <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-white/40 group-focus-within:text-cyan-400 transition" />
           <input
             type="text"
             placeholder={t("search.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 text-sm bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500 transition"
+            className="w-full pl-9 pr-4 py-1.5 text-xs bg-white/10 backdrop-blur-xl border border-white/15 rounded-full text-slate-100 placeholder-white/40 focus:outline-none focus:border-cyan-500/60 focus:bg-white/15 focus:shadow-lg focus:shadow-cyan-500/10 transition-all duration-300"
+            title={t("search.hint", { total: sessions.length, running: sessions.filter((s) => s.attached).length })}
           />
-        </div>
-        <div className="text-xs text-slate-400 flex items-center space-x-4">
-          <span>{tPlural("stats.total", sessions.length)}</span>
-          <span>{t("stats.running", { n: sessions.filter((s) => s.attached).length })}</span>
         </div>
       </div>
 
@@ -555,52 +512,50 @@ export default function App() {
           </div>
         )}
 
-        {filteredSessions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 mb-4">
-              <Terminal className="w-10 h-10 text-slate-600" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {/* Card #1: New Workspace Dashed Glass Card */}
+          <div
+            onClick={() => {
+              setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
+              setShowCreateModal(true);
+            }}
+            className="flex flex-col items-center justify-center min-h-[14rem] rounded-2xl border-2 border-dashed border-white/20 bg-white/5 backdrop-blur-xl hover:bg-white/10 hover:border-cyan-400/50 transition-all duration-300 cursor-pointer group shadow-lg shadow-black/5 animate-fade-in-up"
+          >
+            <div className="p-3 rounded-2xl bg-white/10 border border-white/15 group-hover:scale-110 group-hover:bg-cyan-500/20 group-hover:border-cyan-400/40 transition-all duration-300 mb-3">
+              <Plus className="w-6 h-6 text-white/70 group-hover:text-cyan-300 transition" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-300">{t("empty.title")}</h3>
-            <p className="text-sm text-slate-500 max-w-sm mt-1 mb-4">
+            <span className="text-sm font-semibold text-slate-200 group-hover:text-cyan-300 transition">
+              {t("btn.newWorkspace")}
+            </span>
+            <span className="text-[11px] text-slate-400/80 mt-1 px-4 text-center">
               {t("empty.hint")}
-            </p>
-            <button
-              onClick={() => {
-                setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
-                setShowCreateModal(true);
-              }}
-              className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-cyan-400 text-sm font-medium transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{t("empty.createNow")}</span>
-            </button>
+            </span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-            {filteredSessions.map((session) => {
-              const isRenaming = renamingSession === session.name;
-              const mainCmds = session.panes.map((p) => p.command).filter(Boolean);
-              const isAgentActive = env?.agents.some((a) =>
-                mainCmds.some((c) => c.includes(a.id) || (a.path && c.includes(a.path)))
-              );
-              const activityInfo = getSessionActivityInfo(session);
 
-              const gridCols =
-                session.panes_count === 1
-                  ? "grid-cols-1"
-                  : session.panes_count === 2
-                  ? "grid-cols-2"
-                  : session.panes_count === 6
-                  ? "grid-cols-3"
-                  : "grid-cols-2";
+          {filteredSessions.map((session) => {
+            const isRenaming = renamingSession === session.name;
+            const mainCmds = session.panes.map((p) => p.command).filter(Boolean);
+            const isAgentActive = env?.agents.some((a) =>
+              mainCmds.some((c) => c.includes(a.id) || (a.path && c.includes(a.path)))
+            );
+            const activityInfo = getSessionActivityInfo(session);
 
-              return (
-                <div
-                  key={session.id}
-                  className="flex flex-col justify-between rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition shadow-lg group hover:shadow-cyan-500/5"
-                >
+            const gridCols =
+              session.panes_count === 1
+                ? "grid-cols-1"
+                : session.panes_count === 2
+                ? "grid-cols-2"
+                : session.panes_count === 6
+                ? "grid-cols-3"
+                : "grid-cols-2";
+
+            return (
+              <div
+                key={session.id}
+                className="flex flex-col justify-between rounded-2xl bg-white/10 backdrop-blur-xl border border-white/15 hover:border-cyan-500/50 transition-all duration-300 shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15 group animate-fade-in-up"
+              >
                   {/* Card Header */}
-                  <div className="p-4 border-b border-slate-800/60">
+                  <div className="p-4 border-b border-white/10">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
                         <span
@@ -619,34 +574,28 @@ export default function App() {
                             className="bg-slate-950 px-2 py-0.5 border border-cyan-500 rounded text-sm text-white w-full"
                           />
                         ) : (
-                          <h2 className="font-semibold text-slate-100 truncate text-base group-hover:text-cyan-300 transition">
+                          <h2
+                            onClick={() => {
+                              setRenamingSession(session.name);
+                              setRenamedName(session.name);
+                            }}
+                            className="font-semibold text-slate-100 truncate text-base hover:text-cyan-300 hover:underline transition cursor-pointer"
+                            title={t("card.rename")}
+                          >
                             {session.name}
                           </h2>
                         )}
                       </div>
-                      <div className="flex items-center space-x-1 shrink-0">
-                        <button
-                          onClick={() => {
-                            setRenamingSession(session.name);
-                            setRenamedName(session.name);
-                          }}
-                          className="p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                          title={t("card.rename")}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleKill(session.name)}
-                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                          title={t("card.destroy")}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => handleKill(session.name)}
+                        className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-white/10 transition cursor-pointer text-sm font-bold leading-none shrink-0"
+                        title={t("card.destroy")}
+                      >
+                        ✕
+                      </button>
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-slate-400">
-                      <span>{tPlural("card.windows", session.windows_count)} · {tPlural("card.panes", session.panes_count)}</span>
                       <span>{activityInfo.text}</span>
                     </div>
                   </div>
@@ -703,64 +652,57 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Card Footer Actions */}
-                  <div className="p-3 border-t border-slate-800/60 bg-slate-900/40 relative">
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleOpenSession(session.name)}
-                        className="flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-gradient-to-r hover:from-cyan-600 hover:to-blue-600 text-slate-200 hover:text-white text-sm font-medium transition shadow-sm group-hover:bg-cyan-600/20 group-hover:text-cyan-300 group-hover:border group-hover:border-cyan-500/40 cursor-pointer"
-                        title={t("btn.openWith", { terminal: translateName(currentTerminalObj?.name || "terminal") })}
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>{t("btn.open")} ({translateName(currentTerminalObj?.name || "terminal")})</span>
-                      </button>
-
-                      {env && env.terminals.length > 1 && (
-                        <button
-                          onClick={() =>
-                            setActiveTerminalDropdown(
-                              activeTerminalDropdown === session.name ? null : session.name
-                            )
-                          }
-                          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
-                          title={t("card.selectTerminal")}
-                        >
-                          <ChevronDown className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-
-                    {activeTerminalDropdown === session.name && (
-                      <div className="absolute right-3 bottom-14 z-20 w-44 rounded-xl bg-slate-900 border border-slate-700 shadow-xl py-1">
-                        <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 border-b border-slate-800">
-                          {t("card.selectTerminal")}
-                        </div>
-                        {env?.terminals.map((term) => (
+                  {/* Card Footer Actions: Row of Terminal Icons */}
+                  <div className="p-3 border-t border-white/10 bg-black/20 flex items-center justify-between">
+                    <span className="text-[10px] font-medium text-slate-400">
+                      {t("card.selectTerminal")}
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      {env?.terminals.map((term) => {
+                        const isDefault = selectedTerminal === term.id;
+                        const iconSrc = terminalIconUrls[term.id] || `/terminal-icons/${term.id}.svg`;
+                        return (
                           <button
                             key={term.id}
                             onClick={() => handleOpenSession(session.name, term.id)}
-                            className="w-full text-left px-3 py-1.5 text-xs text-slate-200 hover:bg-cyan-950 hover:text-cyan-300 flex items-center justify-between cursor-pointer"
+                            className={`p-1.5 rounded-xl transition-all duration-200 hover:scale-110 cursor-pointer relative ${
+                              isDefault
+                                ? "bg-cyan-500/20 border border-cyan-400/60 shadow-sm shadow-cyan-500/20"
+                                : "bg-white/5 border border-white/10 hover:bg-white/15"
+                            }`}
+                            title={t("card.openWithTerminal", { name: translateName(term.name) })}
                           >
-                            <span>{translateName(term.name)}</span>
-                            {term.id === selectedTerminal && (
-                              <Check className="w-3 h-3 text-cyan-400" />
+                            <img
+                              src={iconSrc}
+                              onError={(e) => {
+                                e.currentTarget.src = "/terminal-icons/default.svg";
+                              }}
+                              alt={term.name}
+                              className="w-5 h-5 rounded object-contain"
+                            />
+                            {isDefault && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 absolute -top-0.5 -right-0.5 shadow-sm shadow-cyan-400" />
                             )}
                           </button>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
+          {filteredSessions.length === 0 && search && (
+            <div className="text-center text-xs text-slate-400 mt-4 font-mono animate-fade-in-up">
+              {t("empty.title")}
+            </div>
+          )}
       </main>
 
       {/* New Workspace Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in-up">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900/90 backdrop-blur-2xl border border-white/20 shadow-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2">
                 <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use tauri::Emitter;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -9,6 +10,7 @@ pub struct ToolInfo {
     pub id: String,
     pub name: String,
     pub path: String,
+    pub icon_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -73,6 +75,66 @@ pub struct TmuxSession {
     pub panes: Vec<TmuxPane>,
 }
 
+fn find_app_icon(app_path_str: &str) -> Option<String> {
+    let res = std::path::Path::new(app_path_str).join("Contents/Resources");
+    let entries = std::fs::read_dir(res).ok()?;
+
+    let mut icns_files: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().map(|ext| ext == "icns").unwrap_or(false) {
+            icns_files.push(p);
+        }
+    }
+
+    if icns_files.is_empty() {
+        return None;
+    }
+
+    let app_stem = std::path::Path::new(app_path_str)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    for p in &icns_files {
+        let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
+        if stem == "appicon" || stem == "icon" || stem == app_stem {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+
+    Some(icns_files[0].to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn get_terminal_icon(terminal_id: String) -> Result<Vec<u8>, String> {
+    let env_info = detect_environment();
+    let term = env_info
+        .terminals
+        .iter()
+        .find(|t| t.id == terminal_id)
+        .ok_or_else(|| "ERR_TERMINAL_NOT_FOUND".to_string())?;
+
+    let icns_path = match &term.icon_path {
+        Some(p) => p,
+        None => return Err("ERR_ICON_NOT_FOUND".to_string()),
+    };
+
+    let out_png = format!("/tmp/tmuxdeck-icon-{}.png", terminal_id);
+    let status = Command::new("sips")
+        .args(["-s", "format", "png", icns_path, "--out", &out_png])
+        .output();
+
+    match status {
+        Ok(out) if out.status.success() => {
+            let bytes = std::fs::read(&out_png).map_err(|e| format!("ERR_READ_ICON|{}", e))?;
+            let _ = std::fs::remove_file(&out_png);
+            Ok(bytes)
+        }
+        _ => Err("ERR_ICON_CONVERT_FAILED".to_string()),
+    }
+}
+
 fn sanitize_session_name(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -123,7 +185,6 @@ fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
             return Some(path.to_string());
         }
     }
-    // Try `which` / `where`
     let cmd = if cfg!(target_os = "windows") { "where.exe" } else { "which" };
     if let Ok(output) = Command::new(cmd).arg(bin_name).output() {
         if output.status.success() {
@@ -279,12 +340,12 @@ fn detect_environment() -> Environment {
             ("powershell", "PowerShell", "powershell.exe"),
         ];
         for (id, name, bin) in known_windows_terminals {
-            // cmd and powershell are guaranteed on Windows
             if id == "cmd" || id == "powershell" || find_binary(bin, &[]).is_some() {
                 installed_terminals.push(ToolInfo {
                     id: id.to_string(),
                     name: name.to_string(),
                     path: bin.to_string(),
+                    icon_path: None,
                 });
             }
         }
@@ -320,10 +381,12 @@ fn detect_environment() -> Environment {
                 found_path = Some("/System/Applications/Utilities/Terminal.app".to_string());
             }
             if let Some(path) = found_path {
+                let icon_path = find_app_icon(&path);
                 installed_terminals.push(ToolInfo {
                     id: id.to_string(),
                     name: name.to_string(),
                     path,
+                    icon_path,
                 });
             }
         }
@@ -346,6 +409,7 @@ fn detect_environment() -> Environment {
                 id: id.to_string(),
                 name: name.to_string(),
                 path: p,
+                icon_path: None,
             });
         }
     }
@@ -358,6 +422,7 @@ fn detect_environment() -> Environment {
                 id: "custom".to_string(),
                 name: if custom.name.trim().is_empty() { "agent.custom".to_string() } else { custom.name },
                 path: custom.command,
+                icon_path: None,
             });
         }
     }
@@ -368,6 +433,7 @@ fn detect_environment() -> Environment {
         id: "shell".to_string(),
         name: "agent.shell".to_string(),
         path: shell_path,
+        icon_path: None,
     });
 
     Environment {
@@ -478,6 +544,48 @@ fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     }
 }
 
+fn get_session_first_pane_dir(session_name: &str) -> Option<String> {
+    let output = run_tmux(&["list-panes", "-t", session_name, "-F", "#{pane_current_path}"]);
+    if let Ok(out) = output {
+        if out.status.success() {
+            let line = String::from_utf8_lossy(&out.stdout).trim().lines().next().unwrap_or("").to_string();
+            if !line.is_empty() {
+                return Some(line);
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn add_pane(session_name: String) -> Result<(), String> {
+    let sanitized = sanitize_session_name(&session_name)?;
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    let work_dir = get_session_first_pane_dir(&sanitized).unwrap_or_else(|| "~".to_string());
+    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+
+    let mut split_args = vec!["split-window", "-t", &sanitized];
+    if !work_dir.is_empty() && work_dir != "~" {
+        split_args.push("-c");
+        split_args.push(&work_dir);
+    }
+    split_args.push(&shell_path);
+
+    let output = run_tmux(&split_args).map_err(|e| format!("ERR_ADD_PANE_FAILED|{}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ERR_ADD_PANE_OUTPUT_ERR|{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let _ = run_tmux(&["select-layout", "-t", &sanitized, "tiled"]);
+    Ok(())
+}
+
 #[tauri::command]
 fn create_session(opts: CreateOpts) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&opts.name)?;
@@ -511,7 +619,6 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
             }
         });
 
-    // 1. Create first pane
     let mut new_args = vec!["new-session", "-d", "-s", &sanitized_name];
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.push("-c");
@@ -527,7 +634,6 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
         ));
     }
 
-    // 2. Split remaining panes
     let count = match opts.panes {
         1 | 2 | 4 | 6 => opts.panes as usize,
         _ => 4,
@@ -545,7 +651,6 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
         let _ = run_tmux(&["select-layout", "-t", &sanitized_name, "tiled"]);
     }
 
-    // Persist configuration
     let mut cfg = load_config();
     cfg.default_terminal = opts.terminal_id.clone();
     cfg.default_agent = opts.agent_id.clone();
@@ -760,11 +865,145 @@ fn capture_pane(pane_id: String, max_lines: usize) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
+fn build_tray_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error>> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let cfg = load_config();
+    let default_terminal = if !cfg.default_terminal.is_empty() {
+        cfg.default_terminal
+    } else {
+        "ghostty".to_string()
+    };
+
+    let sessions = get_tmux_sessions().unwrap_or_default();
+    let menu = MenuBuilder::new(app);
+
+    if sessions.is_empty() {
+        let no_sess_item = MenuItemBuilder::with_id("no-sessions", "No Active Workspaces")
+            .enabled(false)
+            .build(app)?;
+        let new_item = MenuItemBuilder::with_id("new-workspace", "+ New Workspace...").build(app)?;
+        let show_item = MenuItemBuilder::with_id("show-main", "TmuxDeck Main Window").build(app)?;
+        let quit_item = MenuItemBuilder::with_id("quit", "Quit TmuxDeck").build(app)?;
+
+        return Ok(menu.item(&no_sess_item).separator().item(&new_item).separator().item(&show_item).item(&quit_item).build()?);
+    }
+
+    let mut sorted_sessions = sessions.clone();
+    sorted_sessions.sort_by(|a, b| {
+        if a.attached != b.attached {
+            return b.attached.cmp(&a.attached);
+        }
+        b.last_active_ts.cmp(&a.last_active_ts)
+    });
+
+    let primary = &sorted_sessions[0];
+    let icon_dot = if primary.attached { "●" } else { "○" };
+    let active_header_title = format!("{} Active: {}", icon_dot, primary.name);
+
+    let active_open = MenuItemBuilder::with_id(format!("open:{}", primary.name), format!("Open ({})", default_terminal)).build(app)?;
+    let active_add_pane = MenuItemBuilder::with_id(format!("addpane:{}", primary.name), "Add Pane").build(app)?;
+
+    let active_submenu = SubmenuBuilder::new(app, active_header_title)
+        .item(&active_open)
+        .item(&active_add_pane)
+        .build()?;
+
+    let mut menu = menu.item(&active_submenu).separator();
+
+    let limit = 8;
+    for session in sorted_sessions.iter().take(limit) {
+        let sess_dot = if session.attached { "●" } else { "○" };
+        let title = format!("{} {}", sess_dot, session.name);
+        let item = MenuItemBuilder::with_id(format!("open:{}", session.name), title).build(app)?;
+        menu = menu.item(&item);
+    }
+
+    if sorted_sessions.len() > limit {
+        let more_title = format!("View All ({} total)...", sorted_sessions.len());
+        let view_more_item = MenuItemBuilder::with_id("show-main", more_title).build(app)?;
+        menu = menu.item(&view_more_item);
+    }
+
+    let menu = menu.separator();
+
+    let new_item = MenuItemBuilder::with_id("new-workspace", "+ New Workspace...").build(app)?;
+    let show_item = MenuItemBuilder::with_id("show-main", "TmuxDeck Main Window").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("quit", "Quit TmuxDeck").build(app)?;
+
+    let menu = menu
+        .item(&new_item)
+        .separator()
+        .item(&show_item)
+        .item(&quit_item);
+
+    Ok(menu.build()?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                use tauri::tray::TrayIconBuilder;
+                use tauri::Manager;
+
+                let handle = app.handle().clone();
+
+                if let Ok(initial_menu) = build_tray_menu(&handle) {
+                    let _tray = TrayIconBuilder::with_id("main")
+                        .icon(app.default_window_icon().unwrap().clone())
+                        .menu(&initial_menu)
+                        .on_menu_event(|app, event| {
+                            let event_id = event.id().as_ref();
+                            if event_id.starts_with("open:") {
+                                let session_name = &event_id[5..];
+                                let cfg = load_config();
+                                let term = if !cfg.default_terminal.is_empty() {
+                                    cfg.default_terminal
+                                } else {
+                                    "ghostty".to_string()
+                                };
+                                let _ = open_session(session_name.to_string(), term);
+                            } else if event_id.starts_with("addpane:") {
+                                let session_name = &event_id[8..];
+                                let _ = add_pane(session_name.to_string());
+                            } else if event_id == "new-workspace" || event_id == "show-main" {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                    if event_id == "new-workspace" {
+                                        let _ = window.emit("trigger-new-workspace", ());
+                                    }
+                                }
+                            } else if event_id == "quit" {
+                                app.exit(0);
+                            }
+                        })
+                        .build(app);
+                }
+
+                let refresh_handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    if let Some(tray) = refresh_handle.tray_by_id("main") {
+                        if let Ok(new_menu) = build_tray_menu(&refresh_handle) {
+                            let _ = tray.set_menu(Some(new_menu));
+                        }
+                    }
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             to_wsl_path,
             detect_environment,
@@ -775,7 +1014,9 @@ pub fn run() {
             get_tmux_sessions,
             kill_session,
             rename_session,
-            capture_pane
+            capture_pane,
+            add_pane,
+            get_terminal_icon
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

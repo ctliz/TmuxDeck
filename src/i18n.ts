@@ -26,6 +26,7 @@ const en: Record<string, string> = {
 
   // Search & Stats
   "search.placeholder": "Search workspace name...",
+  "search.hint": "{total} workspaces · {running} running",
   "stats.total_one": "{n} total workspace",
   "stats.total_other": "{n} total workspaces",
   "stats.running": "{n} running",
@@ -46,6 +47,7 @@ const en: Record<string, string> = {
   "card.lastActive": "Active {time} ago",
   "card.lastActive_now": "Active just now",
   "card.idle": "Idle",
+  "card.openWithTerminal": "Open with {name}",
   "card.rename": "Rename",
   "card.destroy": "Destroy workspace",
   "card.panePreview": "Pane Layout",
@@ -84,11 +86,25 @@ const en: Record<string, string> = {
   "agent.shell": "Plain Shell",
   "agent.custom": "Custom Agent",
 
+  // Tray Menu
+  "tray.activeHeader": "● Active: {name}",
+  "tray.activeIdleHeader": "○ Active: {name}",
+  "tray.open": "Open ({terminal})",
+  "tray.addPane": "Add Pane",
+  "tray.newWorkspace": "+ New Workspace...",
+  "tray.showMain": "TmuxDeck Main Window",
+  "tray.quit": "Quit TmuxDeck",
+  "tray.viewMore": "View All ({n} total)...",
+
   // Confirmations
   "confirm.destroy": "Destroy workspace \"{name}\"?",
 
   // Error Code Mappings (from Rust)
+  "ERR_ADD_PANE_FAILED": "Failed to add pane",
+  "ERR_ADD_PANE_OUTPUT_ERR": "Error adding pane",
   "ERR_CONFIG_SAVE": "Failed to save configuration",
+  "ERR_ICON_CONVERT_FAILED": "Icon conversion failed",
+  "ERR_ICON_NOT_FOUND": "Icon not found",
   "ERR_NAME_EMPTY": "Workspace name cannot be empty",
   "ERR_NAME_INVALID": "Invalid workspace name (only letters, numbers, underscores, and hyphens supported)",
   "ERR_TMUX_NOT_FOUND": "tmux executable not found",
@@ -98,10 +114,12 @@ const en: Record<string, string> = {
   "ERR_CREATE_OUTPUT_ERR": "Error creating tmux session",
   "ERR_KILL_FAILED": "Failed to destroy workspace",
   "ERR_KILL_OUTPUT_ERR": "Error destroying workspace",
+  "ERR_READ_ICON": "Failed to read icon",
   "ERR_RENAME_FAILED": "Failed to rename workspace",
   "ERR_RENAME_OUTPUT_ERR": "Error renaming workspace",
   "ERR_SCRIPT_WRITE_FAILED": "Failed to write launch script",
   "ERR_TERMINAL_LAUNCH_FAILED": "Failed to launch terminal",
+  "ERR_TERMINAL_NOT_FOUND": "Terminal not found",
   "ERR_TERMINAL_RETURN_ERR": "Terminal exited with error status",
 
   // Fallbacks & Validation
@@ -143,6 +161,7 @@ const zh: Record<string, string> = {
 
   // Search & Stats
   "search.placeholder": "搜索项目名称...",
+  "search.hint": "{total} 个工作区 · {running} 运行中",
   "stats.total_one": "共 {n} 个项目工作区",
   "stats.total_other": "共 {n} 个项目工作区",
   "stats.running": "运行中: {n}",
@@ -163,6 +182,7 @@ const zh: Record<string, string> = {
   "card.bgActive": "后台活跃",
   "card.lastActive": "最后活跃 {time} 前",
   "card.lastActive_now": "刚刚活跃",
+  "card.openWithTerminal": "使用 {name} 打开",
   "card.rename": "重命名",
   "card.destroy": "销毁工作区",
   "card.panePreview": "分屏预览",
@@ -201,11 +221,25 @@ const zh: Record<string, string> = {
   "agent.shell": "纯 Shell",
   "agent.custom": "自定义 Agent",
 
+  // Tray Menu
+  "tray.activeHeader": "● 当前活跃：{name}",
+  "tray.activeIdleHeader": "○ 当前活跃：{name}",
+  "tray.open": "打开 ({terminal})",
+  "tray.addPane": "新增分屏格",
+  "tray.newWorkspace": "＋ 新建工作区…",
+  "tray.showMain": "TmuxDeck 主界面",
+  "tray.quit": "退出 TmuxDeck",
+  "tray.viewMore": "查看全部（共 {n} 个）…",
+
   // Confirmations
   "confirm.destroy": "确定要销毁工作区「{name}」吗？",
 
   // Error Code Mappings (from Rust)
+  "ERR_ADD_PANE_FAILED": "新增分屏失败",
+  "ERR_ADD_PANE_OUTPUT_ERR": "新增分屏报错",
   "ERR_CONFIG_SAVE": "保存配置失败",
+  "ERR_ICON_CONVERT_FAILED": "图标转换失败",
+  "ERR_ICON_NOT_FOUND": "未找到图标",
   "ERR_NAME_EMPTY": "项目名称不能为空",
   "ERR_NAME_INVALID": "非法的项目名称 (仅支持字母、数字、下划线和连字符)",
   "ERR_TMUX_NOT_FOUND": "未找到 tmux 安装",
@@ -215,10 +249,12 @@ const zh: Record<string, string> = {
   "ERR_CREATE_OUTPUT_ERR": "创建会话报错",
   "ERR_KILL_FAILED": "销毁 session 失败",
   "ERR_KILL_OUTPUT_ERR": "销毁会话失败",
+  "ERR_READ_ICON": "读取图标失败",
   "ERR_RENAME_FAILED": "重命名 session 失败",
   "ERR_RENAME_OUTPUT_ERR": "重命名会话失败",
   "ERR_SCRIPT_WRITE_FAILED": "写入脚本失败",
   "ERR_TERMINAL_LAUNCH_FAILED": "打开终端失败",
+  "ERR_TERMINAL_NOT_FOUND": "未找到指定终端",
   "ERR_TERMINAL_RETURN_ERR": "终端打开返回错误状态",
 
   // Fallbacks & Validation

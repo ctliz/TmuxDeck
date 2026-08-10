@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
+  <!-- Background Dark Container -->
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#0F172A" stroke="#38BDF8" stroke-width="1.5" />
+  
+  <!-- 2x2 Grid Panes -->
+  <!-- Top-Left Pane (with >_) -->
+  <rect x="5" y="5" width="25" height="25" rx="4" fill="#1E293B" stroke="#38BDF8" stroke-width="1.5" />
+  <!-- Top-Right Pane -->
+  <rect x="34" y="5" width="25" height="25" rx="4" fill="#1E293B" stroke="#4ADE80" stroke-width="1.5" stroke-opacity="0.85" />
+  <!-- Bottom-Left Pane -->
+  <rect x="5" y="34" width="25" height="25" rx="4" fill="#1E293B" stroke="#4ADE80" stroke-width="1.5" stroke-opacity="0.85" />
+  <!-- Bottom-Right Pane -->
+  <rect x="34" y="34" width="25" height="25" rx="4" fill="#1E293B" stroke="#38BDF8" stroke-width="1.5" stroke-opacity="0.85" />
+
+  <!-- Prompt Command Symbol >_ in Top-Left Pane -->
+  <path d="M 11.5 11.5 L 16.5 15.5 L 11.5 19.5" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M 18.5 19.5 L 22.5 19.5" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" />
+</svg>
