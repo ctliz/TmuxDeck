@@ -6,7 +6,7 @@ A desktop dashboard for tmux sessions that run AI coding agents.
 
 TmuxDeck turns your tmux sessions into a visual dashboard. Each session is a card showing what is running in every pane, when it was last active, and whether it is still live. One click reattaches to a session in your terminal of choice.
 
-It is built with [Tauri](https://tauri.app/) and runs on macOS. Windows support is in progress.
+It is built with [Tauri](https://tauri.app/) and runs on macOS. Windows support (via WSL) is available; macOS remains the primary, most-tested platform.
 
 ## Why TmuxDeck
 
@@ -21,6 +21,9 @@ TmuxDeck gives that back to you visually: one click to create, one glance to see
 - **Works with what you have.** Installed terminals and agents are detected at runtime; uninstalled ones are hidden. Supported terminals: Ghostty, iTerm2, WezTerm, kitty, Alacritty, and the system Terminal. Supported agents: Claude Code, Codex, OpenCode, Gemini CLI, Aider, Pi, or a plain shell.
 - **Remembers your choices.** The last terminal, agent, and pane count are saved to `~/.config/tmuxdeck/config.json` and restored on the next launch.
 - **No setup required.** If no third-party terminal or agent is installed, TmuxDeck falls back to the system terminal and the default shell.
+- **Lives in the menu bar.** Close the window and TmuxDeck keeps running in the menu bar — open any session, add a pane, or create a new one without opening the main window.
+- **Pane-level control.** Hover a pane preview to kill just that pane, or click "Add pane" to grow the grid. Workspaces are no longer all-or-nothing.
+- **No duplicate windows.** Clicking a session that is already open focuses its existing window instead of spawning another terminal.
 
 ## Requirements
 
@@ -80,7 +83,7 @@ Only installed terminals are shown. If a category has a single candidate, the wh
 
 **Does TmuxDeck support Linux or Windows?**
 
-Currently macOS only. Windows support (via WSL) is in development.
+Linux is not supported yet. Windows works through WSL (tmux runs inside WSL) and ships the same installers, but macOS is the battle-tested platform — please report Windows issues on GitHub.
 
 ## Development
 

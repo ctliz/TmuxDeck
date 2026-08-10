@@ -6,7 +6,7 @@
 
 TmuxDeck 把 tmux 会话变成可视化仪表盘。每个会话是一张卡片，显示每个分屏中正在运行的程序、最后活跃时间，以及会话是否仍在运行。点击一下，即可在你选择的终端中重新连接（attach）到该会话。
 
-基于 [Tauri](https://tauri.app/) 构建，支持 macOS。Windows 支持（通过 WSL）正在开发中。
+基于 [Tauri](https://tauri.app/) 构建，支持 macOS。Windows 支持（通过 WSL）已可用；macOS 仍是主要且经过最多验证的平台。
 
 ## 为什么做 TmuxDeck
 
@@ -21,6 +21,9 @@ TmuxDeck 把这些用可视化的方式还给你：一键创建、一眼看全�
 - **使用你已经安装的工具。** 运行时会检测已安装的终端和 Agent，未安装的不会显示。支持的终端：Ghostty、iTerm2、WezTerm、kitty、Alacritty 和系统终端。支持的 Agent：Claude Code、Codex、OpenCode、Gemini CLI、Aider、Pi，或纯 Shell。
 - **记住你的选择。** 上次使用的终端、Agent 和分屏数会保存到 `~/.config/tmuxdeck/config.json`，下次启动时自动恢复。
 - **无需任何配置。** 即使没有安装任何第三方终端或 Agent，TmuxDeck 也会回退到系统终端和默认 Shell。
+- **常驻菜单栏。** 关闭窗口后 TmuxDeck 仍在菜单栏运行——不打开主窗口即可打开任意会话、新增分屏或新建工作区。
+- **分屏级管理。** 悬停分屏预览格可单独删除该分屏，或点击「新增分屏」扩展网格。工作区不再是一刀切。
+- **不会重复开窗。** 点击已打开的会话会聚焦其已有窗口，而不是再拉起一个终端。
 
 ## 环境要求
 
@@ -80,7 +83,7 @@ TmuxDeck 把这些用可视化的方式还给你：一键创建、一眼看全�
 
 **TmuxDeck 支持 Linux 或 Windows 吗？**
 
-目前仅支持 macOS。Windows 支持（通过 WSL）正在开发中。
+Linux 暂不支持。Windows 可通过 WSL 使用（tmux 运行在 WSL 内），并提供同样的安装包，但 macOS 是经过充分验证的平台——Windows 问题请在 GitHub 上反馈。
 
 ## 开发
 
