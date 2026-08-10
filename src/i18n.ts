@@ -72,6 +72,8 @@ const en: Record<string, string> = {
   // Missing Tmux Warning
   "tmux.missing.title": "tmux is required",
   "tmux.missing.hint": "TmuxDeck relies on tmux to manage agent sessions. Please install tmux via Homebrew first:",
+  "tmux.missing.win": "WSL or tmux not found in WSL",
+  "tmux.missing.win_hint": "TmuxDeck runs tmux inside WSL. Please run these commands in Command Prompt / PowerShell:",
 
   // Built-in Names
   "terminal.system": "Terminal (System)",
@@ -183,6 +185,8 @@ const zh: Record<string, string> = {
   // Missing Tmux Warning
   "tmux.missing.title": "未检测到 Tmux 安装",
   "tmux.missing.hint": "TmuxDeck 依赖 Tmux 来管理多 Agent 会话。请先使用 Homebrew 安装 Tmux：",
+  "tmux.missing.win": "未检测到 WSL 或 WSL 内未安装 Tmux",
+  "tmux.missing.win_hint": "TmuxDeck 通过 WSL 运行 Tmux，请在 CMD 或 PowerShell 中执行以下命令：",
 
   // Built-in Names
   "terminal.system": "终端 (系统)",

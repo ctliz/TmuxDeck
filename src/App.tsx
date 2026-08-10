@@ -155,7 +155,8 @@ export default function App() {
         title: t("modal.workingDirLabel"),
       });
       if (res && typeof res === "string") {
-        setWorkingDir(res);
+        const converted = await invoke<string>("to_wsl_path", { path: res });
+        setWorkingDir(converted);
       }
     } catch (err) {
       console.error("Folder picker error", err);
@@ -268,6 +269,7 @@ export default function App() {
 
   // Hard blocking: full-screen guidance when tmux is missing
   if (env && env.tmux === null) {
+    const isWindows = env.terminals.some((t) => t.id === "wt" || t.id === "cmd" || t.id === "powershell");
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-100 p-6 select-none">
         <div className="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl text-center space-y-6">
@@ -275,29 +277,64 @@ export default function App() {
             <Terminal className="w-8 h-8" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-100">{t("tmux.missing.title")}</h2>
+            <h2 className="text-xl font-bold text-slate-100">
+              {isWindows ? t("tmux.missing.win") : t("tmux.missing.title")}
+            </h2>
             <p className="text-sm text-slate-400 mt-2">
-              {t("tmux.missing.hint")}
+              {isWindows ? t("tmux.missing.win_hint") : t("tmux.missing.hint")}
             </p>
           </div>
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-sm">
-            <span className="text-cyan-400">brew install tmux</span>
-            <button
-              onClick={copyBrewCommand}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center space-x-1 cursor-pointer"
-            >
-              {copiedBrew ? (
-                <>
-                  <Check className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs text-emerald-400 font-sans">{t("btn.copied")}</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4" />
-                  <span className="text-xs font-sans">{t("btn.copy")}</span>
-                </>
-              )}
-            </button>
+          <div className="flex flex-col space-y-2">
+            {isWindows ? (
+              <>
+                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs">
+                  <span className="text-cyan-400">wsl --install</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText("wsl --install");
+                      setCopiedBrew(true);
+                      setTimeout(() => setCopiedBrew(false), 2000);
+                    }}
+                    className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {copiedBrew ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs">
+                  <span className="text-cyan-400">wsl sudo apt install tmux</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText("wsl sudo apt install tmux");
+                      setCopiedBrew(true);
+                      setTimeout(() => setCopiedBrew(false), 2000);
+                    }}
+                    className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {copiedBrew ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-sm">
+                <span className="text-cyan-400">brew install tmux</span>
+                <button
+                  onClick={copyBrewCommand}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center space-x-1 cursor-pointer"
+                >
+                  {copiedBrew ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs text-emerald-400 font-sans">{t("btn.copied")}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span className="text-xs font-sans">{t("btn.copy")}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
           <button
             onClick={loadData}

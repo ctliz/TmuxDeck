@@ -108,8 +108,12 @@ fn sanitize_session_name(raw: &str) -> Result<String, String> {
 }
 
 fn get_config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".config").join("tmuxdeck").join("config.json")
+    if let Some(config_dir) = dirs::config_dir() {
+        config_dir.join("tmuxdeck").join("config.json")
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home).join(".config").join("tmuxdeck").join("config.json")
+    }
 }
 
 fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
@@ -118,10 +122,11 @@ fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
             return Some(path.to_string());
         }
     }
-    // Try `which`
-    if let Ok(output) = Command::new("which").arg(bin_name).output() {
+    // Try `which` / `where`
+    let cmd = if cfg!(target_os = "windows") { "where.exe" } else { "which" };
+    if let Ok(output) = Command::new(cmd).arg(bin_name).output() {
         if output.status.success() {
-            let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let p = String::from_utf8_lossy(&output.stdout).trim().lines().next().unwrap_or("").to_string();
             if !p.is_empty() {
                 return Some(p);
             }
@@ -130,7 +135,29 @@ fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
     None
 }
 
-fn get_tmux_bin() -> Option<String> {
+#[cfg(target_os = "windows")]
+fn run_tmux(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("wsl.exe").arg("--").arg("tmux").args(args).output()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_tmux(args: &[&str]) -> std::io::Result<std::process::Output> {
+    let tmux = check_tmux_installed().unwrap_or_else(|| "tmux".to_string());
+    Command::new(tmux).args(args).output()
+}
+
+#[cfg(target_os = "windows")]
+fn check_tmux_installed() -> Option<String> {
+    if let Ok(out) = Command::new("wsl.exe").args(["--", "tmux", "-V"]).output() {
+        if out.status.success() {
+            return Some("wsl.exe -- tmux".to_string());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn check_tmux_installed() -> Option<String> {
     find_binary(
         "tmux",
         &[
@@ -141,6 +168,29 @@ fn get_tmux_bin() -> Option<String> {
     )
 }
 
+#[cfg(target_os = "windows")]
+fn find_agent_binary(bin: &str) -> Option<String> {
+    if let Ok(out) = Command::new("wsl.exe").args(["--", "which", bin]).output() {
+        if out.status.success() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !p.is_empty() {
+                return Some(p);
+            }
+        }
+    }
+    let nvm_cmd = format!("ls ~/.nvm/versions/node/*/bin/{} 2>/dev/null | head -n 1", bin);
+    if let Ok(out) = Command::new("wsl.exe").args(["--", "bash", "-c", &nvm_cmd]).output() {
+        if out.status.success() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !p.is_empty() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
 fn find_agent_binary(bin: &str) -> Option<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     let candidate_paths = [
@@ -154,7 +204,6 @@ fn find_agent_binary(bin: &str) -> Option<String> {
             return Some(p.clone());
         }
     }
-    // Check ~/.nvm/versions/node/*/bin/<bin>
     let nvm_dir = format!("{}/.nvm/versions/node", home);
     if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
         for entry in entries.flatten() {
@@ -164,7 +213,6 @@ fn find_agent_binary(bin: &str) -> Option<String> {
             }
         }
     }
-    // Try `which`
     if let Ok(output) = Command::new("which").arg(bin).output() {
         if output.status.success() {
             let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -174,6 +222,22 @@ fn find_agent_binary(bin: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[tauri::command]
+fn to_wsl_path(path: String) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(out) = Command::new("wsl.exe").args(["wslpath", "-u", &path]).output() {
+            if out.status.success() {
+                let converted = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !converted.is_empty() {
+                    return converted;
+                }
+            }
+        }
+    }
+    path
 }
 
 #[tauri::command]
@@ -202,45 +266,65 @@ fn save_config(config: Config) -> Result<(), String> {
 
 #[tauri::command]
 fn detect_environment() -> Environment {
-    let tmux = get_tmux_bin();
-
-    // Terminal Registry (macOS)
-    let known_terminals = vec![
-        ("ghostty", "Ghostty", vec!["/Applications/Ghostty.app"]),
-        ("iterm2", "iTerm2", vec!["/Applications/iTerm.app"]),
-        (
-            "terminal",
-            "terminal.system",
-            vec![
-                "/System/Applications/Utilities/Terminal.app",
-                "/Applications/Utilities/Terminal.app",
-            ],
-        ),
-        ("wezterm", "WezTerm", vec!["/Applications/WezTerm.app"]),
-        ("kitty", "kitty", vec!["/Applications/kitty.app"]),
-        ("alacritty", "Alacritty", vec!["/Applications/Alacritty.app"]),
-    ];
+    let tmux = check_tmux_installed();
 
     let mut installed_terminals = Vec::new();
-    for (id, name, paths) in known_terminals {
-        let mut found_path: Option<String> = None;
-        for p in paths {
-            if std::path::Path::new(p).exists() {
-                found_path = Some(p.to_string());
-                break;
+
+    #[cfg(target_os = "windows")]
+    {
+        let known_windows_terminals = vec![
+            ("wt", "Windows Terminal", "wt.exe"),
+            ("cmd", "Command Prompt", "cmd.exe"),
+            ("powershell", "PowerShell", "powershell.exe"),
+        ];
+        for (id, name, bin) in known_windows_terminals {
+            // cmd and powershell are guaranteed on Windows
+            if id == "cmd" || id == "powershell" || find_binary(bin, &[]).is_some() {
+                installed_terminals.push(ToolInfo {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    path: bin.to_string(),
+                });
             }
         }
-        // Terminal.app fallback is guaranteed to exist on macOS
-        if id == "terminal" && found_path.is_none() {
-            found_path = Some("/System/Applications/Utilities/Terminal.app".to_string());
-        }
+    }
 
-        if let Some(path) = found_path {
-            installed_terminals.push(ToolInfo {
-                id: id.to_string(),
-                name: name.to_string(),
-                path,
-            });
+    #[cfg(not(target_os = "windows"))]
+    {
+        let known_terminals = vec![
+            ("ghostty", "Ghostty", vec!["/Applications/Ghostty.app"]),
+            ("iterm2", "iTerm2", vec!["/Applications/iTerm.app"]),
+            (
+                "terminal",
+                "terminal.system",
+                vec![
+                    "/System/Applications/Utilities/Terminal.app",
+                    "/Applications/Utilities/Terminal.app",
+                ],
+            ),
+            ("wezterm", "WezTerm", vec!["/Applications/WezTerm.app"]),
+            ("kitty", "kitty", vec!["/Applications/kitty.app"]),
+            ("alacritty", "Alacritty", vec!["/Applications/Alacritty.app"]),
+        ];
+
+        for (id, name, paths) in known_terminals {
+            let mut found_path: Option<String> = None;
+            for p in paths {
+                if std::path::Path::new(p).exists() {
+                    found_path = Some(p.to_string());
+                    break;
+                }
+            }
+            if id == "terminal" && found_path.is_none() {
+                found_path = Some("/System/Applications/Utilities/Terminal.app".to_string());
+            }
+            if let Some(path) = found_path {
+                installed_terminals.push(ToolInfo {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    path,
+                });
+            }
         }
     }
 
@@ -277,8 +361,8 @@ fn detect_environment() -> Environment {
         }
     }
 
-    // Plain Shell fallback (Always available)
-    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    // Plain Shell fallback
+    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     installed_agents.push(ToolInfo {
         id: "shell".to_string(),
         name: "agent.shell".to_string(),
@@ -295,85 +379,115 @@ fn detect_environment() -> Environment {
 #[tauri::command]
 fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&name)?;
-    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
-
-    let script_content = format!(
-        "#!/bin/bash\nexec '{}' attach-session -t '{}'\n",
-        tmux, sanitized_name
-    );
-    std::fs::write(&script_path, script_content).map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
-
-    #[cfg(unix)]
-    {
-        if let Ok(meta) = std::fs::metadata(&script_path) {
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            let _ = std::fs::set_permissions(&script_path, perms);
-        }
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
 
-    let status = match terminal_id.as_str() {
-        "ghostty" => Command::new("/usr/bin/open")
-            .args(["-na", "Ghostty", "--args", &format!("--command={}", script_path)])
-            .status(),
-        "iterm2" => Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    "tell application \"iTerm\" to create window with default profile command \"{}\"",
-                    script_path
-                ),
-            ])
-            .status(),
-        "terminal" => Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    "tell application \"Terminal\" to do script \"{}\"",
-                    script_path
-                ),
-                "-e",
-                "tell application \"Terminal\" to activate",
-            ])
-            .status(),
-        "wezterm" => Command::new("/usr/bin/open")
-            .args(["-na", "WezTerm", "--args", "start", "--", &script_path])
-            .status(),
-        "kitty" => Command::new("/usr/bin/open")
-            .args(["-na", "kitty", "--args", &script_path])
-            .status(),
-        "alacritty" => Command::new("/usr/bin/open")
-            .args(["-na", "Alacritty", "--args", "-e", &script_path])
-            .status(),
-        _ => Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    "tell application \"Terminal\" to do script \"{}\"",
-                    script_path
-                ),
-                "-e",
-                "tell application \"Terminal\" to activate",
-            ])
-            .status(),
-    };
+    #[cfg(target_os = "windows")]
+    {
+        let status = match terminal_id.as_str() {
+            "wt" => Command::new("wt.exe")
+                .args(["new-tab", "--", "wsl.exe", "--", "tmux", "attach-session", "-t", &sanitized_name])
+                .status(),
+            "powershell" => Command::new("powershell.exe")
+                .args(["-NoExit", "-Command", &format!("wsl.exe -- tmux attach-session -t '{}'", sanitized_name)])
+                .status(),
+            _ => Command::new("cmd.exe")
+                .args(["/c", "start", "cmd", "/k", "wsl.exe", "--", "tmux", "attach-session", "-t", &sanitized_name])
+                .status(),
+        };
+        return match status {
+            Ok(st) if st.success() => Ok(()),
+            Ok(st) => Err(format!("ERR_TERMINAL_RETURN_ERR|{}", st)),
+            Err(e) => Err(format!("ERR_TERMINAL_LAUNCH_FAILED|{}", e)),
+        };
+    }
 
-    match status {
-        Ok(st) if st.success() => Ok(()),
-        Ok(st) => Err(format!("ERR_TERMINAL_RETURN_ERR|{}", st)),
-        Err(e) => Err(format!("ERR_TERMINAL_LAUNCH_FAILED|{}", e)),
+    #[cfg(not(target_os = "windows"))]
+    {
+        let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
+        let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
+
+        let script_content = format!(
+            "#!/bin/bash\nexec '{}' attach-session -t '{}'\n",
+            tmux, sanitized_name
+        );
+        std::fs::write(&script_path, script_content).map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
+
+        #[cfg(unix)]
+        {
+            if let Ok(meta) = std::fs::metadata(&script_path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(&script_path, perms);
+            }
+        }
+
+        let status = match terminal_id.as_str() {
+            "ghostty" => Command::new("/usr/bin/open")
+                .args(["-na", "Ghostty", "--args", &format!("--command={}", script_path)])
+                .status(),
+            "iterm2" => Command::new("osascript")
+                .args([
+                    "-e",
+                    &format!(
+                        "tell application \"iTerm\" to create window with default profile command \"{}\"",
+                        script_path
+                    ),
+                ])
+                .status(),
+            "terminal" => Command::new("osascript")
+                .args([
+                    "-e",
+                    &format!(
+                        "tell application \"Terminal\" to do script \"{}\"",
+                        script_path
+                    ),
+                    "-e",
+                    "tell application \"Terminal\" to activate",
+                ])
+                .status(),
+            "wezterm" => Command::new("/usr/bin/open")
+                .args(["-na", "WezTerm", "--args", "start", "--", &script_path])
+                .status(),
+            "kitty" => Command::new("/usr/bin/open")
+                .args(["-na", "kitty", "--args", &script_path])
+                .status(),
+            "alacritty" => Command::new("/usr/bin/open")
+                .args(["-na", "Alacritty", "--args", "-e", &script_path])
+                .status(),
+            _ => Command::new("osascript")
+                .args([
+                    "-e",
+                    &format!(
+                        "tell application \"Terminal\" to do script \"{}\"",
+                        script_path
+                    ),
+                    "-e",
+                    "tell application \"Terminal\" to activate",
+                ])
+                .status(),
+        };
+
+        match status {
+            Ok(st) if st.success() => Ok(()),
+            Ok(st) => Err(format!("ERR_TERMINAL_RETURN_ERR|{}", st)),
+            Err(e) => Err(format!("ERR_TERMINAL_LAUNCH_FAILED|{}", e)),
+        }
     }
 }
 
 #[tauri::command]
 fn create_session(opts: CreateOpts) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&opts.name)?;
-    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
     let env_info = detect_environment();
 
     let agent_cmd = if opts.agent_id == "shell" {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+        "bash".to_string()
     } else {
         env_info
             .agents
@@ -383,46 +497,51 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
             .unwrap_or_else(|| opts.agent_id.clone())
     };
 
-    let work_dir = opts
+    let work_dir_clean = opts
         .dir
         .clone()
         .filter(|d| !d.trim().is_empty())
-        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
+        .map(|d| to_wsl_path(d))
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "windows") {
+                "~".to_string()
+            } else {
+                std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+            }
+        });
 
-    let cd_arg = format!("-c '{}'", work_dir);
+    // 1. Create first pane
+    let mut new_args = vec!["new-session", "-d", "-s", &sanitized_name];
+    if !work_dir_clean.is_empty() && work_dir_clean != "~" {
+        new_args.push("-c");
+        new_args.push(&work_dir_clean);
+    }
+    new_args.push(&agent_cmd);
 
-    // Reliable sequential pane splitting and tiled layout setup
-    let mut script_parts = Vec::new();
-    script_parts.push(format!(
-        "{} new-session -d -s '{}' {} '{}'",
-        tmux, sanitized_name, cd_arg, agent_cmd
-    ));
+    let output = run_tmux(&new_args).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ERR_CREATE_OUTPUT_ERR|{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
 
+    // 2. Split remaining panes
     let count = match opts.panes {
         1 | 2 | 4 | 6 => opts.panes as usize,
         _ => 4,
     };
 
     for _ in 1..count {
-        script_parts.push(format!(
-            "{} split-window -t '{}' {} '{}'",
-            tmux, sanitized_name, cd_arg, agent_cmd
-        ));
-        script_parts.push(format!("{} select-layout -t '{}' tiled", tmux, sanitized_name));
-    }
+        let mut split_args = vec!["split-window", "-t", &sanitized_name];
+        if !work_dir_clean.is_empty() && work_dir_clean != "~" {
+            split_args.push("-c");
+            split_args.push(&work_dir_clean);
+        }
+        split_args.push(&agent_cmd);
 
-    let script = script_parts.join("; ");
-
-    let output = Command::new("/bin/bash")
-        .args(["-c", &script])
-        .output()
-        .map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "ERR_CREATE_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        let _ = run_tmux(&split_args);
+        let _ = run_tmux(&["select-layout", "-t", &sanitized_name, "tiled"]);
     }
 
     // Persist configuration
@@ -446,19 +565,16 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
 
 #[tauri::command]
 fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
-    let tmux = match get_tmux_bin() {
-        Some(t) => t,
-        None => return Ok(Vec::new()),
-    };
+    if check_tmux_installed().is_none() {
+        return Ok(Vec::new());
+    }
 
-    let output = Command::new(&tmux)
-        .args([
-            "list-sessions",
-            "-F",
-            "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}",
-        ])
-        .output()
-        .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
+    let output = run_tmux(&[
+        "list-sessions",
+        "-F",
+        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}",
+    ])
+    .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
 
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
@@ -501,7 +617,7 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
                 "-".to_string()
             };
 
-            let panes = get_session_panes(&tmux, &name);
+            let panes = get_session_panes(&name);
             let panes_count = panes.len();
 
             sessions.push(TmuxSession {
@@ -519,17 +635,15 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     Ok(sessions)
 }
 
-fn get_session_panes(tmux: &str, session_name: &str) -> Vec<TmuxPane> {
-    let output = Command::new(tmux)
-        .args([
-            "list-panes",
-            "-s",
-            "-t",
-            session_name,
-            "-F",
-            "#{pane_id}|#{pane_current_command}|#{pane_active}",
-        ])
-        .output();
+fn get_session_panes(session_name: &str) -> Vec<TmuxPane> {
+    let output = run_tmux(&[
+        "list-panes",
+        "-s",
+        "-t",
+        session_name,
+        "-F",
+        "#{pane_id}|#{pane_current_command}|#{pane_active}",
+    ]);
 
     if let Ok(out) = output {
         if out.status.success() {
@@ -554,10 +668,11 @@ fn get_session_panes(tmux: &str, session_name: &str) -> Vec<TmuxPane> {
 #[tauri::command]
 fn kill_session(session_name: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&session_name)?;
-    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let output = Command::new(&tmux)
-        .args(["kill-session", "-t", &sanitized_name])
-        .output()
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    let output = run_tmux(&["kill-session", "-t", &sanitized_name])
         .map_err(|e| format!("ERR_KILL_FAILED|{}", e))?;
 
     if !output.status.success() {
@@ -574,10 +689,11 @@ fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
     let sanitized_old = sanitize_session_name(&old_name)?;
     let sanitized_new = sanitize_session_name(&new_name)?;
 
-    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let output = Command::new(&tmux)
-        .args(["rename-session", "-t", &sanitized_old, &sanitized_new])
-        .output()
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    let output = run_tmux(&["rename-session", "-t", &sanitized_old, &sanitized_new])
         .map_err(|e| format!("ERR_RENAME_FAILED|{}", e))?;
 
     if !output.status.success() {
@@ -595,6 +711,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            to_wsl_path,
             detect_environment,
             load_config,
             save_config,
