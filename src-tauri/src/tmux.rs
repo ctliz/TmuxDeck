@@ -303,3 +303,25 @@ pub fn send_key_name(pane_id: &str, key: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+pub fn swap_panes(pane_id_a: &str, pane_id_b: &str) -> Result<(), String> {
+    let a = pane_id_a.trim();
+    let b = pane_id_b.trim();
+    if !validate_pane_id(a) || !validate_pane_id(b) {
+        return Err("ERR_PANE_INVALID".to_string());
+    }
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    let output = run_tmux(&["swap-pane", "-s", a, "-t", b])
+        .map_err(|e| format!("ERR_SWAP_PANE_FAILED|{}", e))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
+        return Err(format!("ERR_SWAP_PANE_FAILED|{}", err));
+    }
+    Ok(())
+}

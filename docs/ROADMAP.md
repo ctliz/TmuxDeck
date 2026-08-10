@@ -27,8 +27,8 @@
 - [x] `intercom.rs`：broker 客户端（UDS + 4 字节大端分帧 + 手工帧分派），无新增依赖
 - [x] `bridge.rs`：对话模型、pane↔会话父链关联、投递路由、`Transport` 抽象
 - [x] 文档落地（架构 / 协议 / 决策 / 脚本说明 / CONTRIBUTING 同步）
-- [ ] **真机验证**：`node scripts/intercom-probe.mjs`（6 条清单见 `scripts/README.md`）
-- [ ] `cargo test` 通过（本批代码尚未编译验证）
+- [x] **真机验证**：`node scripts/intercom-probe.mjs` 6 条清单全过（2026-08-10，tmux-backend）
+- [x] `cargo test` 通过（27 项，2026-08-10）
 - [ ] `TranscriptSource` 具体实现 —— **唯一未定项**，见下
 
 **未解决**：对话内容（agent 说了什么）的来源。`capture-pane` 只能兜底；

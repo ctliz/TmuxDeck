@@ -100,7 +100,8 @@ pub fn run() {
             get_terminal_icon,
             send_pane_text,
             send_pane_key,
-            list_panes
+            list_panes,
+            swap_pane
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -136,6 +137,12 @@ mod tests {
         assert!(!validate_pane_id(""));
         assert!(!validate_pane_id("123"));
         assert!(!validate_pane_id("%"));
+    }
+
+    #[test]
+    fn test_swap_pane_validation() {
+        assert_eq!(swap_panes("invalid", "%1"), Err("ERR_PANE_INVALID".to_string()));
+        assert_eq!(swap_panes("%1", "invalid"), Err("ERR_PANE_INVALID".to_string()));
     }
 
     #[test]

@@ -154,6 +154,19 @@ broker 负责「目标忙时排队、空闲时才注入」，所以**不要**为
 而自己实现投递时机判断——直接 `send` 即可。这正是 intercom 优于
 `send-keys` 直塞字符的核心原因（后者会被正在思考的 TUI 吞掉或打断）。
 
+### 回复必须来自收到 ask 的那个 session
+
+broker 对 `replyTo` 的校验是 **sessionId 级身份**（`broker.ts`：
+`replyEdge.to !== currentId` 即返回 `delivery_failed`）：
+
+- 新开一条连接重新注册（即使同名）会拿到新的 sessionId，**回不了同一个 ask**；
+- 回复只能在**收到 ask 的那条连接**上发出（`intercom.rs` 的 `reply()` 正是如此——
+  同一持久连接、同一 sessionId）；
+- 实测：独立进程带 `replyTo` 发送被拒，报 `Reply target does not match the pending ask`。
+
+对手机端的影响：TmuxDeck 必须保持单一持久连接，回复永远走它，
+不能为每条回复临时建连接。
+
 ---
 
 ## 两个分支的差异

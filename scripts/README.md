@@ -29,7 +29,16 @@ node scripts/intercom-probe.mjs
 
 # 发一条消息后退出
 node scripts/intercom-probe.mjs send <目标会话名或ID> "消息内容"
+
+# 常驻时自动回复 ask（验证 ask→reply 全链路，避免等待方阻塞 10 分钟）
+PROBE_AUTOREPLY=1 node scripts/intercom-probe.mjs
 ```
+
+> **为什么不能单独回 ask**：broker 强制「回复必须来自收到 ask 的那个 session」
+> （sessionId 级身份，`broker.ts` 中 `replyEdge.to !== currentId` 即拒）。
+> 独立进程重新注册是新 session，回不了同一个 ask——回复只能在同一条连接上发生。
+> 真实 TmuxDeck 用同一持久连接（`intercom.rs` 的 `reply()`），语义一致；
+> 探针用 `PROBE_AUTOREPLY=1` 在同一连接上自动回，验证同一条链路。
 
 ### 验证清单
 
@@ -39,7 +48,7 @@ node scripts/intercom-probe.mjs send <目标会话名或ID> "消息内容"
 | 2 | 观察会话列表 | 每个 pi 会话都带状态（`idle` / `thinking` / `tool:…`） |
 | 3 | 在任一 pi 会话执行 `intercom({ action: "list" })` | 列表里能看到 `tmuxdeck-probe` |
 | 4 | 在 pi 里 `intercom({ action: "send", to: "tmuxdeck-probe", message: "hi" })` | 探针打印 `📨 来自 …` |
-| 5 | 在 pi 里改用 `action: "ask"` | 探针打印 `⚠ 对方在等回复（ask）` |
+| 5 | 在 pi 里改用 `action: "ask"`（探针以 `PROBE_AUTOREPLY=1` 运行） | 探针打印 `⚠ 对方在等回复（ask）`，并自动回复解除等待 |
 | 6 | `node scripts/intercom-probe.mjs send <pi会话名> "收到"` | 打印 `✓ 已送达`，且 pi 会话里出现该消息 |
 
 第 2 条通过即证明**不需要**自己实现状态判定；

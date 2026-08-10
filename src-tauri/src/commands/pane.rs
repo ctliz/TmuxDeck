@@ -24,6 +24,12 @@ pub fn list_panes() -> Vec<crate::tmux::PaneDetail> {
     crate::tmux::list_all_panes()
 }
 
+/// 交换两个 pane 格的物理位置（同 session 内交换布局）。
+#[tauri::command]
+pub fn swap_pane(pane_id_a: String, pane_id_b: String) -> Result<(), String> {
+    crate::tmux::swap_panes(&pane_id_a, &pane_id_b)
+}
+
 #[tauri::command]
 pub fn add_pane(session_name: String) -> Result<(), String> {
     let sanitized = sanitize_session_name(&session_name)?;

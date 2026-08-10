@@ -10,6 +10,11 @@
  *   node intercom-probe.mjs                      # 注册并常驻，列出会话、打印收到的消息
  *   node intercom-probe.mjs send <目标> <消息>    # 注册、发一条、退出
  *
+ * 回 ask：broker 强制「回复必须来自收到 ask 的那个 session」（sessionId 级身份，
+ * 见 broker.ts `replyEdge.to !== currentId` 即拒绝）。所以独立进程无法替常驻会话回 ask——
+ * 回复只能发生在同一条连接上：常驻模式加 PROBE_AUTOREPLY=1 会自动回（验证用）。
+ * 真实 TmuxDeck 用同一持久连接（intercom.rs 的 reply()），语义一致。
+ *
  * 验证目标（跑通即证明适配器路线成立）：
  *   1. 能连上 broker 并注册成功            → 拿到 sessionId
  *   2. list 能拿到真实会话与实时状态        → 替代 capture-pane 轮询与四态判定
@@ -151,7 +156,9 @@ socket.on(
       case "message": {
         const from = msg.from;
         console.log(`\n📨 来自 ${from.name ?? from.id.slice(0, 8)} (${from.cwd})`);
-        if (msg.message.expectsReply) console.log("   ⚠ 对方在等回复（ask）");
+        if (msg.message.expectsReply) {
+          console.log(`   ⚠ 对方在等回复（ask）  messageId=${msg.message.id}`);
+        }
         console.log(`   ${msg.message.content.text}`);
         for (const a of msg.message.content.attachments ?? []) {
           console.log(`   [附件 ${a.type}] ${a.name}`);
@@ -161,7 +168,23 @@ socket.on(
           type: "message_receipt",
           receipt: { messageId: msg.message.id, status: "receiver_received", timestamp: Date.now() },
         });
-        console.log(`   ↩ 回复： node intercom-probe.mjs send ${from.name ?? from.id} "..."`);
+        // 回 ask：broker 强制回复必须来自收到 ask 的同一 session，独立进程回不了——
+        // 只能在同一条连接上回。PROBE_AUTOREPLY=1 时自动回一条（带 replyTo），
+        // 让 ask 的等待方不被阻塞 10 分钟，也验证同连接回复链路。
+        if (msg.message.expectsReply && process.env.PROBE_AUTOREPLY === "1") {
+          writeMessage(socket, {
+            type: "send",
+            to: from.id,
+            message: {
+              id: crypto.randomUUID(),
+              timestamp: Date.now(),
+              replyTo: msg.message.id,
+              content: { text: `（探针自动回复）已收到你的 ask，messageId=${msg.message.id}` },
+            },
+          });
+          console.log(`   ↪ 已自动回复 ${from.name ?? from.id} (replyTo=${msg.message.id})`);
+        }
+        console.log(`   （真实客户端：同一连接上以 replyTo 回；探针可用 PROBE_AUTOREPLY=1 演示）`);
         break;
       }
 
