@@ -839,6 +839,34 @@ fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_pane_id(pane_id: &str) -> bool {
+    let trimmed = pane_id.trim();
+    if !trimmed.starts_with('%') || trimmed.len() < 2 {
+        return false;
+    }
+    trimmed[1..].chars().all(|c| c.is_ascii_digit())
+}
+
+#[tauri::command]
+fn kill_pane(pane_id: String) -> Result<(), String> {
+    let trimmed = pane_id.trim();
+    if !validate_pane_id(trimmed) {
+        return Err("ERR_KILL_PANE_INVALID".to_string());
+    }
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    let output = run_tmux(&["kill-pane", "-t", trimmed]).map_err(|e| format!("ERR_KILL_PANE_FAILED|{}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ERR_KILL_PANE_OUTPUT_ERR|{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
 fn strip_ansi(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -1046,6 +1074,7 @@ pub fn run() {
             rename_session,
             capture_pane,
             add_pane,
+            kill_pane,
             get_terminal_icon
         ])
         .run(tauri::generate_context!())

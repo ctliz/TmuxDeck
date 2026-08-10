@@ -379,6 +379,25 @@ export default function App() {
     }
   };
 
+  const handleAddPane = async (sessionName: string) => {
+    try {
+      await invoke("add_pane", { sessionName });
+      await loadData();
+    } catch (err: any) {
+      alert(t("val.createFailed") + ": " + translateError(err));
+    }
+  };
+
+  const handleKillPane = async (paneId: string) => {
+    if (!confirm(t("card.confirmKillPane"))) return;
+    try {
+      await invoke("kill_pane", { paneId });
+      await loadData();
+    } catch (err: any) {
+      alert(translateError(err));
+    }
+  };
+
   const handleRename = async (oldName: string) => {
     const cleanNew = sanitizeNameFrontend(renamedName);
     if (!cleanNew || cleanNew === oldName) {
@@ -556,7 +575,7 @@ export default function App() {
               >
                   {/* Card Header */}
                   <div className="p-4 border-b border-white/10">
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
                         <span
                           className={`w-2.5 h-2.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
@@ -594,16 +613,19 @@ export default function App() {
                         ✕
                       </button>
                     </div>
-
-                    <div className="flex items-center justify-between text-xs text-slate-400">
-                      <span>{activityInfo.text}</span>
-                    </div>
                   </div>
 
                   {/* Pane Layout Preview */}
                   <div className="p-4 flex-1">
-                    <div className="text-xs text-slate-500 mb-2 font-medium flex items-center justify-between">
-                      <span>{t("card.panePreview")}:</span>
+                    <div className="flex items-center justify-between mb-2">
+                      <button
+                        onClick={() => handleAddPane(session.name)}
+                        className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-[10px] text-slate-300 hover:text-cyan-300 transition-all duration-200 cursor-pointer flex items-center space-x-1"
+                        title={t("card.addPane")}
+                      >
+                        <Plus className="w-3 h-3 text-cyan-400" />
+                        <span>{t("card.addPane")}</span>
+                      </button>
                       {isAgentActive && (
                         <span className="flex items-center space-x-1 text-cyan-400 text-[10px]">
                           <Zap className="w-3 h-3" />
@@ -623,7 +645,7 @@ export default function App() {
                         return (
                           <div
                             key={pane.id || idx}
-                            className={`flex flex-col justify-between p-2 rounded-lg border text-[11px] min-h-[4.5rem] transition ${
+                            className={`relative group/pane flex flex-col justify-between p-2 rounded-lg border text-[11px] min-h-[4.5rem] transition ${
                               hasContent
                                 ? "bg-slate-950/90 border-slate-700/80 text-slate-200"
                                 : isAgent
@@ -635,7 +657,21 @@ export default function App() {
                               <span className="font-mono text-[9px] text-slate-500">
                                 #{idx + 1} {matchedAgent ? `· ${translateName(matchedAgent.name)}` : ""}
                               </span>
-                              {isAgent && <Zap className="w-2.5 h-2.5 text-cyan-400 shrink-0" />}
+                              <div className="flex items-center space-x-1">
+                                {session.panes_count > 1 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleKillPane(pane.id);
+                                    }}
+                                    className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 opacity-0 group-hover/pane:opacity-100 transition-all duration-200 cursor-pointer text-[10px] leading-none"
+                                    title={t("card.killPane")}
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                                {isAgent && <Zap className="w-2.5 h-2.5 text-cyan-400 shrink-0" />}
+                              </div>
                             </div>
                             {hasContent ? (
                               <pre className="font-mono text-[9px] text-slate-300 leading-tight whitespace-pre-wrap break-all overflow-hidden line-clamp-4 select-text">
