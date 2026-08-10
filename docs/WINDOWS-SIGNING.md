@@ -111,6 +111,18 @@ GitHub Actions 要用你的 Azure 身份签名，需要一个「服务主体」+
 `AZURE_TRUSTED_SIGNING_*` 三个 secret 删掉，workflow 自动跳过签名。
 审核通过后加回来即可。
 
+**Q: 登录报错「所选用户帐户在租户'Microsoft Services'中不存在」？**
+这是 Azure 最高频的入门坑。含义：你直接登录了门户，但**还没注册 Azure 免费账户**，
+Azure 默认把你塞进它的内部租户，而你没有自己的租户。
+
+解法（按顺序）：
+1. 去 https://azure.microsoft.com/free/ 点 **Start free** 注册（**不是登录**）——
+   需手机号验证 + 绑定银行卡（只验证不扣费），完成后会自动创建你的默认租户和免费订阅
+2. 再打开 portal.azure.com，右上角头像 → **Switch directory** 确认选中你自己的租户
+3. 搜索 **Subscriptions** 确认能看到免费订阅，之后才能创建 Trusted Signing 资源
+
+若仍报错：换无痕窗口重新登录，清掉旧会话的租户上下文。
+
 **Q: 签名会失败吗？常见原因？**
 - Profile 还在 pending（等审核）
 - Endpoint / Account / Profile 名字抄错
