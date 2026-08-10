@@ -18,13 +18,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat <<'EOF' > /tmp/release-notes.md
-          ## TmuxDeck v1.7.1
+          ## TmuxDeck v1.7.2
 
-          A patch release fixing a critical bug: workspace creation failed on all released builds since v1.1.
+          A patch release fixing the Ghostty duplicate-instance bug and shipping the single-file codebase split.
 
-          ### Fix
+          ### Fix: Ghostty no longer spawns duplicate instances
 
-          - **Workspace creation works again.** The create dialog sent `agentId` / `terminalId` while the backend expected `agent_id` / `terminal_id`, so `create_session` failed with `missing field 'agent_id'` and no workspace could be created. Field names are now aligned to snake_case, matching every other frontend/backend structure.
+          Opening a session launched a **new Ghostty instance** every time (`open -na` forces a new process), so repeated clicks piled up instances and windows. Opening now uses Ghostty's native AppleScript `new window with configuration` - one instance, one new window per click, command still executed reliably.
+
+          ### Refactor: codebase split (behavior unchanged)
+
+          - Rust backend split from one 1157-line `lib.rs` into focused modules: `config`, `models`, `registry`, `tmux`, `tray`, and `commands/` (session / pane / utils).
+          - Frontend split from one 987-line `App.tsx` into `types.ts` plus components: `SessionCard`, `CreateWorkspaceModal`, `TmuxMissingScreen`, `SearchHeader`, `NewWorkspaceCard`.
+          - Every file is now under 400 lines; no dependencies added, no behavior changed.
 
           ### Install
 
