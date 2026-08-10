@@ -457,6 +457,7 @@ export default function App() {
                           <input
                             type="text"
                             value={renamedName}
+                            maxLength={60}
                             onChange={(e) => setRenamedName(e.target.value)}
                             onBlur={() => handleRename(session.name)}
                             onKeyDown={(e) => e.key === "Enter" && handleRename(session.name)}
@@ -619,6 +620,7 @@ export default function App() {
                   type="text"
                   placeholder="例如: my-ai-project"
                   value={newSessionName}
+                  maxLength={60}
                   onChange={(e) => setNewSessionName(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
