@@ -93,7 +93,7 @@ impl BridgeEngine {
         println!(
             "[bridge] ws listening on {} (token {})",
             transport.pairing().0,
-            &transport.pairing().1[..8]
+            transport.pairing().1
         );
 
         // 2. intercom（可选）
