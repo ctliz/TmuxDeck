@@ -1,6 +1,59 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ToolInfo {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Environment {
+    pub tmux: Option<String>,
+    pub terminals: Vec<ToolInfo>,
+    pub agents: Vec<ToolInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct CustomAgent {
+    pub name: String,
+    pub command: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Config {
+    pub default_terminal: String,
+    pub default_agent: String,
+    pub default_panes: u8,
+    pub custom_agent: Option<CustomAgent>,
+    pub recent_dirs: Vec<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            default_terminal: String::new(),
+            default_agent: "pi".to_string(),
+            default_panes: 4,
+            custom_agent: None,
+            recent_dirs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CreateOpts {
+    pub name: String,
+    pub dir: Option<String>,
+    pub agent_id: String,
+    pub panes: u8,
+    pub terminal_id: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TmuxPane {
     pub id: String,
@@ -19,14 +72,9 @@ pub struct TmuxSession {
     pub panes: Vec<TmuxPane>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EnvStatus {
-    pub tmux_installed: bool,
-    pub tmux_path: String,
-    pub ghostty_installed: bool,
-    pub ghostty_path: String,
-    pub pi_installed: bool,
-    pub pi_path: String,
+fn get_config_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".config").join("tmuxdeck").join("config.json")
 }
 
 fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
@@ -47,55 +95,338 @@ fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
     None
 }
 
-fn get_tmux_bin() -> String {
+fn get_tmux_bin() -> Option<String> {
     find_binary(
         "tmux",
-        &["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"],
-    )
-    .unwrap_or_else(|| "tmux".to_string())
-}
-
-fn get_ghostty_bin() -> String {
-    find_binary(
-        "ghostty",
-        &["/Applications/Ghostty.app/Contents/MacOS/ghostty", "/usr/local/bin/ghostty", "/opt/homebrew/bin/ghostty"],
-    )
-    .unwrap_or_else(|| "/Applications/Ghostty.app/Contents/MacOS/ghostty".to_string())
-}
-
-fn get_pi_bin() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let nvm_pi = format!("{}/.nvm/versions/node/v24.14.0/bin/pi", home);
-    find_binary(
-        "pi",
         &[
-            "/opt/homebrew/bin/pi",
-            "/usr/local/bin/pi",
-            &nvm_pi,
+            "/opt/homebrew/bin/tmux",
+            "/usr/local/bin/tmux",
+            "/usr/bin/tmux",
         ],
     )
-    .unwrap_or_else(|| "pi".to_string())
+}
+
+fn find_agent_binary(bin: &str) -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidate_paths = [
+        format!("/opt/homebrew/bin/{}", bin),
+        format!("/usr/local/bin/{}", bin),
+        format!("/usr/bin/{}", bin),
+        format!("{}/.cargo/bin/{}", home, bin),
+    ];
+    for p in &candidate_paths {
+        if std::path::Path::new(p).exists() {
+            return Some(p.clone());
+        }
+    }
+    // Check ~/.nvm/versions/node/*/bin/<bin>
+    let nvm_dir = format!("{}/.nvm/versions/node", home);
+    if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path().join("bin").join(bin);
+            if path.exists() {
+                return Some(path.to_string_lossy().to_string());
+            }
+        }
+    }
+    // Try `which`
+    if let Ok(output) = Command::new("which").arg(bin).output() {
+        if output.status.success() {
+            let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !p.is_empty() {
+                return Some(p);
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
-fn check_env() -> EnvStatus {
-    let tmux_p = get_tmux_bin();
-    let ghostty_p = get_ghostty_bin();
-    let pi_p = get_pi_bin();
+fn load_config() -> Config {
+    let path = get_config_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(cfg) = serde_json::from_str::<Config>(&content) {
+                return cfg;
+            }
+        }
+    }
+    Config::default()
+}
 
-    EnvStatus {
-        tmux_installed: std::path::Path::new(&tmux_p).exists(),
-        tmux_path: tmux_p,
-        ghostty_installed: std::path::Path::new(&ghostty_p).exists(),
-        ghostty_path: ghostty_p,
-        pi_installed: std::path::Path::new(&pi_p).exists(),
-        pi_path: pi_p,
+#[tauri::command]
+fn save_config(config: Config) -> Result<(), String> {
+    let path = get_config_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn detect_environment() -> Environment {
+    let tmux = get_tmux_bin();
+
+    // 终端注册表 (macOS)
+    let known_terminals = vec![
+        ("ghostty", "Ghostty", vec!["/Applications/Ghostty.app"]),
+        ("iterm2", "iTerm2", vec!["/Applications/iTerm.app"]),
+        (
+            "terminal",
+            "Terminal (系统)",
+            vec![
+                "/System/Applications/Utilities/Terminal.app",
+                "/Applications/Utilities/Terminal.app",
+            ],
+        ),
+        ("wezterm", "WezTerm", vec!["/Applications/WezTerm.app"]),
+        ("kitty", "kitty", vec!["/Applications/kitty.app"]),
+        ("alacritty", "Alacritty", vec!["/Applications/Alacritty.app"]),
+    ];
+
+    let mut installed_terminals = Vec::new();
+    for (id, name, paths) in known_terminals {
+        let mut found_path: Option<String> = None;
+        for p in paths {
+            if std::path::Path::new(p).exists() {
+                found_path = Some(p.to_string());
+                break;
+            }
+        }
+        // Terminal.app 兜底保证存在
+        if id == "terminal" && found_path.is_none() {
+            found_path = Some("/System/Applications/Utilities/Terminal.app".to_string());
+        }
+
+        if let Some(path) = found_path {
+            installed_terminals.push(ToolInfo {
+                id: id.to_string(),
+                name: name.to_string(),
+                path,
+            });
+        }
+    }
+
+    // Agent 注册表
+    let known_agents = vec![
+        ("pi", "Pi", "pi"),
+        ("claude", "Claude Code", "claude"),
+        ("codex", "Codex", "codex"),
+        ("opencode", "OpenCode", "opencode"),
+        ("gemini", "Gemini CLI", "gemini"),
+        ("aider", "Aider", "aider"),
+    ];
+
+    let mut installed_agents = Vec::new();
+    for (id, name, bin) in known_agents {
+        if let Some(p) = find_agent_binary(bin) {
+            installed_agents.push(ToolInfo {
+                id: id.to_string(),
+                name: name.to_string(),
+                path: p,
+            });
+        }
+    }
+
+    // 自定义 Agent 支持
+    let cfg = load_config();
+    if let Some(custom) = cfg.custom_agent {
+        if !custom.command.trim().is_empty() {
+            installed_agents.push(ToolInfo {
+                id: "custom".to_string(),
+                name: if custom.name.is_empty() { "自定义 Agent".to_string() } else { custom.name },
+                path: custom.command,
+            });
+        }
+    }
+
+    // 纯 Shell 兜底 (永远可用)
+    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    installed_agents.push(ToolInfo {
+        id: "shell".to_string(),
+        name: "纯 Shell".to_string(),
+        path: shell_path,
+    });
+
+    Environment {
+        tmux,
+        terminals: installed_terminals,
+        agents: installed_agents,
     }
 }
 
 #[tauri::command]
+fn open_session(name: String, terminal_id: String) -> Result<(), String> {
+    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
+    let script_path = format!("/tmp/tmuxdeck-{}.sh", name);
+
+    let script_content = format!(
+        "#!/bin/bash\nexec '{}' attach-session -t '{}'\n",
+        tmux, name
+    );
+    std::fs::write(&script_path, script_content).map_err(|e| format!("写入脚本失败: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        if let Ok(meta) = std::fs::metadata(&script_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(&script_path, perms);
+        }
+    }
+
+    let status = match terminal_id.as_str() {
+        "ghostty" => Command::new("/usr/bin/open")
+            .args(["-na", "Ghostty", "--args", &format!("--command={}", script_path)])
+            .status(),
+        "iterm2" => Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    "tell application \"iTerm\" to create window with default profile command \"{}\"",
+                    script_path
+                ),
+            ])
+            .status(),
+        "terminal" => Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    "tell application \"Terminal\" to do script \"{}\"",
+                    script_path
+                ),
+                "-e",
+                "tell application \"Terminal\" to activate",
+            ])
+            .status(),
+        "wezterm" => Command::new("/usr/bin/open")
+            .args(["-na", "WezTerm", "--args", "start", "--", &script_path])
+            .status(),
+        "kitty" => Command::new("/usr/bin/open")
+            .args(["-na", "kitty", "--args", &script_path])
+            .status(),
+        "alacritty" => Command::new("/usr/bin/open")
+            .args(["-na", "Alacritty", "--args", "-e", &script_path])
+            .status(),
+        _ => Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    "tell application \"Terminal\" to do script \"{}\"",
+                    script_path
+                ),
+                "-e",
+                "tell application \"Terminal\" to activate",
+            ])
+            .status(),
+    };
+
+    match status {
+        Ok(st) if st.success() => Ok(()),
+        Ok(st) => Err(format!("终端打开返回错误状态: {}", st)),
+        Err(e) => Err(format!("打开终端失败: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn create_session(opts: CreateOpts) -> Result<(), String> {
+    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
+    let env_info = detect_environment();
+
+    // 确定 agent 执行命令
+    let agent_cmd = if opts.agent_id == "shell" {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    } else {
+        env_info
+            .agents
+            .iter()
+            .find(|a| a.id == opts.agent_id)
+            .map(|a| a.path.clone())
+            .unwrap_or_else(|| opts.agent_id.clone())
+    };
+
+    let work_dir = opts
+        .dir
+        .clone()
+        .filter(|d| !d.trim().is_empty())
+        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
+
+    let cd_arg = format!("-c '{}'", work_dir);
+    let session_name = &opts.name;
+
+    // 按照分屏数构建 tmux 命令
+    let script = match opts.panes {
+        1 => format!(
+            "{} new-session -d -s '{}' {} '{}'",
+            tmux, session_name, cd_arg, agent_cmd
+        ),
+        2 => format!(
+            "{} new-session -d -s '{}' {} '{}'; {} split-window -h -t '{}' {} '{}'; {} select-layout -t '{}' tiled",
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name
+        ),
+        6 => format!(
+            "{} new-session -d -s '{}' {} '{}'; {} split-window -h -t '{}' {} '{}'; {} split-window -v -t '{}:0.0' {} '{}'; {} split-window -v -t '{}:0.1' {} '{}'; {} split-window -v -t '{}:0.2' {} '{}'; {} split-window -v -t '{}:0.3' {} '{}'; {} select-layout -t '{}' tiled",
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name
+        ),
+        _ => format!( // 默认 4 分屏
+            "{} new-session -d -s '{}' {} '{}'; {} split-window -h -t '{}' {} '{}'; {} split-window -v -t '{}:0.0' {} '{}'; {} split-window -v -t '{}:0.1' {} '{}'; {} select-layout -t '{}' tiled",
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name, cd_arg, agent_cmd,
+            tmux, session_name
+        ),
+    };
+
+    let output = Command::new("/bin/bash")
+        .args(["-c", &script])
+        .output()
+        .map_err(|e| format!("创建 tmux session 失败: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "创建会话报错: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // 持久化配置
+    let mut cfg = load_config();
+    cfg.default_terminal = opts.terminal_id.clone();
+    cfg.default_agent = opts.agent_id.clone();
+    cfg.default_panes = opts.panes;
+    if let Some(dir) = opts.dir {
+        if !dir.trim().is_empty() {
+            cfg.recent_dirs.retain(|d| d != &dir);
+            cfg.recent_dirs.insert(0, dir);
+            if cfg.recent_dirs.len() > 5 {
+                cfg.recent_dirs.truncate(5);
+            }
+        }
+    }
+    let _ = save_config(cfg);
+
+    // 立即打开 session
+    open_session(opts.name, opts.terminal_id)
+}
+
+#[tauri::command]
 fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
-    let tmux = get_tmux_bin();
+    let tmux = match get_tmux_bin() {
+        Some(t) => t,
+        None => return Ok(Vec::new()),
+    };
+
     let output = Command::new(&tmux)
         .args([
             "list-sessions",
@@ -126,7 +457,8 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
             let created_ts = parts[4].parse::<i64>().unwrap_or(0);
 
             let created_at = if created_ts > 0 {
-                let datetime = std::time::UNIX_EPOCH + std::time::Duration::from_secs(created_ts as u64);
+                let datetime =
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(created_ts as u64);
                 if let Ok(elapsed) = datetime.elapsed() {
                     let secs = elapsed.as_secs();
                     if secs < 60 {
@@ -196,76 +528,35 @@ fn get_session_panes(tmux: &str, session_name: &str) -> Vec<TmuxPane> {
 }
 
 #[tauri::command]
-fn attach_session(session_name: String) -> Result<(), String> {
-    let tmux = get_tmux_bin();
-    let cmd = format!("{} attach-session -t '{}'", tmux, session_name);
-
-    let output = Command::new("/usr/bin/open")
-        .args(["-na", "Ghostty", "--args", &format!("--command={}", cmd)])
-        .output()
-        .map_err(|e| format!("拉起 Ghostty 失败: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!("Ghostty 启动失败: {}", String::from_utf8_lossy(&output.stderr)));
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn create_4pi_session(session_name: String, working_dir: Option<String>) -> Result<(), String> {
-    let tmux = get_tmux_bin();
-    let pi = get_pi_bin();
-
-    let work_dir = working_dir.unwrap_or_else(|| {
-        std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
-    });
-
-    let cd_arg = format!("-c '{}'", work_dir);
-
-    let cmd1 = format!("{} new-session -d -s '{}' {} '{}'", tmux, session_name, cd_arg, pi);
-    let cmd2 = format!("{} split-window -h -t '{}' {} '{}'", tmux, session_name, cd_arg, pi);
-    let cmd3 = format!("{} split-window -v -t '{}:0.0' {} '{}'", tmux, session_name, cd_arg, pi);
-    let cmd4 = format!("{} split-window -v -t '{}:0.1' {} '{}'", tmux, session_name, cd_arg, pi);
-    let cmd5 = format!("{} select-layout -t '{}' tiled", tmux, session_name);
-
-    let script = format!("{}; {}; {}; {}; {}", cmd1, cmd2, cmd3, cmd4, cmd5);
-
-    let output = Command::new("/bin/bash")
-        .args(["-c", &script])
-        .output()
-        .map_err(|e| format!("创建 tmux session 失败: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!("创建会话报错: {}", String::from_utf8_lossy(&output.stderr)));
-    }
-
-    attach_session(session_name)
-}
-
-#[tauri::command]
 fn kill_session(session_name: String) -> Result<(), String> {
-    let tmux = get_tmux_bin();
+    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
     let output = Command::new(&tmux)
         .args(["kill-session", "-t", &session_name])
         .output()
         .map_err(|e| format!("销毁 session 失败: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("销毁会话失败: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "销毁会话失败: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
 
 #[tauri::command]
 fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
-    let tmux = get_tmux_bin();
+    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
     let output = Command::new(&tmux)
         .args(["rename-session", "-t", &old_name, &new_name])
         .output()
         .map_err(|e| format!("重命名 session 失败: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("重命名会话失败: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "重命名会话失败: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
@@ -273,12 +564,15 @@ fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            check_env,
+            detect_environment,
+            load_config,
+            save_config,
+            create_session,
+            open_session,
             get_tmux_sessions,
-            attach_session,
-            create_4pi_session,
             kill_session,
             rename_session
         ])
