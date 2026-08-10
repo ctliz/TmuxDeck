@@ -10,11 +10,12 @@
 
 ## 原理
 
-微软提供 **Azure Trusted Signing** 免费/低成本代码签名服务。GitHub Actions 官方 action
+微软提供 **Azure Trusted Signing** 代码签名服务（按量计费，无免费层）。GitHub Actions 官方 action
 直接支持，签名后 Windows 安装包显示「发布者已验证」。
 
 **为什么 macOS 不做？** macOS 公证强制要求 $99/年的 Apple Developer 账号，
-纯开源项目不值得。Windows 有免费方案，值得接。
+纯开源项目不值得。Windows 的 Trusted Signing 虽然按量计费，但对低频发版项目
+每次发版仅 2 次签名（msi + exe），月度成本约几分钱（前提是绑定信用卡）。
 
 ---
 
@@ -127,11 +128,14 @@ Azure 默认把你塞进它的内部租户，而你没有自己的租户。
 - Profile 还在 pending（等审核）
 - Endpoint / Account / Profile 名字抄错
 - OIDC 联邦凭证的 Environment 名与仓库不匹配
-- 免费订阅额度用完（极少，本应用签名次数极低）
 
 **Q: 这要花钱吗？**
-Azure Trusted Signing 有免费额度（每月若干次免费签名）。TmuxDeck 发版频率低，
-基本永久在免费额度内。超出后按次计费（约 $9.99/千次级），可忽略。
+Azure Trusted Signing **没有免费层**，按量计费（约 $9.99/千次签名）。但 TmuxDeck 每次发版
+只需 2 次签名（msi + exe），按每月 10 版算也就 $0.20/月。真正的前提是：**必须绑定一张
+信用卡**，且 $200 试用 credit 30 天后过期，之后按量从卡上扣。
+
+对开源项目是否值得，取决于你愿不愿意为「消除 SmartScreen 警告」绑一张卡。
+不愿意的话，保持未签名 + README 引导（右键打开）是完全可接受的开源常态。
 
 **Q: macOS 版怎么办？**
 不签名，保持现状。README 已有「无法验证开发者」引导。
