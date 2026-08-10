@@ -12,6 +12,32 @@
 
 ## 规划队列
 
+### P0 · v1.12 对话桥（进行中）
+
+手机端接入。定位：TmuxDeck 成为 **pi-intercom 的「人类适配器」**——
+该家族已有 Pi / Codex / Claude Code / OpenCode 适配器，唯独没有「人」。
+
+- 需求与验收：`docs/PRD-v1.12-conversation-bridge.md`
+- 架构：`docs/ARCHITECTURE.md` · 协议：`docs/REFERENCE-intercom-protocol.md`
+- 决策留痕：`docs/DECISIONS-v1.12.md`（五个被否决的方案）· `docs/PRIOR-ART-agent-bus.md`
+
+进度：
+
+- [x] `tmux.rs`：`send_keys` / `send_key_name`（白名单）/ `list_all_panes`
+- [x] `intercom.rs`：broker 客户端（UDS + 4 字节大端分帧 + 手工帧分派），无新增依赖
+- [x] `bridge.rs`：对话模型、pane↔会话父链关联、投递路由、`Transport` 抽象
+- [x] 文档落地（架构 / 协议 / 决策 / 脚本说明 / CONTRIBUTING 同步）
+- [ ] **真机验证**：`node scripts/intercom-probe.mjs`（6 条清单见 `scripts/README.md`）
+- [ ] `cargo test` 通过（本批代码尚未编译验证）
+- [ ] `TranscriptSource` 具体实现 —— **唯一未定项**，见下
+
+**未解决**：对话内容（agent 说了什么）的来源。`capture-pane` 只能兜底；
+推荐读 agent 自己的结构化会话记录。trait 已就位，实现待立项。
+
+**外部依赖**：本机装的是 `nicobailon/pi-intercom` 原版（pi-only），
+Claude Code / Codex 仍是孤岛。打通需整体迁移到 `dataforxyz` 跨 harness 家族，
+且**必须全量迁移**（新旧混用会分裂 broker）。属用户决策项。
+
 ### P1 · Windows 实机验证（暂缓，排期待定）
 
 - 验收清单：`docs/WINDOWS-VERIFICATION-v1.7.0.md`（A 环境预检 / B 安装 / C 桥接 / D GUI）
@@ -27,10 +53,11 @@
 | per-pane agent 混搭 | 单个工作区跑不同 agent 编排 | 中 | v1.1 PRD 曾明确不做，需求待验证 |
 | 工作区模板/布局预设 | 常用布局一键复用 | 低-中 | 同上 |
 | macOS 签名 + 自动更新 | 消除 Gatekeeper 警告、用户自动升级 | 中-高 | 涉及 Apple 开发者账号 + tauri-updater |
-| 拆分 App.tsx / lib.rs | 控技术债，功能增长前重构 | 中 | 单文件 987 行 / 1157 行 |
+| 拆分 App.tsx | 控技术债，功能增长前重构 | 中 | 单文件 987 行；`lib.rs` 已于 2026-08-10 拆分完成 |
 
 ### P3 · 技术债与持续改进
 
+- [x] 拆分 `lib.rs` 为模块（tmux / registry / config / models / tray / commands，2026-08-10）
 - [x] 引入自动化测试（v1.7.0，2026-08-10）
 - [x] tmux 无 server 报错治理（v1.7.0，2026-08-10）
 - [x] 发布流程命令行化（gh CLI 接入，draft → 正式发布）

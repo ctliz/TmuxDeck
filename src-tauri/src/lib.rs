@@ -1,17 +1,23 @@
 use tauri::Emitter;
 
+mod bridge;
 mod commands;
 mod config;
+mod intercom;
 mod models;
 mod registry;
 mod tmux;
+mod transcript;
 mod tray;
 
+pub use bridge::*;
 pub use commands::*;
 pub use config::*;
+pub use intercom::*;
 pub use models::*;
 pub use registry::*;
 pub use tmux::*;
+pub use transcript::*;
 pub use tray::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -91,7 +97,10 @@ pub fn run() {
             capture_pane,
             add_pane,
             kill_pane,
-            get_terminal_icon
+            get_terminal_icon,
+            send_pane_text,
+            send_pane_key,
+            list_panes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

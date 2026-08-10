@@ -3,6 +3,27 @@ use crate::tmux::{
     sanitize_session_name, strip_ansi, validate_pane_id,
 };
 
+/// 向 pane 发送一段文本。桌面端此前也没有这个能力。
+///
+/// 自由文本走 tmux 的 `-l`（literal）通道，控制键走 `send_pane_key` 的白名单通道，
+/// 两者不混用——否则消息里出现 "C-c" 会被 tmux 当成控制键执行。
+#[tauri::command]
+pub fn send_pane_text(pane_id: String, text: String, submit: bool) -> Result<(), String> {
+    crate::tmux::send_keys(&pane_id, &text, submit)
+}
+
+/// 向 pane 发送一个具名控制键（Escape / C-c / 方向键等，白名单内）。
+#[tauri::command]
+pub fn send_pane_key(pane_id: String, key: String) -> Result<(), String> {
+    crate::tmux::send_key_name(&pane_id, &key)
+}
+
+/// 列出所有 pane 及其归属、进程与工作目录。
+#[tauri::command]
+pub fn list_panes() -> Vec<crate::tmux::PaneDetail> {
+    crate::tmux::list_all_panes()
+}
+
 #[tauri::command]
 pub fn add_pane(session_name: String) -> Result<(), String> {
     let sanitized = sanitize_session_name(&session_name)?;

@@ -167,3 +167,139 @@ pub fn get_session_panes(session_name: &str) -> Vec<TmuxPane> {
     }
     Vec::new()
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 全局 pane 清单
+//
+// 一次 list-panes -a 拿到所有 pane 的归属、进程与工作目录。相比逐 session 调用，
+// 这是把 pane 关联到 agent 会话（intercom / transcript 文件）时唯一需要的一跳。
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PaneDetail {
+    pub id: String,
+    pub session: String,
+    /// pane 内前台进程名，例如 pi / claude / codex / zsh
+    pub command: String,
+    pub cwd: String,
+    pub active: bool,
+}
+
+pub fn list_all_panes() -> Vec<PaneDetail> {
+    let output = run_tmux(&[
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_id}|#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}",
+    ]);
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let mut panes = Vec::new();
+            for line in stdout.lines() {
+                // cwd 里可能含 '|' 极少见，但按固定字段数从左切、最后一段取右，避免误切
+                let parts: Vec<&str> = line.splitn(5, '|').collect();
+                if parts.len() == 5 {
+                    panes.push(PaneDetail {
+                        id: parts[0].to_string(),
+                        session: parts[1].to_string(),
+                        command: parts[2].to_string(),
+                        cwd: parts[3].to_string(),
+                        active: parts[4] == "1",
+                    });
+                }
+            }
+            return panes;
+        }
+    }
+    Vec::new()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 向 pane 发送输入
+//
+// 这是「手机端能回一句话」的最底层能力，也是没有 intercom 适配器的 agent
+// （Aider / Gemini CLI / 纯 shell）唯一的投递通道。
+//
+// 安全要点：自由文本必须走 `-l`（literal）。不加时 tmux 会把 "C-c"、"Escape"
+// 这类字符串当键名解析，用户消息里出现这些词就会被误当控制键执行。
+// 控制键因此走 send_key_name 这条独立通道，两者不混用。
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub const MAX_SEND_TEXT_BYTES: usize = 8192;
+
+/// 发送字面文本。submit=true 时追加一个独立的 Enter。
+pub fn send_keys(pane_id: &str, text: &str, submit: bool) -> Result<(), String> {
+    let pane = pane_id.trim();
+    if !validate_pane_id(pane) {
+        return Err("ERR_PANE_INVALID".to_string());
+    }
+    if text.is_empty() {
+        return Err("ERR_TEXT_EMPTY".to_string());
+    }
+    if text.len() > MAX_SEND_TEXT_BYTES {
+        return Err("ERR_TEXT_TOO_LONG".to_string());
+    }
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    // 多行文本逐行发送：tmux send-keys -l 不会把 \n 当提交，
+    // 但部分 TUI 对裸 \n 的处理不一致，改为「行内容 + 显式 Enter」更可控。
+    let lines: Vec<&str> = text.split('\n').collect();
+    for (i, line) in lines.iter().enumerate() {
+        if !line.is_empty() {
+            let output = run_tmux(&["send-keys", "-t", pane, "-l", line])
+                .map_err(|e| format!("ERR_SEND_FAILED|{}", e))?;
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                if is_no_server_err(&err) {
+                    return Err("ERR_TMUX_NO_SERVER".to_string());
+                }
+                return Err(format!("ERR_SEND_OUTPUT_ERR|{}", err));
+            }
+        }
+        // 行间换行；最后一行是否换行由 submit 决定
+        if i + 1 < lines.len() {
+            send_key_name(pane, "Enter")?;
+        }
+    }
+
+    if submit {
+        send_key_name(pane, "Enter")?;
+    }
+    Ok(())
+}
+
+/// 允许发送的控制键白名单。不开放任意键名，避免把 send-keys 变成通用键盘注入口。
+const ALLOWED_KEYS: &[&str] = &[
+    "Enter", "Escape", "Tab", "BSpace", "Space",
+    "Up", "Down", "Left", "Right",
+    "C-c", "C-d", "C-l", "C-u", "C-r", "C-p", "C-n",
+];
+
+/// 发送一个具名控制键（Escape / C-c / 方向键等）。
+pub fn send_key_name(pane_id: &str, key: &str) -> Result<(), String> {
+    let pane = pane_id.trim();
+    if !validate_pane_id(pane) {
+        return Err("ERR_PANE_INVALID".to_string());
+    }
+    if !ALLOWED_KEYS.contains(&key) {
+        return Err("ERR_KEY_NOT_ALLOWED".to_string());
+    }
+    if check_tmux_installed().is_none() {
+        return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    let output = run_tmux(&["send-keys", "-t", pane, key])
+        .map_err(|e| format!("ERR_SEND_FAILED|{}", e))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
+        return Err(format!("ERR_SEND_OUTPUT_ERR|{}", err));
+    }
+    Ok(())
+}
