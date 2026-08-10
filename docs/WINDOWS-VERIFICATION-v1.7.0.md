@@ -8,9 +8,9 @@
 
 ## A. 环境预检（SSH 可执行）
 
-- [ ] A1 `wsl.exe -- tmux -V` 输出版本号
-- [ ] A2 `wsl.exe -- which <agent-bin>` 找到至少一个 agent
-- [ ] A3 终端外壳存在：`wt.exe` / `cmd.exe` / `powershell.exe`
+- [x] A1 `wsl.exe -- tmux -V` 输出版本号 → **PASS**（tmux 3.4，2026-08-10 实测）
+- [x] A2 `wsl.exe -- which <agent-bin>` 找到至少一个 agent → **PASS**（codex、opencode，路径 /mnt/c/Users/80763/AppData/Roaming/npm/）
+- [x] A3 终端外壳存在：`wt.exe` / `cmd.exe` / `powershell.exe` → **PASS**（三者齐全）
 
 ## B. 安装（SSH 静默安装 + 文件检查）
 

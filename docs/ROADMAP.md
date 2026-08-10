@@ -15,6 +15,7 @@
 ### P1 · Windows 实机验证（暂缓，排期待定）
 
 - 验收清单：`docs/WINDOWS-VERIFICATION-v1.7.0.md`（A 环境预检 / B 安装 / C 桥接 / D GUI）
+- 进度：A1–A3 已 PASS（tmux 3.4、codex/opencode 可探测、wt/cmd/powershell 齐全）；B/C/D 待排期
 - 主机：`tsiji@192.168.1.17`（访问方式见 server-deploy skill「Windows host access」）
 - 触发条件：用户排期确认后执行；A/B/C 走 SSH，D 需 Windows 机器 GUI 配合
 - 完成标准：全部 PASS 或仅 D8 跳过 → Windows 从「编译级」升级为「实机可用」
