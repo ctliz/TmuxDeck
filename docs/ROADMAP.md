@@ -34,7 +34,9 @@
 - [x] 引入自动化测试（v1.7.0，2026-08-10）
 - [x] tmux 无 server 报错治理（v1.7.0，2026-08-10）
 - [x] 发布流程命令行化（gh CLI 接入，draft → 正式发布）
-- [ ] v1.7.1 候选：Windows 验证若发现真实 bug，按 P0/P1/P2 分级在此排期
+- [x] create_session 字段命名修复（v1.7.1，2026-08-10）
+- [ ] v1.7.2 候选：Ghostty 打开会话多实例 bug（open -na 强制新实例，AppleScript new window 方案已验证，开发中）
+- [ ] 终端启动方式评估：wezterm / kitty / alacritty 的 open -na 潜在同类多实例问题（Ghostty 修复后评估，不主动扩大范围）
 - [ ] README 措辞：Windows 验证通过后，从「macOS 为 battle-tested」更新为双平台声明
 
 ## 原则（沿用 PRD 惯例）
