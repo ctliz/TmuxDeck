@@ -50,6 +50,7 @@ interface TmuxPane {
   id: string;
   command: string;
   active: boolean;
+  content?: string;
 }
 
 interface TmuxSession {
@@ -160,7 +161,20 @@ export default function App() {
       ]);
       setEnv(envData);
       setConfig(cfgData);
-      setSessions(sessionList);
+
+      setSessions((prevSessions) => {
+        return sessionList.map((newSess) => {
+          const oldSess = prevSessions.find((s) => s.id === newSess.id || s.name === newSess.name);
+          if (!oldSess) return newSess;
+          return {
+            ...newSess,
+            panes: newSess.panes.map((newPane) => {
+              const oldPane = oldSess.panes.find((p) => p.id === newPane.id);
+              return oldPane?.content ? { ...newPane, content: oldPane.content } : newPane;
+            }),
+          };
+        });
+      });
 
       if (cfgData.custom_agent) {
         setCustomAgentName(cfgData.custom_agent.name || "");
@@ -191,10 +205,57 @@ export default function App() {
 
   useEffect(() => {
     loadData();
-    const timer = setInterval(() => {
+    const sessionTimer = setInterval(() => {
       loadData();
     }, 4000);
-    return () => clearInterval(timer);
+
+    const failedPaneCounts = new Map<string, number>();
+
+    const captureTimer = setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return; // Pause capture when tab or app window is hidden/minimized
+      }
+
+      setSessions((currentSessions) => {
+        if (currentSessions.length === 0) return currentSessions;
+
+        currentSessions.forEach(async (sess) => {
+          for (const pane of sess.panes) {
+            const failCount = failedPaneCounts.get(pane.id) || 0;
+            if (failCount >= 3) continue;
+
+            try {
+              const content = await invoke<string>("capture_pane", {
+                paneId: pane.id,
+                maxLines: 5,
+              });
+
+              setSessions((prev) =>
+                prev.map((s) => {
+                  if (s.id !== sess.id) return s;
+                  return {
+                    ...s,
+                    panes: s.panes.map((p) =>
+                      p.id === pane.id ? { ...p, content } : p
+                    ),
+                  };
+                })
+              );
+              failedPaneCounts.set(pane.id, 0);
+            } catch (err) {
+              failedPaneCounts.set(pane.id, failCount + 1);
+            }
+          }
+        });
+
+        return currentSessions;
+      });
+    }, 8000);
+
+    return () => {
+      clearInterval(sessionTimer);
+      clearInterval(captureTimer);
+    };
   }, []);
 
   const handlePickDirectory = async () => {
@@ -600,22 +661,34 @@ export default function App() {
                           (a) => a.id !== "shell" && (cmdName.includes(a.id) || (a.path && cmdName.includes(a.path)))
                         );
                         const isAgent = Boolean(matchedAgent);
+                        const hasContent = Boolean(pane.content && pane.content.trim().length > 0);
+
                         return (
                           <div
                             key={pane.id || idx}
-                            className={`flex flex-col justify-between p-2 rounded-lg border text-[11px] h-12 transition ${
-                              isAgent
+                            className={`flex flex-col justify-between p-2 rounded-lg border text-[11px] min-h-[4.5rem] transition ${
+                              hasContent
+                                ? "bg-slate-950/90 border-slate-700/80 text-slate-200"
+                                : isAgent
                                 ? "bg-cyan-950/30 border-cyan-800/40 text-cyan-300"
                                 : "bg-slate-900/60 border-slate-800 text-slate-400"
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono text-[9px] text-slate-500">#{idx + 1}</span>
-                              {isAgent && <Zap className="w-2.5 h-2.5 text-cyan-400" />}
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-mono text-[9px] text-slate-500">
+                                #{idx + 1} {matchedAgent ? `· ${translateName(matchedAgent.name)}` : ""}
+                              </span>
+                              {isAgent && <Zap className="w-2.5 h-2.5 text-cyan-400 shrink-0" />}
                             </div>
-                            <span className="font-mono truncate font-medium">
-                              {matchedAgent ? translateName(matchedAgent.name) : cmdName}
-                            </span>
+                            {hasContent ? (
+                              <pre className="font-mono text-[9px] text-slate-300 leading-tight whitespace-pre-wrap break-all overflow-hidden line-clamp-4 select-text">
+                                {pane.content}
+                              </pre>
+                            ) : (
+                              <span className="font-mono truncate font-medium">
+                                {matchedAgent ? translateName(matchedAgent.name) : cmdName}
+                              </span>
+                            )}
                           </div>
                         );
                       })}

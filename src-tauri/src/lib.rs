@@ -708,6 +708,58 @@ fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
     Ok(())
 }
 
+fn strip_ansi(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        result.push(c);
+    }
+    result
+}
+
+#[tauri::command]
+fn capture_pane(pane_id: String, max_lines: usize) -> Result<String, String> {
+    if check_tmux_installed().is_none() {
+        return Ok(String::new());
+    }
+
+    let output = run_tmux(&["capture-pane", "-p", "-t", &pane_id]);
+    let out = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return Ok(String::new()),
+    };
+
+    let stripped = strip_ansi(&out);
+    let mut lines: Vec<&str> = stripped
+        .lines()
+        .map(|l| l.trim_end())
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("───") && !t.starts_with("---")
+        })
+        .collect();
+
+    let limit = if max_lines == 0 { 5 } else { max_lines };
+    if lines.len() > limit {
+        lines = lines[lines.len() - limit..].to_vec();
+    }
+
+    Ok(lines.join("\n"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -722,7 +774,8 @@ pub fn run() {
             open_session,
             get_tmux_sessions,
             kill_session,
-            rename_session
+            rename_session,
+            capture_pane
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
