@@ -14,44 +14,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: TmuxDeck ${{ github.ref_name }}
-          body: |
-            ## TmuxDeck v1.6.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat <<'EOF' > /tmp/release-notes.md
+          ## TmuxDeck v1.6.0
 
-            A major UI overhaul and the first release with a menu bar presence. Since v1.5.0: Liquid Glass design, a tray icon, terminal brand icons, and pane-level management.
+          A major UI overhaul and the first release with a menu bar presence. Since v1.5.0: Liquid Glass design, a tray icon, terminal brand icons, and pane-level management.
 
-            ### Liquid Glass UI
+          ### Liquid Glass UI
 
-            The interface was rebuilt around macOS 26-style Liquid Glass: translucent surfaces, soft blur, and smooth transitions. The heavy top bar is gone - a floating, semi-transparent search pill sits at the top.
+          The interface was rebuilt around macOS 26-style Liquid Glass: translucent surfaces, soft blur, and smooth transitions. The heavy top bar is gone - a floating, semi-transparent search pill sits at the top.
 
-            Cards were simplified to the essentials: a status dot, a click-to-rename name, and a close button. The pane grid shows live output tail from each pane.
+          Cards were simplified to the essentials: a status dot, a click-to-rename name, and a close button. The pane grid shows live output tail from each pane.
 
-            ### Menu bar (tray) presence
+          ### Menu bar (tray) presence
 
-            TmuxDeck now lives in the menu bar. Close the window and it keeps running - click the tray icon to see the active workspace, open any session, add a pane, or create a new one. The tray menu follows the system language (English / Simplified Chinese).
+          TmuxDeck now lives in the menu bar. Close the window and it keeps running - click the tray icon to see the active workspace, open any session, add a pane, or create a new one. The tray menu follows the system language (English / Simplified Chinese).
 
-            ### Terminal brand icons
+          ### Terminal brand icons
 
-            Each card shows the real icon of every installed terminal (extracted from the app bundle at runtime). One click opens the session in that terminal.
+          Each card shows the real icon of every installed terminal (extracted from the app bundle at runtime). One click opens the session in that terminal.
 
-            ### Pane-level management
+          ### Pane-level management
 
-            Hover a pane to kill just that pane (with confirmation), or click "Add pane" to grow the grid - each new pane inherits the session's working directory.
+          Hover a pane to kill just that pane (with confirmation), or click "Add pane" to grow the grid - each new pane inherits the session's working directory.
 
-            ### Fixes
+          ### Fixes
 
-            - Tray menu labels are now localized (previously hard-coded English).
-            - Removed dead activity-text computation and orphaned i18n keys.
+          - Tray menu labels are now localized (previously hard-coded English).
+          - Removed dead activity-text computation and orphaned i18n keys.
 
-            ### Install
+          ### Install
 
-            - macOS: download the `.dmg`, drag into Applications. If Gatekeeper warns on first launch, right-click -> Open (unsigned build).
-            - Windows: download the `.exe` (NSIS) or `.msi`.
-          draft: true
-          generate_release_notes: true
+          - macOS: download the `.dmg`, drag into Applications. If Gatekeeper warns on first launch, right-click -> Open (unsigned build).
+          - Windows: download the `.exe` (NSIS) or `.msi`.
+          EOF
+          gh release create "${{ github.ref_name }}" \
+            --title "TmuxDeck ${{ github.ref_name }}" \
+            --draft \
+            --notes-file /tmp/release-notes.md
+          echo "::notice::Draft release created for ${{ github.ref_name }}"
 
   build-macos:
     needs: create-release
@@ -73,13 +76,13 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run tauri build
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          draft: true
-          files: |
-            src-tauri/target/release/bundle/dmg/*.dmg
+      - name: Upload .dmg to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            src-tauri/target/release/bundle/dmg/*.dmg \
+            --clobber
 
   build-windows:
     needs: create-release
@@ -129,11 +132,12 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          draft: true
-          files: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+      - name: Upload Windows artifacts to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            src-tauri/target/release/bundle/nsis/*.exe \
+            src-tauri/target/release/bundle/msi/*.msi \
+            --clobber
