@@ -82,6 +82,7 @@ const en: Record<string, string> = {
   "confirm.destroy": "Destroy workspace \"{name}\"?",
 
   // Error Code Mappings (from Rust)
+  "ERR_CONFIG_SAVE": "Failed to save configuration",
   "ERR_NAME_EMPTY": "Workspace name cannot be empty",
   "ERR_NAME_INVALID": "Invalid workspace name (only letters, numbers, underscores, and hyphens supported)",
   "ERR_TMUX_NOT_FOUND": "tmux executable not found",
@@ -192,6 +193,7 @@ const zh: Record<string, string> = {
   "confirm.destroy": "确定要销毁工作区「{name}」吗？",
 
   // Error Code Mappings (from Rust)
+  "ERR_CONFIG_SAVE": "保存配置失败",
   "ERR_NAME_EMPTY": "项目名称不能为空",
   "ERR_NAME_INVALID": "非法的项目名称 (仅支持字母、数字、下划线和连字符)",
   "ERR_TMUX_NOT_FOUND": "未找到 tmux 安装",
