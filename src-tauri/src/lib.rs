@@ -3,21 +3,25 @@ use tauri::Emitter;
 mod bridge;
 mod commands;
 mod config;
+mod engine;
 mod intercom;
 mod models;
 mod registry;
 mod tmux;
 mod transcript;
+mod transport;
 mod tray;
 
 pub use bridge::*;
 pub use commands::*;
 pub use config::*;
+pub use engine::*;
 pub use intercom::*;
 pub use models::*;
 pub use registry::*;
 pub use tmux::*;
 pub use transcript::*;
+pub use transport::*;
 pub use tray::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,11 +41,18 @@ pub fn run() {
                 use tauri::tray::TrayIconBuilder;
                 use tauri::Manager;
 
+                // v1.14：启动桥接引擎（WebSocket 传输 + intercom 接入 + 对话表维护）
+                let bridge_state = crate::engine::spawn_bridge();
+                app.manage(bridge_state);
+
                 let handle = app.handle().clone();
 
                 if let Ok(initial_menu) = build_tray_menu(&handle) {
+                    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+                        .expect("failed to load tray icon bytes");
                     let _tray = TrayIconBuilder::with_id("main")
-                        .icon(app.default_window_icon().unwrap().clone())
+                        .icon(tray_icon)
+                        .icon_as_template(true)
                         .menu(&initial_menu)
                         .on_menu_event(|app, event| {
                             let event_id = event.id().as_ref();
@@ -101,7 +112,9 @@ pub fn run() {
             send_pane_text,
             send_pane_key,
             list_panes,
-            swap_pane
+            swap_pane,
+            bridge_pairing,
+            bridge_conversations
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

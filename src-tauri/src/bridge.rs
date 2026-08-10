@@ -426,6 +426,7 @@ pub enum ClientEvent {
         title: String,
         preview: String,
         /// 回复时要带上的 intercom 消息 ID
+        #[serde(rename = "replyTo")]
         reply_to: Option<String>,
     },
     Error { message: String },
@@ -443,6 +444,10 @@ pub enum ClientCommand {
     Forward { from: String, to: String, text: String },
     /// 请求刷新对话列表
     Refresh,
+    /// 进入某个对话：只推它的 turn（单活跃订阅，新 subscribe 替换旧）
+    Subscribe { id: String },
+    /// 退出当前对话：停止推 turn
+    Unsubscribe,
 }
 
 /// 与手机端之间的传输通道。

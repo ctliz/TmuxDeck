@@ -7,14 +7,17 @@ import { sanitizeNameFrontend } from "./utils";
 import { Config, CustomAgent, Environment, TmuxSession } from "./types";
 import { TmuxMissingScreen } from "./components/TmuxMissingScreen";
 import { SearchHeader } from "./components/SearchHeader";
-import { SessionCard } from "./components/SessionCard";
-import { NewWorkspaceCard } from "./components/NewWorkspaceCard";
+import { CardGrid } from "./components/CardGrid";
 import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
 
 export default function App() {
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
   const sessionsRef = useRef<TmuxSession[]>([]);
   const failedPaneCountsRef = useRef(new Map<string, number>());
+
+  // Card reordering & Drag state
+  const [, setCardOrder] = useState<string[]>([]);
+  const cardOrderRef = useRef<string[]>([]);
 
   const [env, setEnv] = useState<Environment | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
@@ -54,6 +57,15 @@ export default function App() {
     });
   }, [env]);
 
+  const sortSessionsByOrder = (list: TmuxSession[], order: string[]) => {
+    const orderMap = new Map(order.map((id, idx) => [id, idx]));
+    return [...list].sort((a, b) => {
+      const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : Number.MAX_SAFE_INTEGER;
+      const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : Number.MAX_SAFE_INTEGER;
+      return idxA - idxB;
+    });
+  };
+
   const loadData = async () => {
     setLoading(true);
     setErrorMsg("");
@@ -65,8 +77,8 @@ export default function App() {
       ]);
       setEnv(envData);
       setConfig(cfgData);
-      setSessions((prevSessions) =>
-        sessionList.map((newSess) => {
+      setSessions((prevSessions) => {
+        const mergedList = sessionList.map((newSess) => {
           const oldSess = prevSessions.find((s) => s.id === newSess.id || s.name === newSess.name);
           if (!oldSess) return newSess;
           return {
@@ -76,8 +88,18 @@ export default function App() {
               return oldPane?.content ? { ...newPane, content: oldPane.content } : newPane;
             }),
           };
-        })
-      );
+        });
+
+        const activeIds = new Set(mergedList.map((s) => s.id));
+        const updatedOrder = cardOrderRef.current.filter((id) => activeIds.has(id));
+        mergedList.forEach((s) => {
+          if (!updatedOrder.includes(s.id)) updatedOrder.push(s.id);
+        });
+        cardOrderRef.current = updatedOrder;
+        setCardOrder(updatedOrder);
+
+        return sortSessionsByOrder(mergedList, updatedOrder);
+      });
 
       if (cfgData.custom_agent) {
         setCustomAgentName(cfgData.custom_agent.name || "");
@@ -158,21 +180,10 @@ export default function App() {
   };
 
   const handleSaveCustomAgent = async () => {
-    if (!customAgentCmd.trim()) {
-      alert(t("val.enterCustomCmd"));
-      return;
-    }
-    const newCustom: CustomAgent = {
-      name: customAgentName.trim() || t("agent.custom"),
-      command: customAgentCmd.trim(),
-    };
+    if (!customAgentCmd.trim()) return alert(t("val.enterCustomCmd"));
+    const newCustom: CustomAgent = { name: customAgentName.trim() || t("agent.custom"), command: customAgentCmd.trim() };
     try {
-      const currentConfig = config || {
-        default_terminal: selectedTerminal,
-        default_agent: "custom",
-        default_panes: selectedPanes,
-        recent_dirs: [],
-      };
+      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [] };
       const updatedConfig: Config = { ...currentConfig, custom_agent: newCustom };
       await invoke("save_config", { config: updatedConfig });
       const envData = await invoke<Environment>("detect_environment");
@@ -196,20 +207,11 @@ export default function App() {
 
   const handleCreate = async () => {
     const cleanName = sanitizeNameFrontend(newSessionName);
-    if (!cleanName) {
-      alert(t("val.enterName"));
-      return;
-    }
+    if (!cleanName) return alert(t("val.enterName"));
     setLoading(true);
     try {
       await invoke("create_session", {
-        opts: {
-          name: cleanName,
-          dir: workingDir.trim() || null,
-          agent_id: selectedAgent,
-          panes: selectedPanes,
-          terminal_id: selectedTerminal,
-        },
+        opts: { name: cleanName, dir: workingDir.trim() || null, agentId: selectedAgent, panes: selectedPanes, terminalId: selectedTerminal },
       });
       setShowCreateModal(false);
       setNewSessionName("");
@@ -251,18 +253,37 @@ export default function App() {
     }
   };
 
+  const handleSwapPane = async (paneIdA: string, paneIdB: string) => {
+    try {
+      await invoke("swap_pane", { paneIdA, paneIdB });
+      await loadData();
+    } catch (err: any) {
+      alert(translateError(err));
+    }
+  };
+
   const handleRename = async (oldName: string) => {
     const cleanNew = sanitizeNameFrontend(renamedName);
-    if (!cleanNew || cleanNew === oldName) {
-      setRenamingSession(null);
-      return;
-    }
+    if (!cleanNew || cleanNew === oldName) return setRenamingSession(null);
     try {
       await invoke("rename_session", { oldName, newName: cleanNew });
       setRenamingSession(null);
       await loadData();
     } catch (err: any) {
       alert(t("val.renameFailed") + ": " + translateError(err));
+    }
+  };
+
+  const handleReorderCards = (sourceSessionId: string, targetSessionId: string) => {
+    const currentOrder = [...cardOrderRef.current];
+    const fromIndex = currentOrder.indexOf(sourceSessionId);
+    const toIndex = currentOrder.indexOf(targetSessionId);
+    if (fromIndex !== -1 && toIndex !== -1) {
+      currentOrder.splice(fromIndex, 1);
+      currentOrder.splice(toIndex, 0, sourceSessionId);
+      cardOrderRef.current = currentOrder;
+      setCardOrder(currentOrder);
+      setSessions((prev) => sortSessionsByOrder(prev, currentOrder));
     }
   };
 
@@ -303,36 +324,31 @@ export default function App() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          <NewWorkspaceCard
-            onClick={() => {
-              setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
-              setShowCreateModal(true);
-            }}
-          />
+        <CardGrid
+          sessions={filteredSessions}
+          env={env}
+          selectedTerminal={selectedTerminal}
+          renamingSession={renamingSession}
+          renamedName={renamedName}
+          terminalIconUrls={terminalIconUrls}
+          onNewWorkspaceClick={() => {
+            setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
+            setShowCreateModal(true);
+          }}
+          onRenameStart={(name) => {
+            setRenamingSession(name);
+            setRenamedName(name);
+          }}
+          onRenameChange={setRenamedName}
+          onRenameCommit={handleRename}
+          onKill={handleKill}
+          onAddPane={handleAddPane}
+          onKillPane={handleKillPane}
+          onOpenSession={handleOpenSession}
+          onSwapPane={handleSwapPane}
+          onReorderCards={handleReorderCards}
+        />
 
-          {filteredSessions.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              env={env}
-              selectedTerminal={selectedTerminal}
-              renamingSession={renamingSession}
-              renamedName={renamedName}
-              terminalIconUrls={terminalIconUrls}
-              onRenameStart={(name) => {
-                setRenamingSession(name);
-                setRenamedName(name);
-              }}
-              onRenameChange={setRenamedName}
-              onRenameCommit={handleRename}
-              onKill={handleKill}
-              onAddPane={handleAddPane}
-              onKillPane={handleKillPane}
-              onOpenSession={handleOpenSession}
-            />
-          ))}
-        </div>
         {filteredSessions.length === 0 && search && (
           <div className="text-center text-xs text-slate-400 mt-4 font-mono animate-fade-in-up">
             {t("empty.title")}

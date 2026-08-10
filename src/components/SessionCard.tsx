@@ -1,6 +1,7 @@
+import { useState, useRef } from "react";
 import { Plus, Zap } from "lucide-react";
 import { t, translateName } from "../i18n";
-import { Environment, TmuxSession } from "../types";
+import { Environment, TmuxPane, TmuxSession } from "../types";
 
 interface SessionCardProps {
   session: TmuxSession;
@@ -9,6 +10,8 @@ interface SessionCardProps {
   renamingSession: string | null;
   renamedName: string;
   terminalIconUrls: Record<string, string>;
+  isDraggingCard?: boolean;
+  isCardDragOverTarget?: boolean;
   onRenameStart: (name: string) => void;
   onRenameChange: (val: string) => void;
   onRenameCommit: (oldName: string) => void;
@@ -16,6 +19,12 @@ interface SessionCardProps {
   onAddPane: (name: string) => void;
   onKillPane: (id: string) => void;
   onOpenSession: (name: string, termId: string) => void;
+  onSwapPane: (paneIdA: string, paneIdB: string) => void;
+  onCardDragStart?: (e: React.DragEvent, sessionId: string) => void;
+  onCardDragOver?: (e: React.DragEvent, sessionId: string) => void;
+  onCardDragLeave?: (e: React.DragEvent, sessionId: string) => void;
+  onCardDrop?: (e: React.DragEvent, sessionId: string) => void;
+  onCardDragEnd?: (e: React.DragEvent) => void;
 }
 
 export function getSessionActivityInfo(session: TmuxSession) {
@@ -53,6 +62,8 @@ export function SessionCard({
   renamingSession,
   renamedName,
   terminalIconUrls,
+  isDraggingCard,
+  isCardDragOverTarget,
   onRenameStart,
   onRenameChange,
   onRenameCommit,
@@ -60,6 +71,12 @@ export function SessionCard({
   onAddPane,
   onKillPane,
   onOpenSession,
+  onSwapPane,
+  onCardDragStart,
+  onCardDragOver,
+  onCardDragLeave,
+  onCardDrop,
+  onCardDragEnd,
 }: SessionCardProps) {
   const isRenaming = renamingSession === session.name;
   const mainCmds = session.panes.map((p) => p.command).filter(Boolean);
@@ -67,6 +84,11 @@ export function SessionCard({
     mainCmds.some((c) => c.includes(a.id) || (a.path && c.includes(a.path)))
   );
   const activityInfo = getSessionActivityInfo(session);
+
+  // Pane drag state inside card
+  const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null);
+  const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
+  const isPaneDraggingRef = useRef(false);
 
   const gridCols =
     session.panes_count === 1
@@ -77,10 +99,81 @@ export function SessionCard({
       ? "grid-cols-3"
       : "grid-cols-2";
 
+  // Handlers for Pane Drag & Drop (inner-card)
+  const handlePaneDragStart = (e: React.DragEvent, pane: TmuxPane) => {
+    if (session.panes_count <= 1) return;
+    e.stopPropagation();
+    isPaneDraggingRef.current = true;
+    setDraggingPaneId(pane.id);
+    e.dataTransfer.setData(
+      "application/x-tmuxdeck-pane",
+      JSON.stringify({ sessionId: session.id, paneId: pane.id })
+    );
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handlePaneDragOver = (e: React.DragEvent, pane: TmuxPane) => {
+    if (!isPaneDraggingRef.current || session.panes_count <= 1) return;
+    if (draggingPaneId && draggingPaneId !== pane.id) {
+      e.stopPropagation();
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOverPaneId(pane.id);
+    }
+  };
+
+  const handlePaneDragLeave = (e: React.DragEvent, pane: TmuxPane) => {
+    e.stopPropagation();
+    if (dragOverPaneId === pane.id) {
+      setDragOverPaneId(null);
+    }
+  };
+
+  const handlePaneDrop = (e: React.DragEvent, targetPane: TmuxPane) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDragOverPaneId(null);
+    setDraggingPaneId(null);
+    isPaneDraggingRef.current = false;
+
+    const rawData = e.dataTransfer.getData("application/x-tmuxdeck-pane");
+    if (!rawData) return;
+
+    try {
+      const data = JSON.parse(rawData);
+      if (data.sessionId === session.id && data.paneId !== targetPane.id) {
+        onSwapPane(data.paneId, targetPane.id);
+      }
+    } catch (err) {
+      console.error("Pane drop error", err);
+    }
+  };
+
+  const handlePaneDragEnd = (e: React.DragEvent) => {
+    e.stopPropagation();
+    setDraggingPaneId(null);
+    setDragOverPaneId(null);
+    isPaneDraggingRef.current = false;
+  };
+
   return (
-    <div className="flex flex-col justify-between rounded-2xl bg-white/10 backdrop-blur-xl border border-white/15 hover:border-cyan-500/50 transition-all duration-300 shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15 group animate-fade-in-up">
+    <div
+      draggable={!isRenaming}
+      onDragStart={(e) => !isPaneDraggingRef.current && onCardDragStart?.(e, session.id)}
+      onDragOver={(e) => !isPaneDraggingRef.current && onCardDragOver?.(e, session.id)}
+      onDragLeave={(e) => !isPaneDraggingRef.current && onCardDragLeave?.(e, session.id)}
+      onDrop={(e) => !isPaneDraggingRef.current && onCardDrop?.(e, session.id)}
+      onDragEnd={(e) => !isPaneDraggingRef.current && onCardDragEnd?.(e)}
+      className={`flex flex-col justify-between rounded-2xl bg-white/10 backdrop-blur-xl border transition-all duration-300 shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15 group animate-fade-in-up ${
+        isDraggingCard
+          ? "opacity-40 border-cyan-500/70 scale-95 cursor-grabbing"
+          : isCardDragOverTarget
+          ? "border-cyan-400 bg-cyan-500/20 shadow-cyan-500/20 scale-[1.02]"
+          : "border-white/15 hover:border-cyan-500/50"
+      }`}
+    >
       {/* Card Header */}
-      <div className="p-4 border-b border-white/10">
+      <div className="p-4 border-b border-white/10 cursor-grab active:cursor-grabbing">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 min-w-0 flex-1">
             <span
@@ -98,7 +191,8 @@ export function SessionCard({
                   e.key === "Enter" && onRenameCommit(session.name)
                 }
                 autoFocus
-                className="bg-slate-950 px-2 py-0.5 border border-cyan-500 rounded text-sm text-white w-full"
+                className="bg-slate-950 px-2 py-0.5 border border-cyan-500 rounded text-sm text-white w-full cursor-text"
+                onDragStart={(e) => e.stopPropagation()}
               />
             ) : (
               <h2
@@ -153,23 +247,39 @@ export function SessionCard({
               pane.content && pane.content.trim().length > 0
             );
 
+            const isThisPaneDragging = draggingPaneId === pane.id;
+            const isThisPaneDragOver = dragOverPaneId === pane.id;
+            const isPaneDraggable = session.panes_count > 1;
+
             return (
               <div
                 key={pane.id || idx}
-                className={`relative group/pane flex flex-col justify-between p-2 rounded-lg border text-[11px] min-h-[4.5rem] transition ${
-                  hasContent
+                draggable={isPaneDraggable}
+                onDragStart={(e) => handlePaneDragStart(e, pane)}
+                onDragOver={(e) => handlePaneDragOver(e, pane)}
+                onDragLeave={(e) => handlePaneDragLeave(e, pane)}
+                onDrop={(e) => handlePaneDrop(e, pane)}
+                onDragEnd={handlePaneDragEnd}
+                className={`relative group/pane flex flex-col justify-between p-2 rounded-lg border text-[11px] min-h-[4.5rem] transition-all duration-200 ${
+                  isPaneDraggable ? "cursor-grab active:cursor-grabbing" : ""
+                } ${
+                  isThisPaneDragging
+                    ? "opacity-30 border-cyan-500 border-dashed scale-95"
+                    : isThisPaneDragOver
+                    ? "border-cyan-400 bg-cyan-500/30 shadow-sm shadow-cyan-500/30 scale-[1.03]"
+                    : hasContent
                     ? "bg-slate-950/90 border-slate-700/80 text-slate-200"
                     : isAgent
                     ? "bg-cyan-950/30 border-cyan-800/40 text-cyan-300"
                     : "bg-slate-900/60 border-slate-800 text-slate-400"
                 }`}
               >
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center justify-between mb-1 select-none pointer-events-none">
                   <span className="font-mono text-[9px] text-slate-500">
                     #{idx + 1}{" "}
                     {matchedAgent ? `· ${translateName(matchedAgent.name)}` : ""}
                   </span>
-                  <div className="flex items-center space-x-1">
+                  <div className="flex items-center space-x-1 pointer-events-auto">
                     {session.panes_count > 1 && (
                       <button
                         onClick={(e) => {
@@ -192,7 +302,7 @@ export function SessionCard({
                     {pane.content}
                   </pre>
                 ) : (
-                  <span className="font-mono truncate font-medium">
+                  <span className="font-mono truncate font-medium pointer-events-none select-none">
                     {matchedAgent ? translateName(matchedAgent.name) : cmdName}
                   </span>
                 )}

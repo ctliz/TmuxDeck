@@ -18,11 +18,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
 dirs = "5"
 sys-locale = "0.3"
+# v1.14 手机端 WebSocket 传输：
+# tokio 已在依赖树（tauri 传递），这里补齐 net/time features 并显式声明使用；
+# futures-util / getrandom 同样已在树中，不引入新下载。
+tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread", "sync", "io-util"] }
+tokio-tungstenite = "0.30"
+futures-util = "0.3"
+getrandom = "0.2"
 
