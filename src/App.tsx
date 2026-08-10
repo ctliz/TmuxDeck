@@ -59,6 +59,7 @@ interface TmuxSession {
   panes_count: number;
   attached: boolean;
   created_at: string;
+  last_active_ts: number;
   panes: TmuxPane[];
 }
 
@@ -90,6 +91,55 @@ export default function App() {
 
   // Terminal Selector Menu
   const [activeTerminalDropdown, setActiveTerminalDropdown] = useState<string | null>(null);
+
+  const getSessionActivityInfo = (session: TmuxSession) => {
+    if (session.attached) {
+      return {
+        statusClass: "bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse",
+        statusTooltip: t("card.attached"),
+        text: t("card.activeState"),
+      };
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const elapsed = session.last_active_ts > 0 ? Math.max(0, now - session.last_active_ts) : -1;
+
+    if (elapsed >= 0 && elapsed < 600) {
+      let timeText = "";
+      if (elapsed < 60) {
+        timeText = t("card.lastActive_now");
+      } else if (elapsed < 3600) {
+        timeText = t("card.lastActive", { time: `${Math.floor(elapsed / 60)}m` });
+      } else if (elapsed < 86400) {
+        timeText = t("card.lastActive", { time: `${Math.floor(elapsed / 3600)}h` });
+      } else {
+        timeText = t("card.lastActive", { time: `${Math.floor(elapsed / 86400)}d` });
+      }
+
+      return {
+        statusClass: "bg-amber-400 shadow-sm shadow-amber-400/80",
+        statusTooltip: t("card.bgActive"),
+        text: timeText,
+      };
+    }
+
+    let idleText = t("card.idle");
+    if (elapsed >= 600) {
+      if (elapsed < 3600) {
+        idleText = t("card.lastActive", { time: `${Math.floor(elapsed / 60)}m` });
+      } else if (elapsed < 86400) {
+        idleText = t("card.lastActive", { time: `${Math.floor(elapsed / 3600)}h` });
+      } else {
+        idleText = t("card.lastActive", { time: `${Math.floor(elapsed / 86400)}d` });
+      }
+    }
+
+    return {
+      statusClass: "bg-slate-600",
+      statusTooltip: t("card.idle"),
+      text: idleText,
+    };
+  };
 
   const sanitizeNameFrontend = (name: string): string => {
     return name
@@ -464,6 +514,7 @@ export default function App() {
               const isAgentActive = env?.agents.some((a) =>
                 mainCmds.some((c) => c.includes(a.id) || (a.path && c.includes(a.path)))
               );
+              const activityInfo = getSessionActivityInfo(session);
 
               const gridCols =
                 session.panes_count === 1
@@ -484,12 +535,8 @@ export default function App() {
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
                         <span
-                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                            session.attached
-                              ? "bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse"
-                              : "bg-slate-600"
-                          }`}
-                          title={session.attached ? t("card.attached") : t("card.idle")}
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
+                          title={activityInfo.statusTooltip}
                         />
                         {isRenaming ? (
                           <input
@@ -531,7 +578,7 @@ export default function App() {
 
                     <div className="flex items-center justify-between text-xs text-slate-400">
                       <span>{tPlural("card.windows", session.windows_count)} · {tPlural("card.panes", session.panes_count)}</span>
-                      <span>{session.created_at}</span>
+                      <span>{activityInfo.text}</span>
                     </div>
                   </div>
 

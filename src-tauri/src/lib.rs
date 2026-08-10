@@ -69,6 +69,7 @@ pub struct TmuxSession {
     pub panes_count: usize,
     pub attached: bool,
     pub created_at: String,
+    pub last_active_ts: i64,
     pub panes: Vec<TmuxPane>,
 }
 
@@ -572,7 +573,7 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     let output = run_tmux(&[
         "list-sessions",
         "-F",
-        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}",
+        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}|#{session_activity}",
     ])
     .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
 
@@ -589,12 +590,13 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
 
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() >= 5 {
+        if parts.len() >= 6 {
             let id = parts[0].to_string();
             let name = parts[1].to_string();
             let windows_count = parts[2].parse::<usize>().unwrap_or(1);
             let attached = parts[3] == "1";
             let created_ts = parts[4].parse::<i64>().unwrap_or(0);
+            let last_active_ts = parts[5].parse::<i64>().unwrap_or(0);
 
             let created_at = if created_ts > 0 {
                 let datetime =
@@ -627,6 +629,7 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
                 panes_count,
                 attached,
                 created_at,
+                last_active_ts,
                 panes,
             });
         }
