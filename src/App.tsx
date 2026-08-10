@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -66,6 +66,13 @@ interface TmuxSession {
 
 export default function App() {
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
+
+  // Refs shared between loadData (4s refresh) and the capture timer (8s).
+  // sessionsRef avoids stale closures in setInterval; failedPaneCountsRef is
+  // reset on every successful session refresh so a pane that briefly failed
+  // 3 times recovers instead of being disabled forever.
+  const sessionsRef = useRef<TmuxSession[]>([]);
+  const failedPaneCountsRef = useRef(new Map<string, number>());
   const [env, setEnv] = useState<Environment | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [search, setSearch] = useState("");
@@ -161,7 +168,6 @@ export default function App() {
       ]);
       setEnv(envData);
       setConfig(cfgData);
-
       setSessions((prevSessions) => {
         return sessionList.map((newSess) => {
           const oldSess = prevSessions.find((s) => s.id === newSess.id || s.name === newSess.name);
@@ -196,6 +202,11 @@ export default function App() {
       if (cfgData.default_panes) {
         setSelectedPanes(cfgData.default_panes);
       }
+
+      // Successful refresh: keep the ref snapshot fresh and reset the
+      // per-pane circuit breaker so recovered panes resume capture.
+      sessionsRef.current = sessionList;
+      failedPaneCountsRef.current.clear();
     } catch (err: any) {
       setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
     } finally {
@@ -209,47 +220,44 @@ export default function App() {
       loadData();
     }, 4000);
 
-    const failedPaneCounts = new Map<string, number>();
-
     const captureTimer = setInterval(() => {
       if (document.visibilityState !== "visible") {
         return; // Pause capture when tab or app window is hidden/minimized
       }
 
-      setSessions((currentSessions) => {
-        if (currentSessions.length === 0) return currentSessions;
+      const current = sessionsRef.current;
+      if (current.length === 0) return;
+      const failedPaneCounts = failedPaneCountsRef.current;
 
-        currentSessions.forEach(async (sess) => {
-          for (const pane of sess.panes) {
-            const failCount = failedPaneCounts.get(pane.id) || 0;
-            if (failCount >= 3) continue;
+      for (const sess of current) {
+        for (const pane of sess.panes) {
+          const failCount = failedPaneCounts.get(pane.id) || 0;
+          if (failCount >= 3) continue;
 
-            try {
-              const content = await invoke<string>("capture_pane", {
-                paneId: pane.id,
-                maxLines: 5,
-              });
-
-              setSessions((prev) =>
-                prev.map((s) => {
-                  if (s.id !== sess.id) return s;
-                  return {
-                    ...s,
-                    panes: s.panes.map((p) =>
-                      p.id === pane.id ? { ...p, content } : p
-                    ),
-                  };
-                })
-              );
+          invoke<string>("capture_pane", {
+            paneId: pane.id,
+            maxLines: 5,
+          })
+            .then((content) => {
               failedPaneCounts.set(pane.id, 0);
-            } catch (err) {
+              setSessions((prev) =>
+                prev.map((s) =>
+                  s.id === sess.id
+                    ? {
+                        ...s,
+                        panes: s.panes.map((p) =>
+                          p.id === pane.id ? { ...p, content } : p
+                        ),
+                      }
+                    : s
+                )
+              );
+            })
+            .catch(() => {
               failedPaneCounts.set(pane.id, failCount + 1);
-            }
-          }
-        });
-
-        return currentSessions;
-      });
+            });
+        }
+      }
     }, 8000);
 
     return () => {
