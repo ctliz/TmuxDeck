@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
   ChevronDown,
+  Settings,
 } from "lucide-react";
 
 interface ToolInfo {
@@ -31,11 +32,16 @@ interface Environment {
   agents: ToolInfo[];
 }
 
+interface CustomAgent {
+  name: string;
+  command: string;
+}
+
 interface Config {
   default_terminal: string;
   default_agent: string;
   default_panes: number;
-  custom_agent?: { name: string; command: string };
+  custom_agent?: CustomAgent;
   recent_dirs: string[];
 }
 
@@ -72,12 +78,25 @@ export default function App() {
   const [selectedPanes, setSelectedPanes] = useState(4);
   const [selectedTerminal, setSelectedTerminal] = useState("ghostty");
 
+  // Custom Agent Inline Form State
+  const [showCustomAgentForm, setShowCustomAgentForm] = useState(false);
+  const [customAgentName, setCustomAgentName] = useState("");
+  const [customAgentCmd, setCustomAgentCmd] = useState("");
+
   // Rename State
   const [renamingSession, setRenamingSession] = useState<string | null>(null);
   const [renamedName, setRenamedName] = useState("");
 
-  // Terminal Selector Menu for Opening Existing Sessions
+  // Terminal Selector Menu
   const [activeTerminalDropdown, setActiveTerminalDropdown] = useState<string | null>(null);
+
+  const sanitizeNameFrontend = (name: string): string => {
+    return name
+      .trim()
+      .replace(/[^A-Za-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -92,7 +111,11 @@ export default function App() {
       setConfig(cfgData);
       setSessions(sessionList);
 
-      // Set initial defaults from config / env if not set
+      if (cfgData.custom_agent) {
+        setCustomAgentName(cfgData.custom_agent.name || "");
+        setCustomAgentCmd(cfgData.custom_agent.command || "");
+      }
+
       if (cfgData.default_terminal && envData.terminals.some((t) => t.id === cfgData.default_terminal)) {
         setSelectedTerminal(cfgData.default_terminal);
       } else if (envData.terminals.length > 0) {
@@ -138,6 +161,37 @@ export default function App() {
     }
   };
 
+  const handleSaveCustomAgent = async () => {
+    if (!customAgentCmd.trim()) {
+      alert("请输入自定义 Agent 执行命令 (例如: claude --model opus)");
+      return;
+    }
+    const newCustom: CustomAgent = {
+      name: customAgentName.trim() || "自定义 Agent",
+      command: customAgentCmd.trim(),
+    };
+    try {
+      const currentConfig = config || {
+        default_terminal: selectedTerminal,
+        default_agent: "custom",
+        default_panes: selectedPanes,
+        recent_dirs: [],
+      };
+      const updatedConfig: Config = {
+        ...currentConfig,
+        custom_agent: newCustom,
+      };
+      await invoke("save_config", { config: updatedConfig });
+      const envData = await invoke<Environment>("detect_environment");
+      setEnv(envData);
+      setConfig(updatedConfig);
+      setSelectedAgent("custom");
+      setShowCustomAgentForm(false);
+    } catch (err: any) {
+      alert("保存自定义 Agent 失败: " + err);
+    }
+  };
+
   const handleOpenSession = async (sessionName: string, termId?: string) => {
     const targetTerminal = termId || selectedTerminal || (env?.terminals[0]?.id || "terminal");
     try {
@@ -149,15 +203,16 @@ export default function App() {
   };
 
   const handleCreate = async () => {
-    if (!newSessionName.trim()) {
-      alert("请输入项目名称");
+    const cleanName = sanitizeNameFrontend(newSessionName);
+    if (!cleanName) {
+      alert("请输入有效的项目名称 (支持字母、数字、下划线和连字符)");
       return;
     }
     setLoading(true);
     try {
       await invoke("create_session", {
         opts: {
-          name: newSessionName.trim(),
+          name: cleanName,
           dir: workingDir.trim() || null,
           agentId: selectedAgent,
           panes: selectedPanes,
@@ -186,12 +241,13 @@ export default function App() {
   };
 
   const handleRename = async (oldName: string) => {
-    if (!renamedName.trim() || renamedName === oldName) {
+    const cleanNew = sanitizeNameFrontend(renamedName);
+    if (!cleanNew || cleanNew === oldName) {
       setRenamingSession(null);
       return;
     }
     try {
-      await invoke("rename_session", { oldName, newName: renamedName.trim() });
+      await invoke("rename_session", { oldName, newName: cleanNew });
       setRenamingSession(null);
       await loadData();
     } catch (err: any) {
@@ -209,7 +265,7 @@ export default function App() {
     s.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  // 硬阻断：当系统缺失 tmux 时，全屏引导
+  // 硬阻断：当系统缺失 tmux 时全屏引导
   if (env && env.tmux === null) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-100 p-6 select-none">
@@ -227,7 +283,7 @@ export default function App() {
             <span className="text-cyan-400">brew install tmux</span>
             <button
               onClick={copyBrewCommand}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center space-x-1"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center space-x-1 cursor-pointer"
             >
               {copiedBrew ? (
                 <>
@@ -359,21 +415,18 @@ export default function App() {
               className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-cyan-400 text-sm font-medium transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>立即新建工作区</span>
+              <span>矢量新建工作区</span>
             </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {filteredSessions.map((session) => {
               const isRenaming = renamingSession === session.name;
-
-              // 分析 Pane 里的主要命令名
               const mainCmds = session.panes.map((p) => p.command).filter(Boolean);
               const isAgentActive = env?.agents.some((a) =>
                 mainCmds.some((c) => c.includes(a.id) || (a.path && c.includes(a.path)))
               );
 
-              // 确定 preview 格子列数
               const gridCols =
                 session.panes_count === 1
                   ? "grid-cols-1"
@@ -381,7 +434,7 @@ export default function App() {
                   ? "grid-cols-2"
                   : session.panes_count === 6
                   ? "grid-cols-3"
-                  : "grid-cols-2"; // 4 个默认 2x2
+                  : "grid-cols-2";
 
               return (
                 <div
@@ -495,7 +548,6 @@ export default function App() {
                         <span>打开 ({currentTerminalObj?.name || "终端"})</span>
                       </button>
 
-                      {/* 多终端快速切换按钮 */}
                       {env && env.terminals.length > 1 && (
                         <button
                           onClick={() =>
@@ -511,7 +563,6 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* 终端选择下拉单 */}
                     {activeTerminalDropdown === session.name && (
                       <div className="absolute right-3 bottom-14 z-20 w-44 rounded-xl bg-slate-900 border border-slate-700 shadow-xl py-1">
                         <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 border-b border-slate-800">
@@ -539,7 +590,7 @@ export default function App() {
         )}
       </main>
 
-      {/* 新建项目 Modal (PRD 4.3 极简 Segmented Chips) */}
+      {/* 新建项目 Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl p-6">
@@ -571,6 +622,11 @@ export default function App() {
                   onChange={(e) => setNewSessionName(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
+                {newSessionName && sanitizeNameFrontend(newSessionName) !== newSessionName && (
+                  <p className="text-[10px] text-amber-400 mt-1">
+                    提示: 名称将自动规范化为 <code className="font-mono">{sanitizeNameFrontend(newSessionName)}</code>
+                  </p>
+                )}
               </div>
 
               {/* 工作目录与系统选择器 */}
@@ -599,7 +655,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* 常用目录 Chips */}
                 {config && config.recent_dirs && config.recent_dirs.length > 0 && (
                   <div className="flex items-center space-x-1.5 mt-2 flex-wrap gap-y-1">
                     <span className="text-[10px] text-slate-500">最近历史:</span>
@@ -618,12 +673,14 @@ export default function App() {
                 )}
               </div>
 
-              {/* Agent 选择 (如仅1候选则整行隐藏) */}
-              {env && env.agents.length > 1 && (
+              {/* Agent 选择 Segmented Chips */}
+              {env && (
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                    Agent 引擎
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-medium text-slate-400">
+                      Agent 引擎
+                    </label>
+                  </div>
                   <div className="flex items-center space-x-2 flex-wrap gap-y-2">
                     {env.agents.map((agent) => {
                       const isSelected = selectedAgent === agent.id;
@@ -631,18 +688,91 @@ export default function App() {
                         <button
                           key={agent.id}
                           type="button"
-                          onClick={() => setSelectedAgent(agent.id)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                          onClick={() => {
+                            setSelectedAgent(agent.id);
+                            setShowCustomAgentForm(false);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer flex items-center space-x-1 ${
                             isSelected
                               ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
                               : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
                           }`}
                         >
-                          {agent.name}
+                          <span>{agent.name}</span>
+                          {agent.id === "custom" && (
+                            <Settings
+                              className="w-3 h-3 ml-1 opacity-75 hover:opacity-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowCustomAgentForm(true);
+                              }}
+                            />
+                          )}
                         </button>
                       );
                     })}
+
+                    {/* + 自定义 Chip 按钮 */}
+                    {!env.agents.some((a) => a.id === "custom") && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomAgentForm(!showCustomAgentForm)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border border-dashed transition cursor-pointer ${
+                          showCustomAgentForm
+                            ? "bg-cyan-950 border-cyan-500 text-cyan-300"
+                            : "border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+                        }`}
+                      >
+                        + 自定义
+                      </button>
+                    )}
                   </div>
+
+                  {/* 自定义 Agent 行内编辑面板 (PRD 2.3) */}
+                  {showCustomAgentForm && (
+                    <div className="mt-3 p-3 rounded-xl bg-slate-950 border border-cyan-900/60 space-y-3">
+                      <div className="text-xs font-semibold text-cyan-400 flex items-center justify-between">
+                        <span>配置自定义 Agent 命令</span>
+                        <button
+                          onClick={() => setShowCustomAgentForm(false)}
+                          className="text-slate-500 hover:text-slate-300 text-xs"
+                        >
+                          收起
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-1">显示名称 (可选)</label>
+                          <input
+                            type="text"
+                            placeholder="如: Claude Opus"
+                            value={customAgentName}
+                            onChange={(e) => setCustomAgentName(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-1">执行命令 *</label>
+                          <input
+                            type="text"
+                            placeholder="如: claude --model opus"
+                            value={customAgentCmd}
+                            onChange={(e) => setCustomAgentCmd(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSaveCustomAgent}
+                          className="px-3 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium transition cursor-pointer"
+                        >
+                          保存并设定
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
