@@ -22,7 +22,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Setup Rust
@@ -35,6 +35,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run Frontend Tests
+        run: npm test
+
+      - name: Run Rust Tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build (no bundle)
         run: npm run tauri build -- --no-bundle

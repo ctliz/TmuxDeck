@@ -14,6 +14,7 @@ import {
   Settings,
 } from "lucide-react";
 import { t, tPlural, translateName, translateError } from "./i18n";
+import { sanitizeNameFrontend } from "./utils";
 
 interface ToolInfo {
   id: string;
@@ -136,14 +137,6 @@ export default function App() {
       statusClass: "bg-slate-600",
       statusTooltip: t("card.idle"),
     };
-  };
-
-  const sanitizeNameFrontend = (name: string): string => {
-    return name
-      .trim()
-      .replace(/[^A-Za-z0-9_-]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+|-+$/g, "");
   };
 
   const loadData = async () => {

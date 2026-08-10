@@ -1155,3 +1155,60 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_session_name() {
+        assert_eq!(sanitize_session_name(""), Err("ERR_NAME_EMPTY".to_string()));
+        assert_eq!(sanitize_session_name("   "), Err("ERR_NAME_EMPTY".to_string()));
+
+        assert_eq!(sanitize_session_name("foo@bar#baz!"), Ok("foo-bar-baz".to_string()));
+        assert_eq!(sanitize_session_name("  hello   world  "), Ok("hello-world".to_string()));
+
+        let long_name = "a".repeat(70);
+        let result = sanitize_session_name(&long_name).unwrap();
+        assert_eq!(result.len(), 60);
+        assert_eq!(result, "a".repeat(60));
+
+        assert_eq!(sanitize_session_name("---"), Err("ERR_NAME_INVALID".to_string()));
+        assert_eq!(sanitize_session_name("!!!"), Err("ERR_NAME_INVALID".to_string()));
+    }
+
+    #[test]
+    fn test_validate_pane_id() {
+        assert!(validate_pane_id("%123"));
+        assert!(validate_pane_id("%0"));
+
+        assert!(!validate_pane_id("%abc"));
+        assert!(!validate_pane_id(""));
+        assert!(!validate_pane_id("123"));
+        assert!(!validate_pane_id("%"));
+    }
+
+    #[test]
+    fn test_strip_ansi() {
+        assert_eq!(strip_ansi("\x1b[31mHello\x1b[0m"), "Hello");
+        assert_eq!(strip_ansi("\x1b[1m\x1b[32mNested\x1b[0m"), "Nested");
+        assert_eq!(strip_ansi("Plain text"), "Plain text");
+    }
+
+    #[test]
+    fn test_run_tmux_smoke() {
+        if check_tmux_installed().is_some() {
+            let res = run_tmux(&["list-sessions"]);
+            assert!(res.is_ok(), "run_tmux failed to execute command");
+            let output = res.unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // tmux exits non-zero when no server is running yet; both outcomes are valid.
+            assert!(
+                output.status.success() || stderr.contains("no server running"),
+                "tmux should either succeed or report no server running, stderr: {}",
+                stderr
+            );
+        }
+    }
+}
+
