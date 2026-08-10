@@ -18,38 +18,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat <<'EOF' > /tmp/release-notes.md
-          ## TmuxDeck v1.7.0
+          ## TmuxDeck v1.7.1
 
-          Since v1.6.0, five feature increments shipped in one release: a menu bar presence with full session control, real terminal brand icons, a streamlined card header, pane-level management, and duplicate-window protection. This is the largest quality-of-life release since Liquid Glass.
+          A patch release fixing a critical bug: workspace creation failed on all released builds since v1.1.
 
-          ### Menu bar presence
+          ### Fix
 
-          TmuxDeck now lives in the menu bar. Close the window and it keeps running - the tray icon shows the active workspace, and the menu lets you open any session, add a pane, or create a new one without opening the main window.
-
-          - Active workspace section: opens in your default terminal, adds a pane, shows last activity.
-          - Full session list sorted by activity (attached first, then most recently used), up to 8 shown with a "view all" entry.
-          - The tray menu follows the system language (English / Simplified Chinese) and refreshes every 5 seconds.
-
-          ### Terminal brand icons
-
-          Each card's footer is now a row of real terminal icons (extracted from each installed app bundle at runtime, with built-in SVG fallbacks). One click opens the session in that terminal - no more dropdown. The default terminal is highlighted.
-
-          ### Streamlined card header
-
-          Card headers are now just a status dot, a click-to-rename name, and a close button. The hover-only rename/delete buttons and the "X windows - Y panes" statistics line are gone.
-
-          ### Pane-level management
-
-          Workspaces are no longer all-or-nothing. Hover a pane preview tile to kill just that pane (with confirmation; hidden when the session has a single pane), or click "Add pane" to grow the grid - each new pane inherits the session's working directory.
-
-          ### Duplicate-window protection
-
-          Clicking a session that is already attached no longer spawns another terminal window. TmuxDeck focuses the existing window instead - precisely via window title on macOS (falls back to activating the terminal app), and via AppActivate on Windows.
-
-          ### Fixes
-
-          - Tray menu labels are now localized (previously hard-coded English).
-          - Removed dead activity-text computation and orphaned i18n keys after the header cleanup.
+          - **Workspace creation works again.** The create dialog sent `agentId` / `terminalId` while the backend expected `agent_id` / `terminal_id`, so `create_session` failed with `missing field 'agent_id'` and no workspace could be created. Field names are now aligned to snake_case, matching every other frontend/backend structure.
 
           ### Install
 
