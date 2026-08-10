@@ -1253,8 +1253,8 @@ mod tests {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // tmux exits non-zero when no server is running yet; both outcomes are valid.
             assert!(
-                output.status.success() || stderr.contains("no server running"),
-                "tmux should either succeed or report no server running, stderr: {}",
+                output.status.success() || is_no_server_err(&stderr),
+                "tmux should either succeed or report no server, stderr: {}",
                 stderr
             );
         }
