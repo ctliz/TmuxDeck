@@ -8,6 +8,7 @@
 
 给你的 AI 编码 Agent 一个看得见的控制台 —— 点一下，多个 Agent 就在分屏里跑起来了。
 
+[![Build](https://github.com/ctliz/TmuxDeck/actions/workflows/build.yml/badge.svg)](https://github.com/ctliz/TmuxDeck/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-black)
 [![Release](https://img.shields.io/github/v/release/ctliz/TmuxDeck?color=black)](https://github.com/ctliz/TmuxDeck/releases)
