@@ -1,8 +1,10 @@
 use tauri::Emitter;
 
 mod bridge;
+mod bridge_state;
 mod commands;
 mod config;
+mod connection;
 mod engine;
 mod intercom;
 mod models;
@@ -13,6 +15,7 @@ mod transport;
 mod tray;
 
 pub use bridge::*;
+pub use bridge_state::*;
 pub use commands::*;
 pub use config::*;
 pub use engine::*;
@@ -42,7 +45,7 @@ pub fn run() {
                 use tauri::Manager;
 
                 // v1.14：启动桥接引擎（WebSocket 传输 + intercom 接入 + 对话表维护）
-                let bridge_state = crate::engine::spawn_bridge();
+                let bridge_state = crate::bridge_state::spawn_bridge();
                 app.manage(bridge_state);
 
                 let handle = app.handle().clone();

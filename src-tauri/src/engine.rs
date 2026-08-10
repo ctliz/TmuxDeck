@@ -18,13 +18,14 @@ use crate::bridge::{
     deliver, forward, ClientCommand, ClientEvent, ConversationRegistry, ConversationStatus,
     TranscriptSource, Transport, Turn, TurnRole,
 };
+use crate::bridge_state::BridgeState;
 use crate::intercom::{broker_available, IntercomClient, IntercomEvent};
 use crate::tmux::{list_all_panes, send_key_name, validate_pane_id};
 use crate::transcript::CompositeTranscriptSource;
 use crate::transport::WsTransport;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// 常规轮询间隔；有对话在等人/思考时加密。
@@ -32,28 +33,6 @@ pub const POLL_NORMAL: Duration = Duration::from_secs(2);
 pub const POLL_FAST: Duration = Duration::from_millis(500);
 /// intercom 事件与手机指令的阻塞等待上限（保证周期刷新不被饿死）。
 pub const POLL_TICK: Duration = Duration::from_millis(200);
-
-/// 暴露给桌面端 UI 的共享状态（engine 更新，UI 读取）。
-pub struct BridgeState {
-    /// WebSocket 监听地址与 token（配对用，启动后填充）
-    pub ws_addr: Mutex<Option<String>>,
-    pub ws_token: Mutex<Option<String>>,
-    /// 最近一次对话表快照（engine 周期更新）
-    pub conversations: Mutex<Vec<crate::bridge::Conversation>>,
-    /// broker 是否已接入
-    pub broker_connected: Mutex<bool>,
-}
-
-impl Default for BridgeState {
-    fn default() -> Self {
-        Self {
-            ws_addr: Mutex::new(None),
-            ws_token: Mutex::new(None),
-            conversations: Mutex::new(Vec::new()),
-            broker_connected: Mutex::new(false),
-        }
-    }
-}
 
 /// 引擎本体。单线程事件循环，持有所需的全部可变状态。
 pub struct BridgeEngine {
@@ -398,38 +377,6 @@ impl BridgeEngine {
 }
 
 /// 供 Tauri setup 调用：把引擎 spawn 到后台线程。
-pub fn spawn_bridge() -> Arc<BridgeState> {
-    let state = Arc::new(BridgeState::default());
-    let s = state.clone();
-    std::thread::spawn(move || BridgeEngine::run(s));
-    state
-}
-
-/// 桌面端 UI 读取配对信息（WebSocket 地址 + token）。
-#[tauri::command]
-pub fn bridge_pairing(state: tauri::State<Arc<BridgeState>>) -> serde_json::Value {
-    let addr = state.ws_addr.lock().ok().and_then(|g| g.clone());
-    let token = state.ws_token.lock().ok().and_then(|g| g.clone());
-    let broker = state.broker_connected.lock().map(|b| *b).unwrap_or(false);
-    serde_json::json!({
-        "addr": addr,
-        "token": token,
-        "brokerConnected": broker,
-    })
-}
-
-/// 桌面端 UI 读取当前对话表快照（与手机端 `conversations` 事件同构）。
-#[tauri::command]
-pub fn bridge_conversations(state: tauri::State<Arc<BridgeState>>) -> Vec<crate::bridge::Conversation> {
-    state
-        .conversations
-        .lock()
-        .map(|g| g.clone())
-        .unwrap_or_default()
-}
-
-// ───── 单元测试（不依赖真实 socket/broker）─────
-
 #[cfg(test)]
 mod tests {
     use super::*;
