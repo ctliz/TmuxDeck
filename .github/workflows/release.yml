@@ -19,27 +19,32 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: TmuxDeck ${{ github.ref_name }}
           body: |
-            ## TmuxDeck v1.5.0
+            ## TmuxDeck v1.6.0
 
-            Since v1.3.0: workspace activity status and live pane previews.
+            A major UI overhaul and the first release with a menu bar presence. Since v1.5.0: Liquid Glass design, a tray icon, terminal brand icons, and pane-level management.
 
-            ### Workspace activity status
+            ### Liquid Glass UI
 
-            Each workspace card shows its state at a glance:
+            The interface was rebuilt around macOS 26-style Liquid Glass: translucent surfaces, soft blur, and smooth transitions. The heavy top bar is gone - a floating, semi-transparent search pill sits at the top.
 
-            - **Active** (green) - a terminal is attached to the session.
-            - **Running in background** (amber) - detached, active within the last 10 minutes.
-            - **Idle** (gray) - detached and quiet for 10+ minutes, with last-activity time.
+            Cards were simplified to the essentials: a status dot, a click-to-rename name, and a close button. The pane grid shows live output tail from each pane.
 
-            ### Live pane previews
+            ### Menu bar (tray) presence
 
-            Preview tiles show the tail of each pane's output in real time (updated every 8s), so you can see what each agent is doing without opening a terminal. Capture pauses when the window is hidden.
+            TmuxDeck now lives in the menu bar. Close the window and it keeps running - click the tray icon to see the active workspace, open any session, add a pane, or create a new one. The tray menu follows the system language (English / Simplified Chinese).
+
+            ### Terminal brand icons
+
+            Each card shows the real icon of every installed terminal (extracted from the app bundle at runtime). One click opens the session in that terminal.
+
+            ### Pane-level management
+
+            Hover a pane to kill just that pane (with confirmation), or click "Add pane" to grow the grid - each new pane inherits the session's working directory.
 
             ### Fixes
 
-            - Missing English i18n keys for activity labels.
-            - Circuit breaker now recovers after session refresh.
-            - Release stays a draft until published.
+            - Tray menu labels are now localized (previously hard-coded English).
+            - Removed dead activity-text computation and orphaned i18n keys.
 
             ### Install
 
