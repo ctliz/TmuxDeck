@@ -469,11 +469,86 @@ fn detect_environment() -> Environment {
     }
 }
 
+fn is_session_attached(session_name: &str) -> bool {
+    if let Ok(out) = run_tmux(&["list-sessions", "-F", "#{session_attached}", "-t", session_name]) {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            return stdout.trim() == "1";
+        }
+    }
+    false
+}
+
 #[tauri::command]
 fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+
+    if is_session_attached(&sanitized_name) {
+        #[cfg(target_os = "windows")]
+        {
+            let ps_script = format!(
+                "(New-Object -ComObject WScript.Shell).AppActivate('{}')",
+                sanitized_name
+            );
+            let _ = Command::new("powershell.exe")
+                .args(["-Command", &ps_script])
+                .status();
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let (proc_name, app_name) = match terminal_id.as_str() {
+                "ghostty" => ("Ghostty", "Ghostty"),
+                "iterm2" => ("iTerm2", "iTerm2"),
+                "terminal" => ("Terminal", "Terminal"),
+                "wezterm" => ("WezTerm", "WezTerm"),
+                "kitty" => ("kitty", "kitty"),
+                "alacritty" => ("Alacritty", "Alacritty"),
+                _ => ("Terminal", "Terminal"),
+            };
+
+            // Strategy C: Precise window focus by session title via System Events
+            let focus_script = format!(
+                "tell application \"System Events\"\n\
+                 tell process \"{}\"\n\
+                 repeat with w in windows\n\
+                 if name of w contains \"{}\" then\n\
+                 set frontmost of process \"{}\" to true\n\
+                 perform action \"AXRaise\" of w\n\
+                 return\n\
+                 end if\n\
+                 end repeat\n\
+                 end tell\n\
+                 end tell",
+                proc_name, sanitized_name, proc_name
+            );
+
+            let status = Command::new("osascript")
+                .args(["-e", &focus_script])
+                .status();
+
+            if let Ok(st) = status {
+                if st.success() {
+                    return Ok(());
+                }
+            }
+
+            // Strategy A: Fallback to activating App
+            let activate_script = format!("tell application \"{}\" to activate", app_name);
+            let status_a = Command::new("osascript")
+                .args(["-e", &activate_script])
+                .status();
+
+            if let Ok(st) = status_a {
+                if st.success() {
+                    return Ok(());
+                }
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
