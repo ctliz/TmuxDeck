@@ -12,7 +12,7 @@ It is built with [Tauri](https://tauri.app/) and runs on macOS. Windows support 
 
 tmux is famously minimal, but that minimalism has a cost: everything lives in your head. Session names, pane layouts, which agent is where. When you manage a handful of workspaces, that is fine. When every project spawns multiple agent conversations and you have dozens going at once, finding the right one becomes the daily bottleneck.
 
-TmuxDeck gives that back to you visually: one click to create, one glance to see everything, one click to get back in. It also lowers the barrier for people who never learned tmux commands — the dashboard is the interface, tmux stays in the background.
+TmuxDeck gives that back to you visually: one click to create, one glance to see everything, one click to get back in. The interface is deliberately minimal — a search field and a grid of cards — so the time between thinking "I need that workspace" and being in it is a single click. It also lowers the barrier for people who never learned tmux commands — the dashboard is the interface, tmux stays in the background.
 
 ## Features
 
