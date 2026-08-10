@@ -104,7 +104,20 @@ pi-intercom broker 客户端，对齐上游 `types.ts` 与 `broker/framing.ts`�
 { "type": "key",     "id": "%3", "key": "Escape" }
 { "type": "forward", "from": "%1", "to": "%3", "text": "…" }
 { "type": "refresh" }
+{ "type": "subscribe",     "id": "%3" }  // 进入某个对话：只推它的 turn
+{ "type": "unsubscribe" }                  // 退出当前对话：停止推 turn
 ```
+
+**订阅规则（v1.14 新增，分诊与内容分离）**：
+
+| 事件 | 推送范围 |
+|---|---|
+| `conversations` / `status-changed` / `awaiting-human` | **全量推**——分诊信息必须全知道 |
+| `turn`（对话内容） | **仅推被订阅的对话**——单活跃订阅，新 `subscribe` 替换旧订阅；`unsubscribe` 清空 |
+
+- 单活跃订阅：手机一次只看一个对话，`subscribe` 新 id 即切换（极简；多路并行查看需改为订阅集合，v1.14 不做）
+- `subscribe` 时服务端立即推一次该对话的 transcript 尾部（增量游标续读的起始快照），否则手机切过去会看到空白
+- **transcript 轮询成本收窄到订阅粒度**：未订阅的对话不跑轮询（十几路输出不费流量/CPU）
 
 `Conversation.status` 取值：`idle` / `thinking` / `running-tool` / `awaiting-human` / `unknown`。
 其中 `awaiting-human` 来自 intercom 消息的 `expectsReply`——**对方正阻塞等你回话**，

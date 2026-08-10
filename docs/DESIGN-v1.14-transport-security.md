@@ -129,8 +129,11 @@
 ```
 
 - 轮询节奏：`has_clients()` 为真时才跑（手机不在线不空转）；
+  **轮询范围收窄到订阅粒度**：只跑 `subscribe` 的对话（`turn` 按订阅推），
+  其余对话不轮询——`status-changed` / `awaiting-human` 全量推不受影响（来自 broker 事件，零轮询成本）；
   有 `awaiting-human` 或对话状态为 `thinking` 的 pane 时加密轮询间隔
   （500ms），其余 2s。
+- `subscribe` 时：立即推一次该对话 transcript 尾部（游标起始快照）；`unsubscribe` 停止该对话轮询。
 - 手机 `say` 的回复送达：经 intercom 有回执（`delivered` 事件）→
   可透传为 `ClientEvent::Delivered`（可选）；send-keys 路径无回执，
   直接显示「已发送」即可。
