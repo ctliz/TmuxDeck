@@ -8,6 +8,12 @@ TmuxDeck turns your tmux sessions into a visual dashboard. Each session is a car
 
 It is built with [Tauri](https://tauri.app/) and runs on macOS. Windows support is in progress.
 
+## Why TmuxDeck
+
+tmux is famously minimal, but that minimalism has a cost: everything lives in your head. Session names, pane layouts, which agent is where. When you manage a handful of workspaces, that is fine. When every project spawns multiple agent conversations and you have dozens going at once, finding the right one becomes the daily bottleneck.
+
+TmuxDeck gives that back to you visually: one click to create, one glance to see everything, one click to get back in. It also lowers the barrier for people who never learned tmux commands — the dashboard is the interface, tmux stays in the background.
+
 ## Features
 
 - **Session overview.** Every tmux session appears as a card with window count, pane count, per-pane commands, and last-activity time.
