@@ -161,6 +161,14 @@ fn tr(key: &str) -> String {
     }
 }
 
+fn is_no_server_err(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    lower.contains("no server running")
+        || lower.contains("error connecting")
+        || lower.contains("failed to connect")
+        || (lower.contains("no such file or directory") && (lower.contains("tmux") || lower.contains("socket") || lower.contains("/tmp/")))
+}
+
 fn sanitize_session_name(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -486,6 +494,15 @@ fn open_session(name: String, terminal_id: String) -> Result<(), String> {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
 
+    if let Ok(out) = run_tmux(&["has-session", "-t", &sanitized_name]) {
+        if !out.status.success() {
+            let err_msg = String::from_utf8_lossy(&out.stderr);
+            if is_no_server_err(&err_msg) {
+                return Err("ERR_TMUX_NO_SERVER".to_string());
+            }
+        }
+    }
+
     if is_session_attached(&sanitized_name) {
         #[cfg(target_os = "windows")]
         {
@@ -677,9 +694,13 @@ fn add_pane(session_name: String) -> Result<(), String> {
 
     let output = run_tmux(&split_args).map_err(|e| format!("ERR_ADD_PANE_FAILED|{}", e))?;
     if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err_msg) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
         return Err(format!(
             "ERR_ADD_PANE_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
+            err_msg
         ));
     }
 
@@ -729,9 +750,13 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
 
     let output = run_tmux(&new_args).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
     if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err_msg) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
         return Err(format!(
             "ERR_CREATE_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
+            err_msg
         ));
     }
 
@@ -785,7 +810,7 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
 
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
-        if err_msg.contains("no server running") {
+        if is_no_server_err(&err_msg) {
             return Ok(Vec::new());
         }
         return Err(format!("ERR_TMUX_GENERIC|{}", err_msg));
@@ -885,9 +910,13 @@ fn kill_session(session_name: String) -> Result<(), String> {
         .map_err(|e| format!("ERR_KILL_FAILED|{}", e))?;
 
     if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err_msg) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
         return Err(format!(
             "ERR_KILL_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
+            err_msg
         ));
     }
     Ok(())
@@ -906,9 +935,13 @@ fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
         .map_err(|e| format!("ERR_RENAME_FAILED|{}", e))?;
 
     if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err_msg) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
         return Err(format!(
             "ERR_RENAME_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
+            err_msg
         ));
     }
     Ok(())
@@ -934,9 +967,13 @@ fn kill_pane(pane_id: String) -> Result<(), String> {
 
     let output = run_tmux(&["kill-pane", "-t", trimmed]).map_err(|e| format!("ERR_KILL_PANE_FAILED|{}", e))?;
     if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        if is_no_server_err(&err_msg) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
         return Err(format!(
             "ERR_KILL_PANE_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
+            err_msg
         ));
     }
     Ok(())
@@ -1193,6 +1230,18 @@ mod tests {
         assert_eq!(strip_ansi("\x1b[31mHello\x1b[0m"), "Hello");
         assert_eq!(strip_ansi("\x1b[1m\x1b[32mNested\x1b[0m"), "Nested");
         assert_eq!(strip_ansi("Plain text"), "Plain text");
+    }
+
+    #[test]
+    fn test_is_no_server_err() {
+        assert!(is_no_server_err("no server running on /private/tmp/tmux-501/default"));
+        assert!(is_no_server_err("error connecting to /private/tmp/tmux-501/default (No such file or directory)"));
+        assert!(is_no_server_err("failed to connect to server"));
+        assert!(is_no_server_err("No such file or directory (tmux socket)"));
+
+        assert!(!is_no_server_err("can't find session: foo"));
+        assert!(!is_no_server_err("duplicate session: bar"));
+        assert!(!is_no_server_err(""));
     }
 
     #[test]
