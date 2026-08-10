@@ -117,47 +117,24 @@ export default function App() {
       return {
         statusClass: "bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse",
         statusTooltip: t("card.attached"),
-        text: t("card.activeState"),
       };
     }
 
     const now = Math.floor(Date.now() / 1000);
     const elapsed = session.last_active_ts > 0 ? Math.max(0, now - session.last_active_ts) : -1;
 
+    // Background active: detached and active within the last 10 minutes.
     if (elapsed >= 0 && elapsed < 600) {
-      let timeText = "";
-      if (elapsed < 60) {
-        timeText = t("card.lastActive_now");
-      } else if (elapsed < 3600) {
-        timeText = t("card.lastActive", { time: `${Math.floor(elapsed / 60)}m` });
-      } else if (elapsed < 86400) {
-        timeText = t("card.lastActive", { time: `${Math.floor(elapsed / 3600)}h` });
-      } else {
-        timeText = t("card.lastActive", { time: `${Math.floor(elapsed / 86400)}d` });
-      }
-
       return {
         statusClass: "bg-amber-400 shadow-sm shadow-amber-400/80",
         statusTooltip: t("card.bgActive"),
-        text: timeText,
       };
     }
 
-    let idleText = t("card.idle");
-    if (elapsed >= 600) {
-      if (elapsed < 3600) {
-        idleText = t("card.lastActive", { time: `${Math.floor(elapsed / 60)}m` });
-      } else if (elapsed < 86400) {
-        idleText = t("card.lastActive", { time: `${Math.floor(elapsed / 3600)}h` });
-      } else {
-        idleText = t("card.lastActive", { time: `${Math.floor(elapsed / 86400)}d` });
-      }
-    }
-
+    // Idle: detached and quiet for 10+ minutes, or unknown.
     return {
       statusClass: "bg-slate-600",
       statusTooltip: t("card.idle"),
-      text: idleText,
     };
   };
 
