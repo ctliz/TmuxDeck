@@ -19,6 +19,7 @@ import {
   ChevronDown,
   Settings,
 } from "lucide-react";
+import { t, tPlural, translateName, translateError } from "./i18n";
 
 interface ToolInfo {
   id: string;
@@ -132,7 +133,7 @@ export default function App() {
         setSelectedPanes(cfgData.default_panes);
       }
     } catch (err: any) {
-      setErrorMsg(err?.toString() || "数据刷新失败");
+      setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
     } finally {
       setLoading(false);
     }
@@ -151,23 +152,23 @@ export default function App() {
       const res = await open({
         directory: true,
         multiple: false,
-        title: "选择项目工作目录",
+        title: t("modal.workingDirLabel"),
       });
       if (res && typeof res === "string") {
         setWorkingDir(res);
       }
     } catch (err) {
-      console.error("选择文件夹失败", err);
+      console.error("Folder picker error", err);
     }
   };
 
   const handleSaveCustomAgent = async () => {
     if (!customAgentCmd.trim()) {
-      alert("请输入自定义 Agent 执行命令 (例如: claude --model opus)");
+      alert(t("val.enterCustomCmd"));
       return;
     }
     const newCustom: CustomAgent = {
-      name: customAgentName.trim() || "自定义 Agent",
+      name: customAgentName.trim() || t("agent.custom"),
       command: customAgentCmd.trim(),
     };
     try {
@@ -188,7 +189,7 @@ export default function App() {
       setSelectedAgent("custom");
       setShowCustomAgentForm(false);
     } catch (err: any) {
-      alert("保存自定义 Agent 失败: " + err);
+      alert(t("val.saveCustomFailed") + ": " + translateError(err));
     }
   };
 
@@ -198,14 +199,14 @@ export default function App() {
       await invoke("open_session", { name: sessionName, terminalId: targetTerminal });
       setActiveTerminalDropdown(null);
     } catch (err: any) {
-      alert("打开终端失败: " + err);
+      alert(t("val.openTerminalFailed") + ": " + translateError(err));
     }
   };
 
   const handleCreate = async () => {
     const cleanName = sanitizeNameFrontend(newSessionName);
     if (!cleanName) {
-      alert("请输入有效的项目名称 (支持字母、数字、下划线和连字符)");
+      alert(t("val.enterName"));
       return;
     }
     setLoading(true);
@@ -224,19 +225,19 @@ export default function App() {
       setWorkingDir("");
       await loadData();
     } catch (err: any) {
-      alert("创建失败: " + err);
+      alert(t("val.createFailed") + ": " + translateError(err));
     } finally {
       setLoading(false);
     }
   };
 
   const handleKill = async (sessionName: string) => {
-    if (!confirm(`确定要销毁工作区 [${sessionName}] 吗？`)) return;
+    if (!confirm(t("confirm.destroy", { name: sessionName }))) return;
     try {
       await invoke("kill_session", { sessionName });
       await loadData();
     } catch (err: any) {
-      alert("销毁失败: " + err);
+      alert(t("val.destroyFailed") + ": " + translateError(err));
     }
   };
 
@@ -251,7 +252,7 @@ export default function App() {
       setRenamingSession(null);
       await loadData();
     } catch (err: any) {
-      alert("重命名失败: " + err);
+      alert(t("val.renameFailed") + ": " + translateError(err));
     }
   };
 
@@ -265,7 +266,7 @@ export default function App() {
     s.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  // 硬阻断：当系统缺失 tmux 时全屏引导
+  // Hard blocking: full-screen guidance when tmux is missing
   if (env && env.tmux === null) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-100 p-6 select-none">
@@ -274,9 +275,9 @@ export default function App() {
             <Terminal className="w-8 h-8" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-100">未检测到 Tmux 安装</h2>
+            <h2 className="text-xl font-bold text-slate-100">{t("tmux.missing.title")}</h2>
             <p className="text-sm text-slate-400 mt-2">
-              TmuxDeck 依赖 Tmux 来管理多 Agent 会话。请先使用 Homebrew 安装 Tmux：
+              {t("tmux.missing.hint")}
             </p>
           </div>
           <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-sm">
@@ -288,12 +289,12 @@ export default function App() {
               {copiedBrew ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs text-emerald-400 font-sans">已复制</span>
+                  <span className="text-xs text-emerald-400 font-sans">{t("btn.copied")}</span>
                 </>
               ) : (
                 <>
                   <Copy className="w-4 h-4" />
-                  <span className="text-xs font-sans">复制</span>
+                  <span className="text-xs font-sans">{t("btn.copy")}</span>
                 </>
               )}
             </button>
@@ -302,7 +303,7 @@ export default function App() {
             onClick={loadData}
             className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm shadow-lg shadow-cyan-500/20 transition cursor-pointer"
           >
-            我已安装，重新检测
+            {t("btn.recheck")}
           </button>
         </div>
       </div>
@@ -314,7 +315,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans select-none">
-      {/* 顶部 App Header */}
+      {/* App Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md">
         <div className="flex items-center space-x-3">
           <div className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20">
@@ -323,39 +324,39 @@ export default function App() {
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                TmuxDeck
+                {t("app.title")}
               </h1>
               <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">
-                v1.1
+                {t("app.version")}
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              tmux 多 Agent 工作区控制台
+              {t("app.subtitle")}
             </p>
           </div>
         </div>
 
-        {/* 顶部环境指示器 */}
+        {/* Environment Status Indicator */}
         <div className="hidden md:flex items-center space-x-4 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
           <div className="flex items-center space-x-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-slate-300 font-medium">Tmux ✓</span>
+            <span className="text-slate-300 font-medium">{t("env.tmux_ok")}</span>
           </div>
           <span className="text-slate-700">|</span>
           <div className="flex items-center space-x-2 text-slate-400">
-            <span>{env?.terminals.length || 0} 个可用终端</span>
+            <span>{tPlural("env.terminals", env?.terminals.length || 0)}</span>
             <span>·</span>
-            <span>{env?.agents.length || 0} 个 Agent</span>
+            <span>{tPlural("env.agents", env?.agents.length || 0)}</span>
           </div>
         </div>
 
-        {/* 顶部操作区 */}
+        {/* Top Header Actions */}
         <div className="flex items-center space-x-3">
           <button
             onClick={loadData}
             disabled={loading}
             className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 transition disabled:opacity-50 cursor-pointer"
-            title="刷新列表"
+            title={t("btn.refresh")}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -367,30 +368,30 @@ export default function App() {
             className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium shadow-lg shadow-cyan-500/25 transition text-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>新建工作区</span>
+            <span>{t("btn.newWorkspace")}</span>
           </button>
         </div>
       </header>
 
-      {/* 搜索与统计栏 */}
+      {/* Search & Statistics Bar */}
       <div className="flex items-center justify-between px-6 py-3 bg-slate-900/40 border-b border-slate-800/60">
         <div className="relative w-72">
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
           <input
             type="text"
-            placeholder="搜索项目名称..."
+            placeholder={t("search.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-1.5 text-sm bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500 transition"
           />
         </div>
         <div className="text-xs text-slate-400 flex items-center space-x-4">
-          <span>共 <strong className="text-cyan-400">{sessions.length}</strong> 个项目工作区</span>
-          <span>运行中: <strong className="text-emerald-400">{sessions.filter((s) => s.attached).length}</strong></span>
+          <span>{tPlural("stats.total", sessions.length)}</span>
+          <span>{t("stats.running", { n: sessions.filter((s) => s.attached).length })}</span>
         </div>
       </div>
 
-      {/* 主体卡片区域 */}
+      {/* Main Workspace Grid */}
       <main className="flex-1 overflow-y-auto p-6">
         {errorMsg && (
           <div className="mb-6 p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-sm">
@@ -403,9 +404,9 @@ export default function App() {
             <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 mb-4">
               <Terminal className="w-10 h-10 text-slate-600" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-300">暂无匹配的 Tmux 工作区</h3>
+            <h3 className="text-lg font-semibold text-slate-300">{t("empty.title")}</h3>
             <p className="text-sm text-slate-500 max-w-sm mt-1 mb-4">
-              点击右上角的“新建工作区”快速创建一个包含所需 Agent 的项目卡片
+              {t("empty.hint")}
             </p>
             <button
               onClick={() => {
@@ -415,7 +416,7 @@ export default function App() {
               className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-cyan-400 text-sm font-medium transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>矢量新建工作区</span>
+              <span>{t("empty.createNow")}</span>
             </button>
           </div>
         ) : (
@@ -441,7 +442,7 @@ export default function App() {
                   key={session.id}
                   className="flex flex-col justify-between rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition shadow-lg group hover:shadow-cyan-500/5"
                 >
-                  {/* 卡片头部 */}
+                  {/* Card Header */}
                   <div className="p-4 border-b border-slate-800/60">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -451,7 +452,7 @@ export default function App() {
                               ? "bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse"
                               : "bg-slate-600"
                           }`}
-                          title={session.attached ? "活动中 Attached" : "空闲 Idle"}
+                          title={session.attached ? t("card.attached") : t("card.idle")}
                         />
                         {isRenaming ? (
                           <input
@@ -477,14 +478,14 @@ export default function App() {
                             setRenamedName(session.name);
                           }}
                           className="p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                          title="重命名"
+                          title={t("card.rename")}
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleKill(session.name)}
                           className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                          title="销毁 Session"
+                          title={t("card.destroy")}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -492,19 +493,19 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-slate-400">
-                      <span>{session.windows_count} 窗口 · {session.panes_count} 分屏</span>
+                      <span>{tPlural("card.windows", session.windows_count)} · {tPlural("card.panes", session.panes_count)}</span>
                       <span>{session.created_at}</span>
                     </div>
                   </div>
 
-                  {/* 屏阵列布局预览 */}
+                  {/* Pane Layout Preview */}
                   <div className="p-4 flex-1">
                     <div className="text-xs text-slate-500 mb-2 font-medium flex items-center justify-between">
-                      <span>分屏预览:</span>
+                      <span>{t("card.panePreview")}:</span>
                       {isAgentActive && (
                         <span className="flex items-center space-x-1 text-cyan-400 text-[10px]">
                           <Zap className="w-3 h-3" />
-                          <span>Agent Ready</span>
+                          <span>{t("card.agentReady")}</span>
                         </span>
                       )}
                     </div>
@@ -529,7 +530,7 @@ export default function App() {
                               {isAgent && <Zap className="w-2.5 h-2.5 text-cyan-400" />}
                             </div>
                             <span className="font-mono truncate font-medium">
-                              {matchedAgent ? matchedAgent.name : cmdName}
+                              {matchedAgent ? translateName(matchedAgent.name) : cmdName}
                             </span>
                           </div>
                         );
@@ -537,16 +538,16 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 卡片底部操作按钮 */}
+                  {/* Card Footer Actions */}
                   <div className="p-3 border-t border-slate-800/60 bg-slate-900/40 relative">
                     <div className="flex items-center space-x-1">
                       <button
                         onClick={() => handleOpenSession(session.name)}
                         className="flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-gradient-to-r hover:from-cyan-600 hover:to-blue-600 text-slate-200 hover:text-white text-sm font-medium transition shadow-sm group-hover:bg-cyan-600/20 group-hover:text-cyan-300 group-hover:border group-hover:border-cyan-500/40 cursor-pointer"
-                        title={`使用 ${currentTerminalObj?.name || "终端"} 打开`}
+                        title={t("btn.openWith", { terminal: translateName(currentTerminalObj?.name || "terminal") })}
                       >
                         <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>打开 ({currentTerminalObj?.name || "终端"})</span>
+                        <span>{t("btn.open")} ({translateName(currentTerminalObj?.name || "terminal")})</span>
                       </button>
 
                       {env && env.terminals.length > 1 && (
@@ -557,7 +558,7 @@ export default function App() {
                             )
                           }
                           className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
-                          title="选择其他终端打开"
+                          title={t("card.selectTerminal")}
                         >
                           <ChevronDown className="w-4 h-4" />
                         </button>
@@ -567,7 +568,7 @@ export default function App() {
                     {activeTerminalDropdown === session.name && (
                       <div className="absolute right-3 bottom-14 z-20 w-44 rounded-xl bg-slate-900 border border-slate-700 shadow-xl py-1">
                         <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 border-b border-slate-800">
-                          选择启动终端:
+                          {t("card.selectTerminal")}
                         </div>
                         {env?.terminals.map((term) => (
                           <button
@@ -575,7 +576,7 @@ export default function App() {
                             onClick={() => handleOpenSession(session.name, term.id)}
                             className="w-full text-left px-3 py-1.5 text-xs text-slate-200 hover:bg-cyan-950 hover:text-cyan-300 flex items-center justify-between cursor-pointer"
                           >
-                            <span>{term.name}</span>
+                            <span>{translateName(term.name)}</span>
                             {term.id === selectedTerminal && (
                               <Check className="w-3 h-3 text-cyan-400" />
                             )}
@@ -591,7 +592,7 @@ export default function App() {
         )}
       </main>
 
-      {/* 新建项目 Modal */}
+      {/* New Workspace Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl p-6">
@@ -600,7 +601,7 @@ export default function App() {
                 <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
                   <Bot className="w-5 h-5" />
                 </div>
-                <h3 className="text-lg font-bold text-slate-100">新建工作区</h3>
+                <h3 className="text-lg font-bold text-slate-100">{t("modal.createTitle")}</h3>
               </div>
               <button
                 onClick={() => setShowCreateModal(false)}
@@ -611,14 +612,14 @@ export default function App() {
             </div>
 
             <div className="space-y-4">
-              {/* 项目名称 */}
+              {/* Workspace Name Input */}
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">
-                  项目/Session 名称 *
+                  {t("modal.sessionNameLabel")}
                 </label>
                 <input
                   type="text"
-                  placeholder="例如: my-ai-project"
+                  placeholder={t("modal.sessionNamePlaceholder")}
                   value={newSessionName}
                   maxLength={60}
                   onChange={(e) => setNewSessionName(e.target.value)}
@@ -626,22 +627,22 @@ export default function App() {
                 />
                 {newSessionName && sanitizeNameFrontend(newSessionName) !== newSessionName && (
                   <p className="text-[10px] text-amber-400 mt-1">
-                    提示: 名称将自动规范化为 <code className="font-mono">{sanitizeNameFrontend(newSessionName)}</code>
+                    {t("modal.sessionNameHint", { name: sanitizeNameFrontend(newSessionName) })}
                   </p>
                 )}
               </div>
 
-              {/* 工作目录与系统选择器 */}
+              {/* Working Directory & System File Picker */}
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">
-                  工作目录
+                  {t("modal.workingDirLabel")}
                 </label>
                 <div className="flex items-center space-x-2">
                   <div className="relative flex-1">
                     <Folder className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
                     <input
                       type="text"
-                      placeholder="默认 Home 根目录"
+                      placeholder={t("modal.workingDirPlaceholder")}
                       value={workingDir}
                       onChange={(e) => setWorkingDir(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
@@ -653,13 +654,13 @@ export default function App() {
                     className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition flex items-center space-x-1 shrink-0 cursor-pointer"
                   >
                     <Folder className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>浏览...</span>
+                    <span>{t("btn.browse")}</span>
                   </button>
                 </div>
 
                 {config && config.recent_dirs && config.recent_dirs.length > 0 && (
                   <div className="flex items-center space-x-1.5 mt-2 flex-wrap gap-y-1">
-                    <span className="text-[10px] text-slate-500">最近历史:</span>
+                    <span className="text-[10px] text-slate-500">{t("modal.recentDirs")}</span>
                     {config.recent_dirs.map((dir) => (
                       <button
                         key={dir}
@@ -675,12 +676,12 @@ export default function App() {
                 )}
               </div>
 
-              {/* Agent 选择 Segmented Chips */}
-              {env && (
+              {/* Agent Selection Segmented Chips */}
+              {env && env.agents.length > 1 && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-medium text-slate-400">
-                      Agent 引擎
+                      {t("modal.agentLabel")}
                     </label>
                   </div>
                   <div className="flex items-center space-x-2 flex-wrap gap-y-2">
@@ -700,7 +701,7 @@ export default function App() {
                               : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
                           }`}
                         >
-                          <span>{agent.name}</span>
+                          <span>{translateName(agent.name)}</span>
                           {agent.id === "custom" && (
                             <Settings
                               className="w-3 h-3 ml-1 opacity-75 hover:opacity-100"
@@ -714,7 +715,6 @@ export default function App() {
                       );
                     })}
 
-                    {/* + 自定义 Chip 按钮 */}
                     {!env.agents.some((a) => a.id === "custom") && (
                       <button
                         type="button"
@@ -725,39 +725,39 @@ export default function App() {
                             : "border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
                         }`}
                       >
-                        + 自定义
+                        {t("modal.customAgentChip")}
                       </button>
                     )}
                   </div>
 
-                  {/* 自定义 Agent 行内编辑面板 (PRD 2.3) */}
+                  {/* Inline Custom Agent Editor */}
                   {showCustomAgentForm && (
                     <div className="mt-3 p-3 rounded-xl bg-slate-950 border border-cyan-900/60 space-y-3">
                       <div className="text-xs font-semibold text-cyan-400 flex items-center justify-between">
-                        <span>配置自定义 Agent 命令</span>
+                        <span>{t("modal.customAgentTitle")}</span>
                         <button
                           onClick={() => setShowCustomAgentForm(false)}
-                          className="text-slate-500 hover:text-slate-300 text-xs"
+                          className="text-slate-500 hover:text-slate-300 text-xs cursor-pointer"
                         >
-                          收起
+                          {t("btn.collapse")}
                         </button>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-[10px] text-slate-400 mb-1">显示名称 (可选)</label>
+                          <label className="block text-[10px] text-slate-400 mb-1">{t("modal.customAgentNameLabel")}</label>
                           <input
                             type="text"
-                            placeholder="如: Claude Opus"
+                            placeholder={t("modal.customAgentNamePlaceholder")}
                             value={customAgentName}
                             onChange={(e) => setCustomAgentName(e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] text-slate-400 mb-1">执行命令 *</label>
+                          <label className="block text-[10px] text-slate-400 mb-1">{t("modal.customAgentCmdLabel")}</label>
                           <input
                             type="text"
-                            placeholder="如: claude --model opus"
+                            placeholder={t("modal.customAgentCmdPlaceholder")}
                             value={customAgentCmd}
                             onChange={(e) => setCustomAgentCmd(e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
@@ -770,7 +770,7 @@ export default function App() {
                           onClick={handleSaveCustomAgent}
                           className="px-3 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium transition cursor-pointer"
                         >
-                          保存并设定
+                          {t("btn.saveAndApply")}
                         </button>
                       </div>
                     </div>
@@ -778,10 +778,10 @@ export default function App() {
                 </div>
               )}
 
-              {/* 分屏数量 Segmented Chips */}
+              {/* Pane Count Segmented Chips */}
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  分屏数量
+                  {t("modal.panesLabel")}
                 </label>
                 <div className="flex items-center space-x-2">
                   {[1, 2, 4, 6].map((p) => {
@@ -797,18 +797,18 @@ export default function App() {
                             : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
                         }`}
                       >
-                        {p} 屏
+                        {tPlural("modal.panesCount", p)}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* 终端选择 (如仅1候选则整行隐藏) */}
+              {/* Terminal Selection Segmented Chips */}
               {env && env.terminals.length > 1 && (
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                    启动终端
+                    {t("modal.terminalLabel")}
                   </label>
                   <div className="flex items-center space-x-2 flex-wrap gap-y-2">
                     {env.terminals.map((term) => {
@@ -824,7 +824,7 @@ export default function App() {
                               : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
                           }`}
                         >
-                          {term.name}
+                          {translateName(term.name)}
                         </button>
                       );
                     })}
@@ -832,11 +832,14 @@ export default function App() {
                 </div>
               )}
 
-              {/* 动态配置说明 */}
+              {/* Dynamic Summary */}
               <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/60 text-xs text-slate-400">
-                将创建 <strong className="text-cyan-400">{selectedPanes}</strong> 个分屏，每个运行{" "}
-                <strong className="text-cyan-400">{currentAgentObj?.name || selectedAgent}</strong>，并用{" "}
-                <strong className="text-cyan-400">{currentTerminalObj?.name || selectedTerminal}</strong> 打开。
+                {t("modal.summary", {
+                  panes: selectedPanes,
+                  panesText: tPlural("modal.panesCount", selectedPanes),
+                  agent: translateName(currentAgentObj?.name || selectedAgent),
+                  terminal: translateName(currentTerminalObj?.name || selectedTerminal),
+                })}
               </div>
             </div>
 
@@ -845,7 +848,7 @@ export default function App() {
                 onClick={() => setShowCreateModal(false)}
                 className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
               >
-                取消
+                {t("btn.cancel")}
               </button>
               <button
                 onClick={handleCreate}
@@ -853,7 +856,7 @@ export default function App() {
                 className="flex items-center space-x-2 px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm transition shadow-lg shadow-cyan-500/20 disabled:opacity-50 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>{loading ? "创建中..." : "创建并启动"}</span>
+                <span>{loading ? t("btn.creating") : t("btn.create")}</span>
               </button>
             </div>
           </div>

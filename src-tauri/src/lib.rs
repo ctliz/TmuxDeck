@@ -75,7 +75,7 @@ pub struct TmuxSession {
 fn sanitize_session_name(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("项目名称不能为空".to_string());
+        return Err("ERR_NAME_EMPTY".to_string());
     }
 
     let sanitized: String = trimmed
@@ -99,7 +99,7 @@ fn sanitize_session_name(raw: &str) -> Result<String, String> {
     let result = result.trim_matches('-').to_string();
 
     if result.is_empty() {
-        return Err("非法的项目名称 (仅支持字母、数字、下划线和连字符)".to_string());
+        return Err("ERR_NAME_INVALID".to_string());
     }
     if result.len() > 60 {
         return Ok(result[..60].to_string());
@@ -195,8 +195,8 @@ fn save_config(config: Config) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&config).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
+    std::fs::write(path, json).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
     Ok(())
 }
 
@@ -204,13 +204,13 @@ fn save_config(config: Config) -> Result<(), String> {
 fn detect_environment() -> Environment {
     let tmux = get_tmux_bin();
 
-    // 终端注册表 (macOS)
+    // Terminal Registry (macOS)
     let known_terminals = vec![
         ("ghostty", "Ghostty", vec!["/Applications/Ghostty.app"]),
         ("iterm2", "iTerm2", vec!["/Applications/iTerm.app"]),
         (
             "terminal",
-            "Terminal (系统)",
+            "terminal.system",
             vec![
                 "/System/Applications/Utilities/Terminal.app",
                 "/Applications/Utilities/Terminal.app",
@@ -230,7 +230,7 @@ fn detect_environment() -> Environment {
                 break;
             }
         }
-        // Terminal.app 兜底保证存在
+        // Terminal.app fallback is guaranteed to exist on macOS
         if id == "terminal" && found_path.is_none() {
             found_path = Some("/System/Applications/Utilities/Terminal.app".to_string());
         }
@@ -244,7 +244,7 @@ fn detect_environment() -> Environment {
         }
     }
 
-    // Agent 注册表
+    // Agent Registry
     let known_agents = vec![
         ("pi", "Pi", "pi"),
         ("claude", "Claude Code", "claude"),
@@ -265,23 +265,23 @@ fn detect_environment() -> Environment {
         }
     }
 
-    // 自定义 Agent 支持
+    // Custom Agent Support
     let cfg = load_config();
     if let Some(custom) = cfg.custom_agent {
         if !custom.command.trim().is_empty() {
             installed_agents.push(ToolInfo {
                 id: "custom".to_string(),
-                name: if custom.name.trim().is_empty() { "自定义 Agent".to_string() } else { custom.name },
+                name: if custom.name.trim().is_empty() { "agent.custom".to_string() } else { custom.name },
                 path: custom.command,
             });
         }
     }
 
-    // 纯 Shell 兜底 (永远可用)
+    // Plain Shell fallback (Always available)
     let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     installed_agents.push(ToolInfo {
         id: "shell".to_string(),
-        name: "纯 Shell".to_string(),
+        name: "agent.shell".to_string(),
         path: shell_path,
     });
 
@@ -295,14 +295,14 @@ fn detect_environment() -> Environment {
 #[tauri::command]
 fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&name)?;
-    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
+    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
     let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
 
     let script_content = format!(
         "#!/bin/bash\nexec '{}' attach-session -t '{}'\n",
         tmux, sanitized_name
     );
-    std::fs::write(&script_path, script_content).map_err(|e| format!("写入脚本失败: {}", e))?;
+    std::fs::write(&script_path, script_content).map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
 
     #[cfg(unix)]
     {
@@ -361,15 +361,15 @@ fn open_session(name: String, terminal_id: String) -> Result<(), String> {
 
     match status {
         Ok(st) if st.success() => Ok(()),
-        Ok(st) => Err(format!("终端打开返回错误状态: {}", st)),
-        Err(e) => Err(format!("打开终端失败: {}", e)),
+        Ok(st) => Err(format!("ERR_TERMINAL_RETURN_ERR|{}", st)),
+        Err(e) => Err(format!("ERR_TERMINAL_LAUNCH_FAILED|{}", e)),
     }
 }
 
 #[tauri::command]
 fn create_session(opts: CreateOpts) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&opts.name)?;
-    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
+    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
     let env_info = detect_environment();
 
     let agent_cmd = if opts.agent_id == "shell" {
@@ -391,7 +391,7 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
 
     let cd_arg = format!("-c '{}'", work_dir);
 
-    // 采用稳定可靠的顺序切分与 tiled 布局
+    // Reliable sequential pane splitting and tiled layout setup
     let mut script_parts = Vec::new();
     script_parts.push(format!(
         "{} new-session -d -s '{}' {} '{}'",
@@ -416,16 +416,16 @@ fn create_session(opts: CreateOpts) -> Result<(), String> {
     let output = Command::new("/bin/bash")
         .args(["-c", &script])
         .output()
-        .map_err(|e| format!("创建 tmux session 失败: {}", e))?;
+        .map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
 
     if !output.status.success() {
         return Err(format!(
-            "创建会话报错: {}",
+            "ERR_CREATE_OUTPUT_ERR|{}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
 
-    // 持久化配置
+    // Persist configuration
     let mut cfg = load_config();
     cfg.default_terminal = opts.terminal_id.clone();
     cfg.default_agent = opts.agent_id.clone();
@@ -458,14 +458,14 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
             "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}",
         ])
         .output()
-        .map_err(|e| format!("无法运行 tmux list-sessions: {}", e))?;
+        .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
 
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
         if err_msg.contains("no server running") {
             return Ok(Vec::new());
         }
-        return Err(format!("tmux 错误: {}", err_msg));
+        return Err(format!("ERR_TMUX_GENERIC|{}", err_msg));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -486,19 +486,19 @@ fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
                 if let Ok(elapsed) = datetime.elapsed() {
                     let secs = elapsed.as_secs();
                     if secs < 60 {
-                        format!("{} 秒前", secs)
+                        format!("{}s", secs)
                     } else if secs < 3600 {
-                        format!("{} 分钟前", secs / 60)
+                        format!("{}m", secs / 60)
                     } else if secs < 86400 {
-                        format!("{} 小时前", secs / 3600)
+                        format!("{}h", secs / 3600)
                     } else {
-                        format!("{} 天前", secs / 86400)
+                        format!("{}d", secs / 86400)
                     }
                 } else {
-                    "刚刚".to_string()
+                    "0s".to_string()
                 }
             } else {
-                "未知".to_string()
+                "-".to_string()
             };
 
             let panes = get_session_panes(&tmux, &name);
@@ -554,15 +554,15 @@ fn get_session_panes(tmux: &str, session_name: &str) -> Vec<TmuxPane> {
 #[tauri::command]
 fn kill_session(session_name: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&session_name)?;
-    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
+    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
     let output = Command::new(&tmux)
         .args(["kill-session", "-t", &sanitized_name])
         .output()
-        .map_err(|e| format!("销毁 session 失败: {}", e))?;
+        .map_err(|e| format!("ERR_KILL_FAILED|{}", e))?;
 
     if !output.status.success() {
         return Err(format!(
-            "销毁会话失败: {}",
+            "ERR_KILL_OUTPUT_ERR|{}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -574,15 +574,15 @@ fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
     let sanitized_old = sanitize_session_name(&old_name)?;
     let sanitized_new = sanitize_session_name(&new_name)?;
 
-    let tmux = get_tmux_bin().ok_or_else(|| "未找到 tmux 安装".to_string())?;
+    let tmux = get_tmux_bin().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
     let output = Command::new(&tmux)
         .args(["rename-session", "-t", &sanitized_old, &sanitized_new])
         .output()
-        .map_err(|e| format!("重命名 session 失败: {}", e))?;
+        .map_err(|e| format!("ERR_RENAME_FAILED|{}", e))?;
 
     if !output.status.success() {
         return Err(format!(
-            "重命名会话失败: {}",
+            "ERR_RENAME_OUTPUT_ERR|{}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
