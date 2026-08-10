@@ -18,32 +18,38 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat <<'EOF' > /tmp/release-notes.md
-          ## TmuxDeck v1.6.0
+          ## TmuxDeck v1.7.0
 
-          A major UI overhaul and the first release with a menu bar presence. Since v1.5.0: Liquid Glass design, a tray icon, terminal brand icons, and pane-level management.
+          Since v1.6.0, five feature increments shipped in one release: a menu bar presence with full session control, real terminal brand icons, a streamlined card header, pane-level management, and duplicate-window protection. This is the largest quality-of-life release since Liquid Glass.
 
-          ### Liquid Glass UI
+          ### Menu bar presence
 
-          The interface was rebuilt around macOS 26-style Liquid Glass: translucent surfaces, soft blur, and smooth transitions. The heavy top bar is gone - a floating, semi-transparent search pill sits at the top.
+          TmuxDeck now lives in the menu bar. Close the window and it keeps running - the tray icon shows the active workspace, and the menu lets you open any session, add a pane, or create a new one without opening the main window.
 
-          Cards were simplified to the essentials: a status dot, a click-to-rename name, and a close button. The pane grid shows live output tail from each pane.
-
-          ### Menu bar (tray) presence
-
-          TmuxDeck now lives in the menu bar. Close the window and it keeps running - click the tray icon to see the active workspace, open any session, add a pane, or create a new one. The tray menu follows the system language (English / Simplified Chinese).
+          - Active workspace section: opens in your default terminal, adds a pane, shows last activity.
+          - Full session list sorted by activity (attached first, then most recently used), up to 8 shown with a "view all" entry.
+          - The tray menu follows the system language (English / Simplified Chinese) and refreshes every 5 seconds.
 
           ### Terminal brand icons
 
-          Each card shows the real icon of every installed terminal (extracted from the app bundle at runtime). One click opens the session in that terminal.
+          Each card's footer is now a row of real terminal icons (extracted from each installed app bundle at runtime, with built-in SVG fallbacks). One click opens the session in that terminal - no more dropdown. The default terminal is highlighted.
+
+          ### Streamlined card header
+
+          Card headers are now just a status dot, a click-to-rename name, and a close button. The hover-only rename/delete buttons and the "X windows - Y panes" statistics line are gone.
 
           ### Pane-level management
 
-          Hover a pane to kill just that pane (with confirmation), or click "Add pane" to grow the grid - each new pane inherits the session's working directory.
+          Workspaces are no longer all-or-nothing. Hover a pane preview tile to kill just that pane (with confirmation; hidden when the session has a single pane), or click "Add pane" to grow the grid - each new pane inherits the session's working directory.
+
+          ### Duplicate-window protection
+
+          Clicking a session that is already attached no longer spawns another terminal window. TmuxDeck focuses the existing window instead - precisely via window title on macOS (falls back to activating the terminal app), and via AppActivate on Windows.
 
           ### Fixes
 
           - Tray menu labels are now localized (previously hard-coded English).
-          - Removed dead activity-text computation and orphaned i18n keys.
+          - Removed dead activity-text computation and orphaned i18n keys after the header cleanup.
 
           ### Install
 
