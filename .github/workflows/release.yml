@@ -19,9 +19,32 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: TmuxDeck ${{ github.ref_name }}
           body: |
-            **安装**
-            - macOS: 下载 `.dmg`,拖入「应用程序」。首次打开如提示「无法验证开发者」,右键 → 打开。
-            - Windows: 下载 `.exe`(NSIS 安装包)或 `.msi`。
+            ## TmuxDeck v1.5.0
+
+            Since v1.3.0: workspace activity status and live pane previews.
+
+            ### Workspace activity status
+
+            Each workspace card shows its state at a glance:
+
+            - **Active** (green) - a terminal is attached to the session.
+            - **Running in background** (amber) - detached, active within the last 10 minutes.
+            - **Idle** (gray) - detached and quiet for 10+ minutes, with last-activity time.
+
+            ### Live pane previews
+
+            Preview tiles show the tail of each pane's output in real time (updated every 8s), so you can see what each agent is doing without opening a terminal. Capture pauses when the window is hidden.
+
+            ### Fixes
+
+            - Missing English i18n keys for activity labels.
+            - Circuit breaker now recovers after session refresh.
+            - Release stays a draft until published.
+
+            ### Install
+
+            - macOS: download the `.dmg`, drag into Applications. If Gatekeeper warns on first launch, right-click -> Open (unsigned build).
+            - Windows: download the `.exe` (NSIS) or `.msi`.
           draft: true
           generate_release_notes: true
 
