@@ -323,9 +323,9 @@ export default function App() {
         opts: {
           name: cleanName,
           dir: workingDir.trim() || null,
-          agentId: selectedAgent,
+          agent_id: selectedAgent,
           panes: selectedPanes,
-          terminalId: selectedTerminal,
+          terminal_id: selectedTerminal,
         },
       });
       setShowCreateModal(false);
