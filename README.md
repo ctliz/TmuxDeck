@@ -138,7 +138,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 | **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | Automatic on start (`/reload` in open sessions) |
 | **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` | `claude mcp add -s user claude-intercom -- claude-intercom-mcp` |
 | **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
-| **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json` |
+| **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json`; `tui.mjs` adds `/intercom`, `/intercom-name`, and `/intercom-id` |
 
 ### 3. Use Intercom
 
@@ -147,6 +147,7 @@ Communicate across agent sessions using the shared broker:
 - **Session discovery & messaging:** Use `intercom_list`, `intercom_send`, `intercom_ask`, and `intercom_reply` to discover and exchange messages.
 - **Claude Code integration:** Registering via MCP (`claude mcp add`) provides tools; slash commands require plugin metadata.
 - **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
+- **Rename an OpenCode Intercom session:** Run `/intercom-name`, or choose **Rename intercom session** in the command palette; the prompt is titled **Rename this Intercom session**. The model can also call `intercom_set_name({ name: "<new-name>" })`. This changes only the discoverable name, not the stable Intercom session ID.
 
 See [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md) for complete configuration instructions.
 
