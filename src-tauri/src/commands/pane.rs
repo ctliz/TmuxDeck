@@ -62,7 +62,13 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
             + 1;
         let created = create_native_slot(&sanitized, next_slot, &work_dir, &shell_path)?;
         let slots = list_native_slots(&sanitized)?;
-        if let Err(error) = open_native_workspace(&sanitized, &slots) {
+        // 方案 A：新增 = 当前可见格子 + 1（不复活关闭的 surface，其 slot 后台保留）。
+        // 查询失败（无 Ghostty 窗口）时降级为补全全部。
+        let target = match crate::commands::native::ghostty_terminal_count() {
+            Some(current) => (current + 1).min(slots.len()),
+            None => slots.len(),
+        };
+        if let Err(error) = open_native_workspace(&sanitized, &slots, target) {
             let _ = run_tmux(&["kill-session", "-t", &created.target]);
             return Err(error);
         }

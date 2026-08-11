@@ -256,7 +256,11 @@ pub(crate) fn create_native_slot(
     })
 }
 
-pub(crate) fn open_native_workspace(workspace: &str, slots: &[NativeSlot]) -> Result<(), String> {
+pub(crate) fn open_native_workspace(
+    workspace: &str,
+    slots: &[NativeSlot],
+    target_count: usize,
+) -> Result<(), String> {
     if slots.is_empty() {
         return Err("ERR_TMUX_NO_SERVER".to_string());
     }
@@ -264,11 +268,9 @@ pub(crate) fn open_native_workspace(workspace: &str, slots: &[NativeSlot]) -> Re
         .lock()
         .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
     let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let add_direction = match crate::tmux::get_attach_client_size() {
-        Some((w, h)) => split_direction_for_size(w, h),
-        None => "down",
-    };
-    let script = ghostty_layout_script(workspace, slots, &tmux, add_direction);
+    let current = ghostty_terminal_count().unwrap_or(slots.len());
+    let add_direction = add_direction_for(current, crate::tmux::get_attach_client_size());
+    let script = ghostty_layout_script(workspace, slots, &tmux, add_direction, target_count);
     let output = Command::new("osascript")
         .args(["-e", &script])
         .output()
@@ -383,19 +385,44 @@ fn title(workspace: &str, slot: &str) -> String {
     format!("TmuxDeck::{}::{}", workspace, slot)
 }
 
-/// `add_direction` 用于 else 分支（已有窗口补缺失 slot）的新增 split 方向：
-/// 横屏窗口用 down、竖屏窗口用 right（向短边分割，保持 pane 与窗口同方向）。
-/// 向短边分割：横屏（宽>=高）→ down（纵向新增），竖屏（高>宽）→ right（横向新增）。
-/// 保持新增 pane 与窗口同方向，避免竖屏窗口被横向切成窄条。
-pub(crate) fn split_direction_for_size(w: u32, h: u32) -> &'static str {
-    if h > w {
-        "right"
-    } else {
-        "down"
+/// 数当前可见的 Ghostty surface（方案 A 的「当前格子数」）。
+///
+/// AppleScript `count of terminals of front window`——注意这数的是**前窗口**的
+/// terminals。查询失败（Ghostty 未开 / 无窗口）返回 None，调用方降级。
+pub(crate) fn ghostty_terminal_count() -> Option<usize> {
+    let output = Command::new("osascript")
+        .args(["-e", "tell application \"Ghostty\" to count of terminals of front window"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    s.parse::<usize>().ok()
+}
+
+/// 新增 surface 的方向决策（方案 A，用户拍板）。
+///
+/// - `current_surfaces <= 1` → `"down"`（首个新增：当前格子下方）；
+/// - 否则按当前窗口形状交替：竖条（w<h，纵向分割过）→ `"down"`，
+///   横条（w>=h）→ `"right"`；拿不到尺寸（None）→ `"right"`。
+pub(crate) fn add_direction_for(current_surfaces: usize, client: Option<(u32, u32)>) -> &'static str {
+    if current_surfaces <= 1 {
+        return "down";
+    }
+    match client {
+        Some((w, h)) if w < h => "down",
+        _ => "right",
     }
 }
 
-fn ghostty_layout_script(workspace: &str, slots: &[NativeSlot], tmux: &str, add_direction: &str) -> String {
+fn ghostty_layout_script(
+    workspace: &str,
+    slots: &[NativeSlot],
+    tmux: &str,
+    add_direction: &str,
+    target_count: usize,
+) -> String {
     let prefix = format!("TmuxDeck::{}::", workspace);
     let mut script = String::from("tell application \"Ghostty\"\nset deckWindow to missing value\nset anchorTerminal to missing value\nrepeat with w in windows\nrepeat with term in terminals of w\nif name of term starts with \"");
     script.push_str(&applescript_string(&prefix));
@@ -422,17 +449,23 @@ fn ghostty_layout_script(workspace: &str, slots: &[NativeSlot], tmux: &str, add_
         script.push_str(&format!("set t{n} to split {base} direction {direction} with configuration cfg{n}\ndelay 0.5\nperform action \"set_surface_title:{}\" on t{n}\nset anchorTerminal to t{n}\n", applescript_string(&title(workspace, &slot.slot))));
     }
     script.push_str("else\n");
-    for (index, slot) in slots.iter().enumerate() {
-        let n = index + 1;
+    // else 分支（已有窗口）：只补到 target_count，不无条件补全（方案 A）。
+    // openCount = 本 workspace 当前可见 surface 数（按前缀统计，跨所有窗口）；
+    // needed = target_count - openCount；反向遍历 slots（新 slot 优先——add_pane
+    // 刚建的 slot 才是「新增的那个」，先补它，关闭的旧 slot 保持后台不复活），
+    // 补满 needed 即停。
+    script.push_str(&format!("set openCount to 0\nrepeat with w in windows\nrepeat with term in terminals of w\nif name of term starts with \"{}\" then set openCount to openCount + 1\nend repeat\nend repeat\nset needed to {} - openCount\nif needed < 0 then set needed to 0\nset addedCount to 0\n", applescript_string(&prefix), target_count));
+    for (index, slot) in slots.iter().rev().enumerate() {
+        let n = slots.len() - index;
         let slot_title = applescript_string(&title(workspace, &slot.slot));
-        script.push_str(&format!("set slotFound to false\nrepeat with w in windows\nrepeat with term in terminals of w\nif name of term is \"{slot_title}\" then\nset slotFound to true\nset deckWindow to w\nset anchorTerminal to term\nend if\nend repeat\nend repeat\nif slotFound is false then\n"));
+        script.push_str(&format!("set slotFound to false\nrepeat with w in windows\nrepeat with term in terminals of w\nif name of term is \"{slot_title}\" then\nset slotFound to true\nset deckWindow to w\nset anchorTerminal to term\nend if\nend repeat\nend repeat\nif slotFound is false and addedCount < needed then\n"));
         script.push_str(&config_script(
             &format!("missingCfg{}", n),
             workspace,
             slot,
             tmux,
         ));
-        script.push_str(&format!("set addedTerminal to split anchorTerminal direction {add_direction} with configuration missingCfg{n}\ndelay 0.5\nperform action \"set_surface_title:{slot_title}\" on addedTerminal\nset anchorTerminal to addedTerminal\nend if\n"));
+        script.push_str(&format!("set addedTerminal to split anchorTerminal direction {add_direction} with configuration missingCfg{n}\ndelay 0.5\nperform action \"set_surface_title:{slot_title}\" on addedTerminal\nset anchorTerminal to addedTerminal\nset addedCount to addedCount + 1\nend if\n"));
     }
     script.push_str("end if\nperform action \"equalize_splits\" on anchorTerminal\nfocus anchorTerminal\nactivate\nend tell\n");
     script
@@ -461,13 +494,46 @@ mod tests {
     }
 
     #[test]
-    fn test_split_direction_follows_screen_orientation() {
-        // 横屏（宽>=高）→ down
-        assert_eq!(split_direction_for_size(114, 55), "down");
-        assert_eq!(split_direction_for_size(100, 100), "down");
-        // 竖屏（高>宽）→ right
-        assert_eq!(split_direction_for_size(55, 114), "right");
-        assert_eq!(split_direction_for_size(40, 90), "right");
+    fn test_add_direction_for() {
+        // current_surfaces <= 1 → down（首个新增：当前格子下方）
+        assert_eq!(add_direction_for(0, None), "down");
+        assert_eq!(add_direction_for(1, None), "down");
+        assert_eq!(add_direction_for(1, Some((114, 55))), "down");
+        assert_eq!(add_direction_for(1, Some((55, 114))), "down");
+        // 2+ 竖条（w<h，纵向分割过）→ down
+        assert_eq!(add_direction_for(2, Some((55, 114))), "down");
+        assert_eq!(add_direction_for(3, Some((40, 90))), "down");
+        // 2+ 横条（w>=h）→ right
+        assert_eq!(add_direction_for(2, Some((114, 55))), "right");
+        assert_eq!(add_direction_for(3, Some((100, 100))), "right");
+        // 2+ 拿不到尺寸 → right
+        assert_eq!(add_direction_for(2, None), "right");
+        assert_eq!(add_direction_for(5, None), "right");
+    }
+
+    #[test]
+    fn test_else_branch_adds_only_up_to_target_count_newest_first() {
+        let slots: Vec<NativeSlot> = (1..=4)
+            .map(|slot| NativeSlot {
+                target: slot_target("deck", slot),
+                slot: slot.to_string(),
+            })
+            .collect();
+        // target=3：只补到 3 个；反向遍历（新 slot 优先）
+        let script = ghostty_layout_script("deck", &slots, "/opt/homebrew/bin/tmux", "down", 3);
+        assert!(script.contains("set needed to 3 - openCount"));
+        assert!(script.contains("repeat with w in windows"));
+        // 反向：先处理 slot 4，再 3、2、1
+        let pos4 = script.find("missingCfg4").unwrap();
+        let pos3 = script.find("missingCfg3").unwrap();
+        let pos1 = script.find("missingCfg1").unwrap();
+        assert!(pos4 < pos3 && pos3 < pos1);
+        // 上限：addedCount < needed 才补
+        assert!(script.contains("if slotFound is false and addedCount < needed then"));
+        assert!(script.contains("set addedCount to addedCount + 1"));
+        // 创建分支（新窗口 2x2 布局）不受影响
+        assert!(script.contains("set t2 to split t1 direction right"));
+        assert!(script.contains("set t4 to split t2 direction down"));
     }
 
     #[test]
@@ -553,7 +619,7 @@ mod tests {
                 slot: slot.to_string(),
             })
             .collect();
-        let script = ghostty_layout_script("deck", &slots, "/opt/homebrew/bin/tmux", "down");
+        let script = ghostty_layout_script("deck", &slots, "/opt/homebrew/bin/tmux", "down", 4);
         assert!(script.contains("set t2 to split t1 direction right"));
         assert!(script.contains("set t3 to split t1 direction down"));
         assert!(script.contains("set t4 to split t2 direction down"));
@@ -571,7 +637,13 @@ mod tests {
                 slot: slot.to_string(),
             })
             .collect();
-        let script = ghostty_layout_script("compile-test", &slots, "/opt/homebrew/bin/tmux", "down");
+        let script = ghostty_layout_script(
+            "compile-test",
+            &slots,
+            "/opt/homebrew/bin/tmux",
+            "down",
+            4,
+        );
         let output_path = std::env::temp_dir().join(format!(
             "tmuxdeck-ghostty-script-{}.scpt",
             std::process::id()

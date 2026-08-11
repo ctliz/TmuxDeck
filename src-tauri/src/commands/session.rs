@@ -51,7 +51,8 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }    let native_slots = list_native_slots(&sanitized_name)?;
     if !native_slots.is_empty() {
-        return open_native_workspace(&sanitized_name, &native_slots);
+        // 打开 workspace：补全到全部 slot（行为不变）
+        return open_native_workspace(&sanitized_name, &native_slots, native_slots.len());
     }
 
     if let Ok(out) = run_tmux(&["has-session", "-t", &sanitized_name]) {
@@ -287,7 +288,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
 
     if opts.terminal_id == "ghostty" && ghostty_native_available() {
         let slots = create_native_workspace(&sanitized_name, count, &work_dir_clean, &agent_cmd)?;
-        if open_native_workspace(&sanitized_name, &slots).is_ok() {
+        if open_native_workspace(&sanitized_name, &slots, slots.len()).is_ok() {
             save_create_defaults(&opts);
             return Ok(());
         }
