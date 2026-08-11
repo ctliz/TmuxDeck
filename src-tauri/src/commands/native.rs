@@ -404,15 +404,17 @@ pub(crate) fn ghostty_terminal_count() -> Option<usize> {
 /// 新增 surface 的方向决策（方案 A，用户拍板）。
 ///
 /// - `current_surfaces <= 1` → `"down"`（首个新增：当前格子下方）；
-/// - 否则按当前窗口形状交替：竖条（w<h，纵向分割过）→ `"down"`，
-///   横条（w>=h）→ `"right"`；拿不到尺寸（None）→ `"right"`。
+/// - 否则**只有明显横条**（宽 ≥ 2×高，确属上下排列）才往右（right）平衡，
+///   其余（竖条、方形、接近方形如 2x2 缺格）一律往下（down）。
+///   实测教训：2x2 删一格后 pane 接近方形（如 79x55，ratio 1.44），
+///   按 w>=h 判定会一直往右——方形必须默认 down。
 pub(crate) fn add_direction_for(current_surfaces: usize, client: Option<(u32, u32)>) -> &'static str {
     if current_surfaces <= 1 {
         return "down";
     }
     match client {
-        Some((w, h)) if w < h => "down",
-        _ => "right",
+        Some((w, h)) if h > 0 && w >= h * 2 => "right",
+        _ => "down",
     }
 }
 
@@ -503,12 +505,15 @@ mod tests {
         // 2+ 竖条（w<h，纵向分割过）→ down
         assert_eq!(add_direction_for(2, Some((55, 114))), "down");
         assert_eq!(add_direction_for(3, Some((40, 90))), "down");
-        // 2+ 横条（w>=h）→ right
-        assert_eq!(add_direction_for(2, Some((114, 55))), "right");
-        assert_eq!(add_direction_for(3, Some((100, 100))), "right");
-        // 2+ 拿不到尺寸 → right
-        assert_eq!(add_direction_for(2, None), "right");
-        assert_eq!(add_direction_for(5, None), "right");
+        // 2+ 明显横条（宽 >= 2*高，上下排列）→ right
+        assert_eq!(add_direction_for(2, Some((114, 27))), "right");
+        assert_eq!(add_direction_for(3, Some((220, 55))), "right");
+        // 接近方形（2x2 缺格，如 79x55 / 100x100）→ down（避免一直 right）
+        assert_eq!(add_direction_for(3, Some((79, 55))), "down");
+        assert_eq!(add_direction_for(3, Some((100, 100))), "down");
+        // 2+ 拿不到尺寸 → down（默认横向，避免一直往右）
+        assert_eq!(add_direction_for(2, None), "down");
+        assert_eq!(add_direction_for(5, None), "down");
     }
 
     #[test]
