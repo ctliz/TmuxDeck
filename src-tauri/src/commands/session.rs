@@ -20,13 +20,36 @@ use crate::tmux::{
     is_session_attached, is_session_missing_err, run_tmux, sanitize_session_name,
 };
 
+/// 写出防御版 attach 脚本（has-session 守卫 + shell 降级）。
+/// 脚本文件内容是运行时读取的——即使旧 Ghostty 窗口的 command 快照
+/// 指向此路径，重写后也能优雅降级，不再弹 "failed to launch" 窗口。
+fn write_attach_script(sanitized_name: &str) -> Result<String, String> {
+    let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
+    let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
+    let script_content = format!(
+        "#!/bin/bash\nif '{}' has-session -t '{}' 2>/dev/null; then\n  exec '{}' attach-session -t '{}'\nelse\n  echo \"Session '{}' no longer exists. Starting a shell instead.\"\n  exec \"$SHELL\"\nfi\n",
+        tmux, sanitized_name, tmux, sanitized_name, sanitized_name
+    );
+    std::fs::write(&script_path, script_content)
+        .map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&script_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(&script_path, perms);
+        }
+    }
+    Ok(script_path)
+}
+
 #[tauri::command]
 pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
-    }
-    let native_slots = list_native_slots(&sanitized_name)?;
+    }    let native_slots = list_native_slots(&sanitized_name)?;
     if !native_slots.is_empty() {
         return open_native_workspace(&sanitized_name, &native_slots);
     }
@@ -40,6 +63,11 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
             // session 已消失：不要继续生成脚本启动终端——attach 必败，
             // 脚本 39ms 退出会让 Ghostty 弹 "failed to launch" 窗口。
             if is_session_missing_err(&err_msg) {
+                // 自愈：仍把脚本文件重写为防御版（has-session 守卫 + shell 降级）。
+                // 遗留 Ghostty 窗口的 surface command 是创建时的脚本路径快照，
+                // 但脚本内容运行时读取——重写后旧窗口按 Cmd+D split 继承的也是
+                // 防御脚本，attach 失败时优雅降级而非弹 "failed to launch" 窗口。
+                let _ = write_attach_script(&sanitized_name);
                 return Err("ERR_SESSION_NOT_FOUND".to_string());
             }
         }
@@ -157,23 +185,8 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     {
         let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-        let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
-
-        let script_content = format!(
-            "#!/bin/bash\nif '{}' has-session -t '{}' 2>/dev/null; then\n  exec '{}' attach-session -t '{}'\nelse\n  echo \"Session '{}' no longer exists. Starting a shell instead.\"\n  exec \"$SHELL\"\nfi\n",
-            tmux, sanitized_name, tmux, sanitized_name, sanitized_name
-        );
-        std::fs::write(&script_path, script_content)
+        let script_path = write_attach_script(&sanitized_name)
             .map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
-
-        #[cfg(unix)]
-        {
-            if let Ok(meta) = std::fs::metadata(&script_path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = std::fs::set_permissions(&script_path, perms);
-            }
-        }
 
         let status = match terminal_id.as_str() {
             "ghostty" => Command::new("osascript")
