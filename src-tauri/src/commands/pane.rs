@@ -1,6 +1,7 @@
 use crate::audit::{record_kill, tmux_counts};
 use crate::commands::native::{
-    create_native_slot, kill_native_slot, list_native_slots, open_native_workspace,
+    create_native_slot, kill_native_slot, list_native_slots, rebuild_native_workspace,
+    visible_native_slot_numbers,
 };
 use crate::commands::utils::isolated_agent_command;
 use crate::tmux::{
@@ -54,6 +55,8 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
     let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
     if !native_slots.is_empty() {
+        // 先记录当前可见 slots；关闭的 surface 不在目标集，tmux slot session 继续后台运行。
+        let mut target_numbers = visible_native_slot_numbers(&sanitized)?;
         let next_slot = native_slots
             .iter()
             .filter_map(|slot| slot.slot.parse::<usize>().ok())
@@ -61,14 +64,21 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
             .unwrap_or(0)
             + 1;
         let created = create_native_slot(&sanitized, next_slot, &work_dir, &shell_path)?;
-        let slots = list_native_slots(&sanitized)?;
-        // 方案 A：新增 = 当前可见格子 + 1（不复活关闭的 surface，其 slot 后台保留）。
-        // 查询失败（无 Ghostty 窗口）时降级为补全全部。
-        let target = match crate::commands::native::ghostty_terminal_count() {
-            Some(current) => (current + 1).min(slots.len()),
-            None => slots.len(),
-        };
-        if let Err(error) = open_native_workspace(&sanitized, &slots, target) {
+        target_numbers.push(next_slot);
+        target_numbers.sort_unstable();
+        target_numbers.dedup();
+
+        let all_slots = list_native_slots(&sanitized)?;
+        let target_slots: Vec<_> = target_numbers
+            .iter()
+            .filter_map(|number| {
+                all_slots
+                    .iter()
+                    .find(|slot| slot.slot.parse::<usize>().ok() == Some(*number))
+                    .cloned()
+            })
+            .collect();
+        if let Err(error) = rebuild_native_workspace(&sanitized, &target_slots) {
             let _ = run_tmux(&["kill-session", "-t", &created.target]);
             return Err(error);
         }

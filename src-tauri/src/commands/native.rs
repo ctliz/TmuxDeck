@@ -191,7 +191,11 @@ fn startup_exit_error(target: &str, pane_status: &str) -> Option<String> {
             target, signal
         ));
     }
-    let status = parts.get(1).copied().filter(|value| !value.is_empty()).unwrap_or("unknown");
+    let status = parts
+        .get(1)
+        .copied()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
     Some(format!(
         "ERR_NATIVE_SLOT_AGENT_EXITED|{}|status|{}",
         target, status
@@ -235,15 +239,8 @@ pub(crate) fn create_native_slot(
         let _ = run_tmux(&["kill-session", "-t", &target]);
         return Err(error);
     }
-    let remain_off = run_tmux(&[
-        "set-option",
-        "-w",
-        "-t",
-        &target,
-        "remain-on-exit",
-        "off",
-    ])
-    .map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    let remain_off = run_tmux(&["set-option", "-w", "-t", &target, "remain-on-exit", "off"])
+        .map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
     if !remain_off.status.success() {
         return Err(native_slot_setup_error(
             &target,
@@ -254,6 +251,21 @@ pub(crate) fn create_native_slot(
         target,
         slot: slot_value,
     })
+}
+
+fn run_ghostty_script(script: &str) -> Result<(), String> {
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .map_err(|e| format!("ERR_TERMINAL_LAUNCH_FAILED|{}", e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "ERR_TERMINAL_RETURN_ERR|{}",
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
 }
 
 pub(crate) fn open_native_workspace(
@@ -271,18 +283,58 @@ pub(crate) fn open_native_workspace(
     let current = ghostty_terminal_count().unwrap_or(slots.len());
     let add_direction = add_direction_for(current, crate::tmux::get_attach_client_size());
     let script = ghostty_layout_script(workspace, slots, &tmux, add_direction, target_count);
+    run_ghostty_script(&script)
+}
+
+/// 返回当前可见的 native slot 编号（按标题 `TmuxDeck::<workspace>::<slot>`）。
+/// 查询发生在创建新 slot 之前，供 add_pane 生成「可见 slots + 新 slot」目标集。
+fn parse_visible_slot_numbers(stdout: &str, prefix: &str) -> Vec<usize> {
+    let mut numbers: Vec<usize> = stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(prefix)?.parse().ok())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    numbers
+}
+
+pub(crate) fn visible_native_slot_numbers(workspace: &str) -> Result<Vec<usize>, String> {
+    let prefix = format!("TmuxDeck::{}::", workspace);
+    let script = format!(
+        "tell application \"Ghostty\"\nset resultText to \"\"\nrepeat with w in windows\nrepeat with term in terminals of w\nset termName to name of term\nif termName starts with \"{}\" then\nset resultText to resultText & termName & linefeed\nend if\nend repeat\nend repeat\nreturn resultText\nend tell\n",
+        applescript_string(&prefix)
+    );
     let output = Command::new("osascript")
         .args(["-e", &script])
         .output()
         .map_err(|e| format!("ERR_TERMINAL_LAUNCH_FAILED|{}", e))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
+    if !output.status.success() {
+        return Err(format!(
             "ERR_TERMINAL_RETURN_ERR|{}",
             String::from_utf8_lossy(&output.stderr)
-        ))
+        ));
     }
+    Ok(parse_visible_slot_numbers(
+        &String::from_utf8_lossy(&output.stdout),
+        &prefix,
+    ))
+}
+
+/// 关闭该 workspace 当前所有 surfaces，再按目标 slots 重建面板式网格。
+/// tmux slot sessions 不动，agent 持续运行；视觉上只闪一次。
+pub(crate) fn rebuild_native_workspace(
+    workspace: &str,
+    slots: &[NativeSlot],
+) -> Result<(), String> {
+    if slots.is_empty() {
+        return Err("ERR_TMUX_NO_SERVER".to_string());
+    }
+    let _layout_guard = GHOSTTY_LAYOUT_LOCK
+        .lock()
+        .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
+    let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
+    let script = ghostty_rebuild_script(workspace, slots, &tmux);
+    run_ghostty_script(&script)
 }
 
 pub(crate) fn kill_native_slot(target: &str) -> Result<(), String> {
@@ -391,7 +443,10 @@ fn title(workspace: &str, slot: &str) -> String {
 /// terminals。查询失败（Ghostty 未开 / 无窗口）返回 None，调用方降级。
 pub(crate) fn ghostty_terminal_count() -> Option<usize> {
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"Ghostty\" to count of terminals of front window"])
+        .args([
+            "-e",
+            "tell application \"Ghostty\" to count of terminals of front window",
+        ])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -408,13 +463,46 @@ pub(crate) fn ghostty_terminal_count() -> Option<usize> {
 ///   其余（竖条、方形、接近方形如 2x2 缺格）一律往下（down）。
 ///   实测教训：2x2 删一格后 pane 接近方形（如 79x55，ratio 1.44），
 ///   按 w>=h 判定会一直往右——方形必须默认 down。
-pub(crate) fn add_direction_for(current_surfaces: usize, client: Option<(u32, u32)>) -> &'static str {
+pub(crate) fn add_direction_for(
+    current_surfaces: usize,
+    client: Option<(u32, u32)>,
+) -> &'static str {
     if current_surfaces <= 1 {
         return "down";
     }
     match client {
         Some((w, h)) if h > 0 && w >= h * 2 => "right",
         _ => "down",
+    }
+}
+
+/// 面板式网格：6 格固定 3 列 2 行；其余按 2 列逐行填充。
+/// 返回 `(base_terminal_index, direction)`，n 从 2 开始。
+fn grid_split_for(total: usize, n: usize) -> (usize, &'static str) {
+    if total == 6 {
+        if n <= 3 {
+            (n - 1, "right")
+        } else {
+            (n - 3, "down")
+        }
+    } else if n == 2 {
+        (1, "right")
+    } else {
+        (n - 2, "down")
+    }
+}
+
+/// 向 AppleScript 追加「新建窗口 + 按面板网格创建 slots」逻辑。
+fn append_grid_creation(script: &mut String, workspace: &str, slots: &[NativeSlot], tmux: &str) {
+    script.push_str(&config_script("cfg1", workspace, &slots[0], tmux));
+    script.push_str("set deckWindow to new window with configuration cfg1\ndelay 0.8\nset t1 to item 1 of terminals of deckWindow\nperform action \"set_surface_title:");
+    script.push_str(&applescript_string(&title(workspace, &slots[0].slot)));
+    script.push_str("\" on t1\nset anchorTerminal to t1\n");
+    for (index, slot) in slots.iter().enumerate().skip(1) {
+        let n = index + 1;
+        let (base, direction) = grid_split_for(slots.len(), n);
+        script.push_str(&config_script(&format!("cfg{}", n), workspace, slot, tmux));
+        script.push_str(&format!("set t{n} to split t{base} direction {direction} with configuration cfg{n}\ndelay 0.5\nperform action \"set_surface_title:{}\" on t{n}\nset anchorTerminal to t{n}\n", applescript_string(&title(workspace, &slot.slot))));
     }
 }
 
@@ -430,26 +518,7 @@ fn ghostty_layout_script(
     script.push_str(&applescript_string(&prefix));
     script.push_str("\" then\nset deckWindow to w\nset anchorTerminal to term\nend if\nend repeat\nend repeat\n");
     script.push_str("if deckWindow is missing value then\n");
-    script.push_str(&config_script("cfg1", workspace, &slots[0], tmux));
-    script.push_str("set deckWindow to new window with configuration cfg1\ndelay 0.8\nset t1 to item 1 of terminals of deckWindow\nperform action \"set_surface_title:");
-    script.push_str(&applescript_string(&title(workspace, &slots[0].slot)));
-    script.push_str("\" on t1\nset anchorTerminal to t1\n");
-    for (index, slot) in slots.iter().enumerate().skip(1) {
-        let n = index + 1;
-        script.push_str(&config_script(&format!("cfg{}", n), workspace, slot, tmux));
-        let (base, direction) = match (slots.len(), n) {
-            (4, 2) => ("t1", "right"),
-            (4, 3) => ("t1", "down"),
-            (4, 4) => ("t2", "down"),
-            (6, 2) => ("t1", "right"),
-            (6, 3) => ("t2", "right"),
-            (6, 4) => ("t1", "down"),
-            (6, 5) => ("t2", "down"),
-            (6, 6) => ("t3", "down"),
-            _ => ("anchorTerminal", if n % 2 == 0 { "right" } else { "down" }),
-        };
-        script.push_str(&format!("set t{n} to split {base} direction {direction} with configuration cfg{n}\ndelay 0.5\nperform action \"set_surface_title:{}\" on t{n}\nset anchorTerminal to t{n}\n", applescript_string(&title(workspace, &slot.slot))));
-    }
+    append_grid_creation(&mut script, workspace, slots, tmux);
     script.push_str("else\n");
     // else 分支（已有窗口）：只补到 target_count，不无条件补全（方案 A）。
     // openCount = 本 workspace 当前可见 surface 数（按前缀统计，跨所有窗口）；
@@ -473,6 +542,19 @@ fn ghostty_layout_script(
     script
 }
 
+fn ghostty_rebuild_script(workspace: &str, slots: &[NativeSlot], tmux: &str) -> String {
+    let prefix = applescript_string(&format!("TmuxDeck::{}::", workspace));
+    // Ghostty 在最后一个窗口被关掉时会退出：不能 close-old 后再 new-window。
+    // native workspace 本来就是独立窗口：先保存含该 workspace surface 的 window id，
+    // 创建新网格后按 id 关闭旧窗口。tmux 只短暂双 attach，agent 不受影响。
+    let mut script = format!(
+        "tell application \"Ghostty\"\nset oldWindowIds to {{}}\nrepeat with w in windows\nset isWorkspaceWindow to false\nrepeat with term in terminals of w\nif name of term starts with \"{prefix}\" then\nset isWorkspaceWindow to true\nexit repeat\nend if\nend repeat\nif isWorkspaceWindow then set end of oldWindowIds to id of w\nend repeat\n"
+    );
+    append_grid_creation(&mut script, workspace, slots, tmux);
+    script.push_str("delay 0.5\nrepeat with oldWindowId in oldWindowIds\nset oldWindow to missing value\nrepeat with w in windows\nif id of w is contents of oldWindowId then\nset oldWindow to contents of w\nexit repeat\nend if\nend repeat\nif oldWindow is not missing value then\nclose window oldWindow\ndelay 0.3\nend if\nend repeat\nperform action \"equalize_splits\" on anchorTerminal\nfocus anchorTerminal\nactivate\nend tell\n");
+    script
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,6 +575,63 @@ mod tests {
         let target = slot_target(&workspace, 42);
         assert!(target.len() > 60);
         assert_eq!(validate_native_slot_target(&target), Ok(target.as_str()));
+    }
+
+    #[test]
+    fn test_parse_visible_slot_numbers_filters_sorts_and_deduplicates() {
+        let stdout = "TmuxDeck::deck::5\nTmuxDeck::other::9\nTmuxDeck::deck::2\nTmuxDeck::deck::5\nTmuxDeck::deck::bad\n";
+        assert_eq!(
+            parse_visible_slot_numbers(stdout, "TmuxDeck::deck::"),
+            vec![2, 5]
+        );
+    }
+
+    #[test]
+    fn test_grid_split_rules() {
+        // 非 6 格：2 列逐行填充
+        assert_eq!(grid_split_for(2, 2), (1, "right"));
+        assert_eq!(grid_split_for(3, 3), (1, "down"));
+        assert_eq!(grid_split_for(4, 4), (2, "down"));
+        assert_eq!(grid_split_for(5, 5), (3, "down"));
+        // 6 格：3 列 2 行
+        assert_eq!(grid_split_for(6, 2), (1, "right"));
+        assert_eq!(grid_split_for(6, 3), (2, "right"));
+        assert_eq!(grid_split_for(6, 4), (1, "down"));
+        assert_eq!(grid_split_for(6, 5), (2, "down"));
+        assert_eq!(grid_split_for(6, 6), (3, "down"));
+    }
+
+    #[test]
+    fn test_rebuild_three_slot_grid_uses_visible_plus_new_only() {
+        // 4 格关掉 03/04，再新增 05 → 重建目标 01/02/05（2+1 面板布局）
+        let slots = vec![
+            NativeSlot {
+                target: slot_target("deck", 1),
+                slot: "1".into(),
+            },
+            NativeSlot {
+                target: slot_target("deck", 2),
+                slot: "2".into(),
+            },
+            NativeSlot {
+                target: slot_target("deck", 5),
+                slot: "5".into(),
+            },
+        ];
+        let script = ghostty_rebuild_script("deck", &slots, "/opt/homebrew/bin/tmux");
+        assert!(script.contains("set end of oldWindowIds to id of w"));
+        assert!(script.contains("if id of w is contents of oldWindowId then"));
+        assert!(script.contains("close window oldWindow\ndelay 0.3"));
+        assert!(script.contains("set_surface_title:TmuxDeck::deck::1"));
+        assert!(script.contains("set_surface_title:TmuxDeck::deck::2"));
+        assert!(script.contains("set_surface_title:TmuxDeck::deck::5"));
+        assert!(!script.contains("set_surface_title:TmuxDeck::deck::3"));
+        assert!(!script.contains("set_surface_title:TmuxDeck::deck::4"));
+        assert!(script.contains("set t2 to split t1 direction right"));
+        assert!(script.contains("set t3 to split t1 direction down"));
+        for slot in ["1", "2", "5"] {
+            let _ = std::fs::remove_file(native_slot_script_path("deck", slot));
+        }
     }
 
     #[test]
@@ -564,12 +703,8 @@ mod tests {
 
     #[test]
     fn test_native_slot_uses_one_command_queue_and_isolated_agent_env() {
-        let args = native_slot_command_args(
-            "workspace",
-            2,
-            "/tmp/project",
-            "custom-agent --model 'A B'",
-        );
+        let args =
+            native_slot_command_args("workspace", 2, "/tmp/project", "custom-agent --model 'A B'");
         assert_eq!(args.iter().filter(|arg| *arg == "new-session").count(), 1);
         assert_eq!(args.iter().filter(|arg| *arg == "set-option").count(), 6);
         assert_eq!(
@@ -581,20 +716,28 @@ mod tests {
             .position(|arg| arg.contains("env -u PI_SESSION_ID"))
             .unwrap();
         let first_option = args.iter().position(|arg| arg == "set-option").unwrap();
-        let first_clear = args.iter().position(|arg| arg == "set-environment").unwrap();
+        let first_clear = args
+            .iter()
+            .position(|arg| arg == "set-environment")
+            .unwrap();
         assert!(agent_index < first_option && first_option < first_clear);
         assert_eq!(args[first_option + 4], "remain-on-exit");
         assert_eq!(args[first_option + 5], "on");
         assert!(!args.iter().any(|arg| arg == "PI_CODING_AGENT_DIR"));
         assert!(args[agent_index].contains("custom-agent --model"));
         assert!(args.windows(2).any(|pair| pair == [";", "set-option"]));
-        assert!(args.windows(2).any(|pair| pair == [TERMINAL_OPTION, "ghostty"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == [TERMINAL_OPTION, "ghostty"]));
     }
 
     #[test]
     fn test_native_slot_error_classifies_early_agent_exit() {
         assert_eq!(
-            native_slot_setup_error("workspace__td_slot_02", "no such session: workspace__td_slot_02"),
+            native_slot_setup_error(
+                "workspace__td_slot_02",
+                "no such session: workspace__td_slot_02"
+            ),
             "ERR_NATIVE_SLOT_AGENT_EXITED|workspace__td_slot_02"
         );
         assert_eq!(
@@ -642,27 +785,30 @@ mod tests {
                 slot: slot.to_string(),
             })
             .collect();
-        let script = ghostty_layout_script(
-            "compile-test",
-            &slots,
-            "/opt/homebrew/bin/tmux",
-            "down",
-            4,
-        );
-        let output_path = std::env::temp_dir().join(format!(
-            "tmuxdeck-ghostty-script-{}.scpt",
-            std::process::id()
-        ));
-        let output = Command::new("osacompile")
-            .args(["-e", &script, "-o"])
-            .arg(&output_path)
-            .output()
-            .expect("osacompile should be available on macOS");
-        let _ = std::fs::remove_file(output_path);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let scripts = [
+            ghostty_layout_script("compile-test", &slots, "/opt/homebrew/bin/tmux", "down", 4),
+            ghostty_rebuild_script("compile-test", &slots, "/opt/homebrew/bin/tmux"),
+        ];
+        for (index, script) in scripts.iter().enumerate() {
+            let output_path = std::env::temp_dir().join(format!(
+                "tmuxdeck-ghostty-script-{}-{index}.scpt",
+                std::process::id()
+            ));
+            let output = Command::new("osacompile")
+                .args(["-e", script, "-o"])
+                .arg(&output_path)
+                .output()
+                .expect("osacompile should be available on macOS");
+            let _ = std::fs::remove_file(output_path);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        for slot in 1..=4 {
+            let _ =
+                std::fs::remove_file(native_slot_script_path("compile-test", &slot.to_string()));
+        }
     }
 }
