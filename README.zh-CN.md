@@ -78,7 +78,7 @@ flowchart TB
 
 TmuxDeck 在那条总线上注册成一个名为 `me` 的会话。需要决策的 agent 找你的方式，和它找另一个 agent 完全一样。而由于 broker 本身就在跟踪谁空闲、谁在思考、谁正阻塞等待回复，**「哪个需要我」这个问题是被数据回答的，不是猜出来的**。
 
-> 当前状态：客户端已实现，手机端传输尚未完成。详见 [docs/PRD-v1.12](docs/PRD-v1.12-conversation-bridge.md)。
+> 当前状态：intercom 客户端与安全 WebSocket 传输已实现，完整手机端 UI 仍待完成。详见 [docs/PRD-v1.12](docs/PRD-v1.12-conversation-bridge.md)。
 
 ---
 
@@ -95,7 +95,7 @@ TmuxDeck 在那条总线上注册成一个名为 `me` 的会话。需要决策�
 - **记住你的选择。** 上次的终端、agent、分屏数保存在 `~/.config/tmuxdeck/config.json`。
 - **零配置。** 什么都没装时，回退到系统终端和默认 Shell。
 
-开发中（v1.12）：向分屏发送文本与控制键、intercom broker 客户端、统一的对话模型。
+对话桥基础能力（v1.8）：定向 pane 输入、intercom broker 客户端、结构化 transcript、统一对话模型与按订阅分发的 WebSocket 传输。完整手机端 UI 仍在开发中。
 
 ---
 

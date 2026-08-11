@@ -78,7 +78,7 @@ flowchart TB
 
 TmuxDeck registers on that broker as a session named `me`. An agent that needs a decision addresses you the same way it would address another agent — and because the broker already tracks who is idle, who is thinking, and who is blocked waiting for a reply, **the "which one needs me" question is answered by data, not guesswork**.
 
-> Status: the client is implemented; the phone transport is not. See [docs/PRD-v1.12](docs/PRD-v1.12-conversation-bridge.md).
+> Status: the intercom client and secure WebSocket transport are implemented; the complete mobile client UI is still pending. See [docs/PRD-v1.12](docs/PRD-v1.12-conversation-bridge.md).
 
 ---
 
@@ -95,7 +95,7 @@ Shipped today:
 - **Remembers your choices.** Last terminal, agent, and pane count persist to `~/.config/tmuxdeck/config.json`.
 - **No setup required.** With nothing else installed, it falls back to the system terminal and your shell.
 
-In progress (v1.12): sending text and control keys into panes, intercom broker client, unified conversation model.
+Conversation bridge foundation (v1.8): directed pane input, intercom broker client, structured transcripts, unified conversation model, and subscription-scoped WebSocket transport. The complete mobile UI remains in progress.
 
 ---
 

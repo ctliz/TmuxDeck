@@ -22,7 +22,7 @@ use crate::bridge_state::BridgeState;
 use crate::intercom::{broker_available, IntercomClient, IntercomEvent};
 use crate::tmux::{list_all_panes, send_key_name, validate_pane_id};
 use crate::transcript::CompositeTranscriptSource;
-use crate::transport::WsTransport;
+use crate::transport::{InboundCommand, WsTransport};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
@@ -41,7 +41,7 @@ pub struct BridgeEngine {
     registry: ConversationRegistry,
     transcript: CompositeTranscriptSource,
     transport: WsTransport,
-    cmd_rx: tokio::sync::mpsc::UnboundedReceiver<ClientCommand>,
+    cmd_rx: tokio::sync::mpsc::UnboundedReceiver<InboundCommand>,
     /// pane → 上次已推送到手机端的轮次时间戳
     last_turn_ts: HashMap<String, i64>,
     state: Arc<BridgeState>,
@@ -209,18 +209,23 @@ impl BridgeEngine {
     }
 
     /// 订阅某对话：立即推一次 transcript 尾部快照（游标起始，避免手机端空白）。
-    fn subscribe_snapshot(&mut self, id: &str) {
+    fn subscribe_snapshot(&mut self, conn_id: u64, id: &str) {
         let Some(conv) = self.registry.get(id).cloned() else {
-            let _ = self.transport.emit(&ClientEvent::Error {
-                message: format!("unknown pane {}", id),
-            });
+            let _ = self.transport.emit_to(
+                conn_id,
+                &ClientEvent::Error {
+                    message: format!("unknown pane {}", id),
+                },
+            );
             return;
         };
         match self.transcript.poll(&conv, 0) {
             Ok(turns) => {
                 // 只推尾部（最多 40 条），让手机端一进来就有内容
                 for t in turns.iter().rev().take(40).rev() {
-                    let _ = self.transport.emit(&ClientEvent::Turn { turn: t.clone() });
+                    let _ = self
+                        .transport
+                        .emit_to(conn_id, &ClientEvent::Turn { turn: t.clone() });
                 }
                 if let Some(last) = turns.last() {
                     self.last_turn_ts.insert(id.to_string(), last.timestamp);
@@ -306,59 +311,81 @@ impl BridgeEngine {
     }
 
     // ── 手机指令处理 ──
-    fn on_command(&mut self, cmd: ClientCommand) {
-        match cmd {
+    fn on_command(&mut self, inbound: InboundCommand) {
+        let InboundCommand { conn_id, command } = inbound;
+        match command {
             ClientCommand::Say { id, text } => {
                 let Some(conv) = self.registry.get(&id) else {
-                    let _ = self.transport.emit(&ClientEvent::Error {
-                        message: format!("unknown pane {}", id),
-                    });
+                    let _ = self.transport.emit_to(
+                        conn_id,
+                        &ClientEvent::Error {
+                            message: format!("unknown pane {}", id),
+                        },
+                    );
                     return;
                 };
                 match deliver(conv, &text, self.intercom.as_ref()) {
                     Ok(route) => println!("[bridge] say {} → {} ({:?})", id, text, route),
                     Err(e) => {
-                        let _ = self.transport.emit(&ClientEvent::Error {
-                            message: format!("deliver failed: {}", e),
-                        });
+                        let _ = self.transport.emit_to(
+                            conn_id,
+                            &ClientEvent::Error {
+                                message: format!("deliver failed: {}", e),
+                            },
+                        );
                     }
                 }
             }
             ClientCommand::Key { id, key } => {
                 if !validate_pane_id(&id) {
-                    let _ = self.transport.emit(&ClientEvent::Error {
-                        message: format!("invalid pane {}", id),
-                    });
+                    let _ = self.transport.emit_to(
+                        conn_id,
+                        &ClientEvent::Error {
+                            message: format!("invalid pane {}", id),
+                        },
+                    );
                     return;
                 }
                 match send_key_name(&id, &key) {
                     Ok(()) => println!("[bridge] key {} → {}", id, key),
                     Err(e) => {
-                        let _ = self.transport.emit(&ClientEvent::Error {
-                            message: format!("key failed: {}", e),
-                        });
+                        let _ = self.transport.emit_to(
+                            conn_id,
+                            &ClientEvent::Error {
+                                message: format!("key failed: {}", e),
+                            },
+                        );
                     }
                 }
             }
             ClientCommand::Forward { from, to, text } => {
                 let Some(f) = self.registry.get(&from) else {
-                    let _ = self.transport.emit(&ClientEvent::Error {
-                        message: format!("unknown pane {}", from),
-                    });
+                    let _ = self.transport.emit_to(
+                        conn_id,
+                        &ClientEvent::Error {
+                            message: format!("unknown pane {}", from),
+                        },
+                    );
                     return;
                 };
                 let Some(t) = self.registry.get(&to) else {
-                    let _ = self.transport.emit(&ClientEvent::Error {
-                        message: format!("unknown pane {}", to),
-                    });
+                    let _ = self.transport.emit_to(
+                        conn_id,
+                        &ClientEvent::Error {
+                            message: format!("unknown pane {}", to),
+                        },
+                    );
                     return;
                 };
                 match forward(f, t, &text, self.intercom.as_ref()) {
                     Ok(route) => println!("[bridge] forward {} → {} ({:?})", from, to, route),
                     Err(e) => {
-                        let _ = self.transport.emit(&ClientEvent::Error {
-                            message: format!("forward failed: {}", e),
-                        });
+                        let _ = self.transport.emit_to(
+                            conn_id,
+                            &ClientEvent::Error {
+                                message: format!("forward failed: {}", e),
+                            },
+                        );
                     }
                 }
             }
@@ -367,7 +394,7 @@ impl BridgeEngine {
             }
             ClientCommand::Subscribe { id } => {
                 // 单活跃订阅：新 subscribe 直接替换（emit 过滤已由 transport 就地更新）
-                self.subscribe_snapshot(&id);
+                self.subscribe_snapshot(conn_id, &id);
             }
             ClientCommand::Unsubscribe => {
                 // 清空订阅：停止该对话轮询（last_turn_ts 保留，重新订阅时继续增量）
@@ -382,6 +409,165 @@ mod tests {
     use super::*;
     use crate::bridge::Conversation;
     use crate::tmux::PaneDetail;
+    use futures_util::stream::{SplitSink, SplitStream};
+    use futures_util::{SinkExt, StreamExt};
+    use std::net::SocketAddr;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::protocol::Message;
+    use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+    type TestSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+
+    async fn connect_client(
+        addr: SocketAddr,
+        token: &str,
+    ) -> (SplitSink<TestSocket, Message>, SplitStream<TestSocket>) {
+        let url = format!("ws://{}/v1/ws?token={}", addr, token);
+        let mut req = url.into_client_request().unwrap();
+        req.headers_mut().insert(
+            "sec-websocket-protocol",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static(
+                crate::transport::WS_SUBPROTOCOL,
+            ),
+        );
+        tokio_tungstenite::connect_async(req).await.unwrap().0.split()
+    }
+
+    async fn recv_text(stream: &mut SplitStream<TestSocket>) -> String {
+        loop {
+            match stream.next().await.unwrap().unwrap() {
+                Message::Text(text) => return text.to_string(),
+                Message::Ping(_) | Message::Pong(_) => continue,
+                other => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+    }
+
+    async fn assert_no_text(stream: &mut SplitStream<TestSocket>, message: &str) {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), recv_text(stream))
+                .await
+                .is_err(),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn test_two_connections_use_targeted_results_and_subscription_delivery() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (transport, mut cmd_rx) = WsTransport::bind().await.unwrap();
+            let (addr, token) = transport.pairing();
+            let (mut sink_a, mut stream_a) = connect_client(addr, token).await;
+            let (mut sink_b, mut stream_b) = connect_client(addr, token).await;
+
+            sink_a
+                .send(Message::Text(
+                    r#"{"type":"subscribe","id":"%missing"}"#.into(),
+                ))
+                .await
+                .unwrap();
+            let unknown = cmd_rx.recv().await.unwrap();
+            let conn_a = unknown.conn_id;
+
+            sink_b
+                .send(Message::Text(r#"{"type":"refresh"}"#.into()))
+                .await
+                .unwrap();
+            let conn_b = cmd_rx.recv().await.unwrap().conn_id;
+            assert_ne!(conn_a, conn_b);
+
+            let mut engine = BridgeEngine {
+                intercom: None,
+                intercom_rx: None,
+                registry: ConversationRegistry::new(),
+                transcript: CompositeTranscriptSource::new(),
+                transport,
+                cmd_rx,
+                last_turn_ts: HashMap::new(),
+                state: Arc::new(BridgeState::default()),
+                last_refresh: Instant::now(),
+                fast_due: false,
+            };
+
+            // A 的未知订阅错误只回 A。
+            engine.on_command(unknown);
+            assert!(recv_text(&mut stream_a).await.contains("unknown pane %missing"));
+            assert_no_text(&mut stream_b, "B 不应收到 A 的命令错误").await;
+
+            // A/B 分别订阅不同对话；入站 envelope 保留各自连接 ID。
+            sink_a
+                .send(Message::Text(
+                    r#"{"type":"subscribe","id":"%3"}"#.into(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(engine.cmd_rx.recv().await.unwrap().conn_id, conn_a);
+            sink_b
+                .send(Message::Text(
+                    r#"{"type":"subscribe","id":"%9"}"#.into(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(engine.cmd_rx.recv().await.unwrap().conn_id, conn_b);
+
+            let snapshot = ClientEvent::Turn {
+                turn: Turn {
+                    conversation_id: "%3".into(),
+                    role: TurnRole::Agent,
+                    text: "snapshot".into(),
+                    timestamp: 1,
+                },
+            };
+            engine.transport.emit_to(conn_a, &snapshot).unwrap();
+            assert!(recv_text(&mut stream_a).await.contains("snapshot"));
+            assert_no_text(&mut stream_b, "订阅快照不应发给其他连接").await;
+
+            let incremental = ClientEvent::Turn {
+                turn: Turn {
+                    conversation_id: "%3".into(),
+                    role: TurnRole::Agent,
+                    text: "incremental".into(),
+                    timestamp: 2,
+                },
+            };
+            engine.transport.emit(&incremental).unwrap();
+            assert!(recv_text(&mut stream_a).await.contains("incremental"));
+            assert_no_text(&mut stream_b, "持续 Turn 只应发给对应对话订阅者").await;
+
+            // 全局同步事件不受订阅过滤，两个连接都收到。
+            engine
+                .transport
+                .emit(&ClientEvent::Conversations { items: Vec::new() })
+                .unwrap();
+            assert!(recv_text(&mut stream_a).await.contains("conversations"));
+            assert!(recv_text(&mut stream_b).await.contains("conversations"));
+            engine
+                .transport
+                .emit(&ClientEvent::StatusChanged {
+                    id: "%3".into(),
+                    status: ConversationStatus::Idle,
+                })
+                .unwrap();
+            assert!(recv_text(&mut stream_a).await.contains("status-changed"));
+            assert!(recv_text(&mut stream_b).await.contains("status-changed"));
+
+            // 同一对话允许多连接订阅，后续增量应各自收到。
+            sink_b
+                .send(Message::Text(
+                    r#"{"type":"subscribe","id":"%3"}"#.into(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(engine.cmd_rx.recv().await.unwrap().conn_id, conn_b);
+            engine.transport.emit(&incremental).unwrap();
+            assert!(recv_text(&mut stream_a).await.contains("incremental"));
+            assert!(recv_text(&mut stream_b).await.contains("incremental"));
+        });
+    }
 
     #[test]
     fn test_say_unknown_pane_emits_error() {

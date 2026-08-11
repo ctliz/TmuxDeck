@@ -5,9 +5,9 @@
 
 ## 当前状态
 
-- **最新发布**：v1.7.0（2026-08-10）— 合并 v1.7 托盘 / v1.8 终端图标 / v1.9 卡片头部 / v1.10 pane 管理 / v1.11 防重复开窗
+- **最新发布**：v1.8.0（2026-08-11）— 对话桥后端与安全 WebSocket 传输、pane/card 拖拽排序、新图标体系、定向通信修复
 - **主线**：main 分支直推，CI（macOS + Windows 构建 + 前后端测试）全绿
-- **测试体系**：后端 5 单测 + 前端 3 单测 + CI 测试步骤（已落地）
+- **测试体系**：后端 43 项通过（另 1 项真机测试 ignored）+ 前端 3 项通过 + CI 测试步骤
 - **质量基线**：tmux 无 server 报错已治理（ERR_TMUX_NO_SERVER 双语友好提示）
 
 ## 规划队列
@@ -29,10 +29,11 @@
 - [x] 文档落地（架构 / 协议 / 决策 / 脚本说明 / CONTRIBUTING 同步）
 - [x] **真机验证**：`node scripts/intercom-probe.mjs` 6 条清单全过（2026-08-10，tmux-backend）
 - [x] `cargo test` 通过（27 项，2026-08-10）
-- [ ] `TranscriptSource` 具体实现 —— **唯一未定项**，见下
+- [x] `TranscriptSource`：Pi / Claude Code 结构化会话记录读取，`capture-pane` 兜底
+- [x] WebSocket 传输：token 鉴权、订阅过滤、心跳与连接级定向回复
+- [ ] 完整手机端 UI 与推送入口
 
-**未解决**：对话内容（agent 说了什么）的来源。`capture-pane` 只能兜底；
-推荐读 agent 自己的结构化会话记录。trait 已就位，实现待立项。
+**未解决**：完整手机端 UI 尚未交付；当前已具备安全 WebSocket 传输与对话协议。
 
 **外部依赖**：本机装的是 `nicobailon/pi-intercom` 原版（pi-only），
 Claude Code / Codex 仍是孤岛。打通需整体迁移到 `dataforxyz` 跨 harness 家族，
@@ -62,7 +63,7 @@ Claude Code / Codex 仍是孤岛。打通需整体迁移到 `dataforxyz` 跨 har
 - [x] tmux 无 server 报错治理（v1.7.0，2026-08-10）
 - [x] 发布流程命令行化（gh CLI 接入，draft → 正式发布）
 - [x] create_session 字段命名修复（v1.7.1，2026-08-10）
-- [ ] v1.7.2 候选：Ghostty 打开会话多实例 bug（open -na 强制新实例，AppleScript new window 方案已验证，开发中）
+- [x] v1.7.2：Ghostty 打开会话多实例 bug（AppleScript new window，2026-08-11）
 - [ ] 终端启动方式评估：wezterm / kitty / alacritty 的 open -na 潜在同类多实例问题（Ghostty 修复后评估，不主动扩大范围）
 - [ ] README 措辞：Windows 验证通过后，从「macOS 为 battle-tested」更新为双平台声明
 

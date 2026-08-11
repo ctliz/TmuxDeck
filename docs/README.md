@@ -51,4 +51,4 @@
 
 [v1.5.0](./RELEASE-NOTES-v1.5.0.md) · [v1.6.0](./RELEASE-NOTES-v1.6.0.md) ·
 [v1.7.0](./RELEASE-NOTES-v1.7.0.md) · [v1.7.1](./RELEASE-NOTES-v1.7.1.md) ·
-[v1.7.2](./RELEASE-NOTES-v1.7.2.md)
+[v1.7.2](./RELEASE-NOTES-v1.7.2.md) · [v1.8.0](./RELEASE-NOTES-v1.8.0.md)

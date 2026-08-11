@@ -10,8 +10,8 @@
 //! - 每 IP 每 10 秒最多 5 次握手尝试（防扫描）
 //! - 单帧 64 KiB、`text` 字段 8 KiB、100 帧/秒/连接、20s 心跳 60s 超时
 //!
-//! 上层（引擎）通过 `Transport::emit` 广播事件（turn 按订阅过滤）。
-//! 连接级细节（握手、限流、心跳）在 `connection.rs`。
+//! 上层（引擎）通过 `Transport::emit` 分发全局/订阅事件，通过 `emit_to`
+//! 单播请求结果。连接级细节（握手、限流、心跳）在 `connection.rs`。
 
 use crate::bridge::{ClientCommand, ClientEvent, Transport};
 use std::collections::HashMap;
@@ -128,6 +128,12 @@ pub struct ConnState {
     pub(crate) subscribed: Option<String>,
 }
 
+/// 带来源连接的入站指令，供引擎定向返回请求结果。
+pub struct InboundCommand {
+    pub(crate) conn_id: u64,
+    pub(crate) command: ClientCommand,
+}
+
 /// WebSocket 传输实现。
 ///
 /// - `bind()` 在 loopback 动态端口上起监听，返回传输对象与手机指令流
@@ -139,14 +145,14 @@ pub struct WsTransport {
     addr: SocketAddr,
     token: String,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
-    cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    cmd_tx: mpsc::UnboundedSender<InboundCommand>,
 }
 
 impl WsTransport {
     /// 绑定 loopback 动态端口并开始接受连接。
     ///
     /// 返回 `(传输对象, 手机指令接收端)`。指令流由引擎消费。
-    pub async fn bind() -> Result<(Self, mpsc::UnboundedReceiver<ClientCommand>), String> {
+    pub async fn bind() -> Result<(Self, mpsc::UnboundedReceiver<InboundCommand>), String> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| format!("ERR_WS_BIND|{}", e))?;
@@ -178,6 +184,26 @@ impl WsTransport {
     /// 配对信息：监听地址与 token（供桌面端展示二维码/文本）。
     pub fn pairing(&self) -> (SocketAddr, &str) {
         (self.addr, &self.token)
+    }
+
+    /// 只向指定连接推送请求结果（快照、错误、未来回执）。
+    pub fn emit_to(&mut self, conn_id: u64, event: &ClientEvent) -> Result<(), String> {
+        let json = serde_json::to_string(event).map_err(|e| format!("ERR_WS_SERIALIZE|{}", e))?;
+        if json.len() > MAX_FRAME_BYTES {
+            return Err("ERR_WS_FRAME_TOO_LARGE".to_string());
+        }
+        let dead = {
+            let clients = self.clients.lock().map_err(|_| "ERR_WS_LOCK".to_string())?;
+            clients
+                .get(&conn_id)
+                .is_some_and(|conn| conn.tx.send(json).is_err())
+        };
+        if dead {
+            if let Ok(mut clients) = self.clients.lock() {
+                clients.remove(&conn_id);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -236,7 +262,11 @@ impl WsTransport {
     }
 
     /// 更新某连接的订阅状态（由连接任务在收到 subscribe/unsubscribe 时调用）。
-    pub(crate) fn set_subscription(conn_id: u64, subscribed: Option<String>, clients: &Arc<Mutex<HashMap<u64, ConnState>>>) {
+    pub(crate) fn set_subscription(
+        conn_id: u64,
+        subscribed: Option<String>,
+        clients: &Arc<Mutex<HashMap<u64, ConnState>>>,
+    ) {
         if let Ok(mut c) = clients.lock() {
             if let Some(conn) = c.get_mut(&conn_id) {
                 conn.subscribed = subscribed;

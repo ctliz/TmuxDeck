@@ -17,30 +17,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat <<'EOF' > /tmp/release-notes.md
-          ## TmuxDeck v1.7.2
-
-          A patch release fixing the Ghostty duplicate-instance bug and shipping the single-file codebase split.
-
-          ### Fix: Ghostty no longer spawns duplicate instances
-
-          Opening a session launched a **new Ghostty instance** every time (`open -na` forces a new process), so repeated clicks piled up instances and windows. Opening now uses Ghostty's native AppleScript `new window with configuration` - one instance, one new window per click, command still executed reliably.
-
-          ### Refactor: codebase split (behavior unchanged)
-
-          - Rust backend split from one 1157-line `lib.rs` into focused modules: `config`, `models`, `registry`, `tmux`, `tray`, and `commands/` (session / pane / utils).
-          - Frontend split from one 987-line `App.tsx` into `types.ts` plus components: `SessionCard`, `CreateWorkspaceModal`, `TmuxMissingScreen`, `SearchHeader`, `NewWorkspaceCard`.
-          - Every file is now under 400 lines; no dependencies added, no behavior changed.
-
-          ### Install
-
-          - macOS: download the `.dmg`, drag into Applications. If Gatekeeper warns on first launch, right-click -> Open (unsigned build).
-          - Windows: download the `.exe` (NSIS) or `.msi`.
-          EOF
+          notes_file="docs/RELEASE-NOTES-${{ github.ref_name }}.md"
+          if [ ! -f "$notes_file" ]; then
+            echo "Release notes not found: $notes_file" >&2
+            exit 1
+          fi
           gh release create "${{ github.ref_name }}" \
             --title "TmuxDeck ${{ github.ref_name }}" \
             --draft \
-            --notes-file /tmp/release-notes.md
+            --notes-file "$notes_file"
           echo "::notice::Draft release created for ${{ github.ref_name }}"
 
   build-macos:
@@ -128,3 +113,14 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe \
             src-tauri/target/release/bundle/msi/*.msi \
             --clobber
+
+  publish-release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" --draft=false --latest
+          echo "::notice::Published release ${{ github.ref_name }}"

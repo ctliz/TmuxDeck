@@ -5,7 +5,9 @@
 //! 不涉及对话语义（那是引擎的事）。
 
 use crate::bridge::{ClientCommand, ClientCommand::Subscribe, ClientCommand::Unsubscribe};
-use crate::transport::{host_allowed, ConnState, WsTransport, MAX_FRAME_BYTES, MAX_TEXT_BYTES};
+use crate::transport::{
+    host_allowed, ConnState, InboundCommand, WsTransport, MAX_FRAME_BYTES, MAX_TEXT_BYTES,
+};
 use crate::transport::{HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, MAX_FRAMES_PER_SEC, WS_SUBPROTOCOL};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
@@ -24,7 +26,7 @@ pub(crate) async fn accept_loop(
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
     next_id: Arc<AtomicU64>,
     token: String,
-    cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    cmd_tx: mpsc::UnboundedSender<InboundCommand>,
 ) -> Result<(), String> {
     // 握手限速桶：IP → 最近握手时间
     let mut handshakes: HashMap<IpAddr, Vec<Instant>> = HashMap::new();
@@ -60,7 +62,7 @@ async fn handle_connection(
     conn_id: u64,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
     token: String,
-    cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    cmd_tx: mpsc::UnboundedSender<InboundCommand>,
 ) -> Result<(), String> {
     #[allow(clippy::result_large_err)] // tungstenite 的 ErrorResponse 是 Response 类型，API 强制
     let ws = accept_hdr_async(
@@ -157,7 +159,10 @@ async fn handle_connection(
                                     }
                                     _ => {}
                                 }
-                                let _ = cmd_tx.send(cmd);
+                                let _ = cmd_tx.send(InboundCommand {
+                                    conn_id,
+                                    command: cmd,
+                                });
                             }
                             Err(_) => break, // 非法指令：断开
                         }
