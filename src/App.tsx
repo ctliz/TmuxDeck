@@ -211,7 +211,7 @@ export default function App() {
     setLoading(true);
     try {
       await invoke("create_session", {
-        opts: { name: cleanName, dir: workingDir.trim() || null, agentId: selectedAgent, panes: selectedPanes, terminalId: selectedTerminal },
+        opts: { name: cleanName, dir: workingDir.trim() || null, agent_id: selectedAgent, panes: selectedPanes, terminal_id: selectedTerminal },
       });
       setShowCreateModal(false);
       setNewSessionName("");
