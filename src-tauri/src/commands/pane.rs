@@ -51,7 +51,7 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
         .map(|slot| slot.target.as_str())
         .unwrap_or(sanitized.as_str());
     let work_dir = get_session_first_pane_dir(work_dir_target).unwrap_or_else(|| "~".to_string());
-    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
     if !native_slots.is_empty() {
         let next_slot = native_slots

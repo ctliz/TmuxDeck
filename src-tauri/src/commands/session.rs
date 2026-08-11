@@ -14,7 +14,7 @@ use crate::commands::utils::{
 };
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
-use crate::registry::detect_environment;
+use crate::registry::{detect_environment, ToolInfo};
 use crate::tmux::{
     check_tmux_installed, get_session_panes, has_attached_clients, is_no_server_err,
     is_session_attached, run_tmux, sanitize_session_name,
@@ -230,6 +230,14 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     }
 }
 
+fn resolve_agent_command(agent_id: &str, agents: &[ToolInfo]) -> String {
+    agents
+        .iter()
+        .find(|agent| agent.id == agent_id)
+        .map(|agent| agent.path.clone())
+        .unwrap_or_else(|| agent_id.to_string())
+}
+
 #[tauri::command]
 pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&opts.name)?;
@@ -239,16 +247,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
 
     let env_info = detect_environment();
 
-    let agent_cmd = if opts.agent_id == "shell" {
-        "bash".to_string()
-    } else {
-        env_info
-            .agents
-            .iter()
-            .find(|a| a.id == opts.agent_id)
-            .map(|a| a.path.clone())
-            .unwrap_or_else(|| opts.agent_id.clone())
-    };
+    let agent_cmd = resolve_agent_command(&opts.agent_id, &env_info.agents);
 
     let work_dir_clean = opts
         .dir
@@ -556,6 +555,27 @@ mod tests {
             Err("ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED".to_string())
         );
         assert_eq!(reject_native_rename(false), Ok(()));
+    }
+
+    #[test]
+    fn resolve_agent_uses_detected_shell_and_agent_paths() {
+        let agents = vec![
+            ToolInfo {
+                id: "shell".to_string(),
+                name: "Plain Shell".to_string(),
+                path: "/bin/zsh".to_string(),
+                icon_path: None,
+            },
+            ToolInfo {
+                id: "pi".to_string(),
+                name: "Pi".to_string(),
+                path: "/opt/bin/pi".to_string(),
+                icon_path: None,
+            },
+        ];
+        assert_eq!(resolve_agent_command("shell", &agents), "/bin/zsh");
+        assert_eq!(resolve_agent_command("pi", &agents), "/opt/bin/pi");
+        assert_eq!(resolve_agent_command("unknown-agent", &agents), "unknown-agent");
     }
 
     #[test]

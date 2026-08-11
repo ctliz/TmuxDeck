@@ -401,9 +401,23 @@ mod integration_tests {
             }).unwrap();
             transport.emit(&ClientEvent::Error { message: "x".into() }).unwrap();
 
-            // 收到非 turn 事件（Error 全量推）
-            let msg = tokio::time::timeout(Duration::from_secs(2), stream.next()).await.unwrap().unwrap().unwrap();
-            assert!(msg.to_string().contains("\"type\":\"error\""));
+            // 收到非 turn 事件（Error 全量推）；跨平台忽略先到的心跳/非文本帧。
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    match stream.next().await {
+                        Some(Ok(Message::Text(text)))
+                            if text.contains("\"type\":\"error\"") =>
+                        {
+                            break;
+                        }
+                        Some(Ok(_)) => continue,
+                        Some(Err(error)) => panic!("websocket read failed: {}", error),
+                        None => panic!("websocket closed before Error event"),
+                    }
+                }
+            })
+            .await
+            .expect("timed out waiting for Error event");
 
             // 2 秒内不应收到 turn（忽略服务端心跳 Ping/Pong）
             let mut got_turn = false;

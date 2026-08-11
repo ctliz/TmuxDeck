@@ -509,6 +509,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn test_generated_ghostty_script_compiles() {
+        if !std::path::Path::new("/Applications/Ghostty.app").exists() {
+            return;
+        }
         let slots: Vec<NativeSlot> = (1..=4)
             .map(|slot| NativeSlot {
                 target: slot_target("compile-test", slot),
