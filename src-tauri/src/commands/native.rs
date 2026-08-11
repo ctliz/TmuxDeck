@@ -125,11 +125,14 @@ fn native_slot_command_args(
 ) -> Vec<String> {
     let target = slot_target(workspace, slot);
     let slot_value = slot.to_string();
+    let augmented_path = crate::commands::utils::build_augmented_path_for_command(agent_cmd);
     let mut args = vec![
         "new-session".to_string(),
         "-d".to_string(),
         "-s".to_string(),
         target.clone(),
+        "-e".to_string(),
+        format!("PATH={}", augmented_path),
         "-e".to_string(),
         format!("TMUXDECK_WORKSPACE={}", workspace),
         "-e".to_string(),

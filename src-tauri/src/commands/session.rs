@@ -252,7 +252,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     let work_dir_clean = opts
         .dir
         .clone()
-        .filter(|d| !d.trim().is_empty())
+        .filter(|d| !d.trim().is_empty() && (d == "~" || std::path::Path::new(d).exists()))
         .map(|d| to_wsl_path(d))
         .unwrap_or_else(|| {
             if cfg!(target_os = "windows") {
@@ -278,11 +278,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         }
     }
 
+    let augmented_path = crate::commands::utils::build_augmented_path_for_command(&agent_cmd);
     let mut new_args = vec![
         "new-session".to_string(),
         "-d".to_string(),
         "-s".to_string(),
         sanitized_name.clone(),
+        "-e".to_string(),
+        format!("PATH={}", augmented_path),
     ];
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
