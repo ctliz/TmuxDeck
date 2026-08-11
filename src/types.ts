@@ -43,4 +43,5 @@ export interface TmuxSession {
   last_active_ts: number;
   panes: TmuxPane[];
   native_split?: boolean;
+  terminal_id?: string;
 }

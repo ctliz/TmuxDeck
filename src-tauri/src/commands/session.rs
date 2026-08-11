@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use crate::audit::{observe_session_count, record_kill, tmux_counts};
 use crate::commands::native::{
     create_native_workspace, destroy_native_workspace, ghostty_native_available, list_native_slots,
-    open_native_workspace,
+    open_native_workspace, TERMINAL_OPTION,
 };
 use crate::commands::utils::{
     append_identity_env_clears, isolated_agent_command, to_wsl_path,
@@ -290,6 +290,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     }
     new_args.push(isolated_agent_command(&agent_cmd));
     append_identity_env_clears(&mut new_args, &sanitized_name);
+    new_args.extend([
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        sanitized_name.clone(),
+        TERMINAL_OPTION.to_string(),
+        opts.terminal_id.clone(),
+    ]);
     let new_refs: Vec<&str> = new_args.iter().map(String::as_str).collect();
 
     let output = run_tmux(&new_refs).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
@@ -333,6 +341,16 @@ fn save_create_defaults(opts: &CreateOpts) {
     let _ = save_config(cfg);
 }
 
+fn terminal_id_from_metadata(native: bool, value: &str) -> Option<String> {
+    if !value.is_empty() {
+        Some(value.to_string())
+    } else if native {
+        Some("ghostty".to_string())
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     if check_tmux_installed().is_none() {
@@ -342,7 +360,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     let output = run_tmux(&[
         "list-sessions",
         "-F",
-        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}|#{session_activity}|#{@tmuxdeck-native-split}|#{@tmuxdeck-workspace}|#{@tmuxdeck-slot}",
+        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}|#{session_activity}|#{@tmuxdeck-native-split}|#{@tmuxdeck-workspace}|#{@tmuxdeck-slot}|#{@tmuxdeck-terminal}",
     ])
     .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
 
@@ -361,7 +379,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
 
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() < 9 {
+        if parts.len() < 10 {
             continue;
         }
         let id = parts[0].to_string();
@@ -373,6 +391,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
         let native = parts[6] == "1" && !parts[7].is_empty();
         let workspace = parts[7].to_string();
         let slot = (!parts[8].is_empty()).then_some(parts[8]);
+        let terminal_id = terminal_id_from_metadata(native, parts[9]);
         let panes = get_session_panes(&target, attached, slot);
 
         if native {
@@ -388,6 +407,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
                     last_active_ts: 0,
                     panes: Vec::new(),
                     native_split: true,
+                    terminal_id: terminal_id.clone(),
                 });
             entry.attached |= attached;
             entry.last_active_ts = entry.last_active_ts.max(last_active_ts);
@@ -405,6 +425,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
                 last_active_ts,
                 panes,
                 native_split: false,
+                terminal_id,
             });
         }
     }
@@ -535,5 +556,18 @@ mod tests {
             Err("ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED".to_string())
         );
         assert_eq!(reject_native_rename(false), Ok(()));
+    }
+
+    #[test]
+    fn terminal_metadata_preserves_legacy_compatibility() {
+        assert_eq!(
+            terminal_id_from_metadata(true, ""),
+            Some("ghostty".to_string())
+        );
+        assert_eq!(terminal_id_from_metadata(false, ""), None);
+        assert_eq!(
+            terminal_id_from_metadata(false, "iterm2"),
+            Some("iterm2".to_string())
+        );
     }
 }

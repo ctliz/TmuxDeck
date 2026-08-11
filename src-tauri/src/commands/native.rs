@@ -9,6 +9,7 @@ static GHOSTTY_LAYOUT_LOCK: Mutex<()> = Mutex::new(());
 pub(crate) const NATIVE_OPTION: &str = "@tmuxdeck-native-split";
 pub(crate) const WORKSPACE_OPTION: &str = "@tmuxdeck-workspace";
 pub(crate) const SLOT_OPTION: &str = "@tmuxdeck-slot";
+pub(crate) const TERMINAL_OPTION: &str = "@tmuxdeck-terminal";
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeSlot {
@@ -152,6 +153,7 @@ fn native_slot_command_args(
         (NATIVE_OPTION, "1"),
         (WORKSPACE_OPTION, workspace),
         (SLOT_OPTION, slot_value.as_str()),
+        (TERMINAL_OPTION, "ghostty"),
         ("status", "off"),
     ] {
         args.extend([
@@ -445,7 +447,7 @@ mod tests {
             "custom-agent --model 'A B'",
         );
         assert_eq!(args.iter().filter(|arg| *arg == "new-session").count(), 1);
-        assert_eq!(args.iter().filter(|arg| *arg == "set-option").count(), 5);
+        assert_eq!(args.iter().filter(|arg| *arg == "set-option").count(), 6);
         assert_eq!(
             args.iter().filter(|arg| *arg == "set-environment").count(),
             crate::commands::utils::AGENT_IDENTITY_ENV_VARS.len()
@@ -462,6 +464,7 @@ mod tests {
         assert!(!args.iter().any(|arg| arg == "PI_CODING_AGENT_DIR"));
         assert!(args[agent_index].contains("custom-agent --model"));
         assert!(args.windows(2).any(|pair| pair == [";", "set-option"]));
+        assert!(args.windows(2).any(|pair| pair == [TERMINAL_OPTION, "ghostty"]));
     }
 
     #[test]

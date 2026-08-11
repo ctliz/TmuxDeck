@@ -45,15 +45,22 @@ export function CardGrid({
 
   const handleCardDragStart = (e: React.DragEvent, sessionId: string) => {
     e.dataTransfer.setData("application/x-tmuxdeck-card", sessionId);
+    e.dataTransfer.setData("text/plain", sessionId);
     e.dataTransfer.effectAllowed = "move";
     setDraggingCardId(sessionId);
   };
 
   const handleCardDragOver = (e: React.DragEvent, sessionId: string) => {
-    if (e.dataTransfer.types.includes("application/x-tmuxdeck-card")) {
+    const types = Array.from(e.dataTransfer.types || []);
+    const isCardDrag =
+      draggingCardId !== null ||
+      types.includes("application/x-tmuxdeck-card") ||
+      types.includes("text/plain");
+
+    if (isCardDrag) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      if (draggingCardId !== sessionId) {
+      if (draggingCardId !== sessionId && cardDragOverId !== sessionId) {
         setCardDragOverId(sessionId);
       }
     }
@@ -68,7 +75,10 @@ export function CardGrid({
   const handleCardDrop = (e: React.DragEvent, targetSessionId: string) => {
     e.preventDefault();
     setCardDragOverId(null);
-    const sourceSessionId = e.dataTransfer.getData("application/x-tmuxdeck-card");
+    const sourceSessionId =
+      e.dataTransfer.getData("application/x-tmuxdeck-card") ||
+      e.dataTransfer.getData("text/plain") ||
+      draggingCardId;
     setDraggingCardId(null);
 
     if (!sourceSessionId || sourceSessionId === targetSessionId) return;

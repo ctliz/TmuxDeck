@@ -55,9 +55,11 @@ test("native split models and translations", () => {
     created_at: "123456",
     last_active_ts: 0,
     native_split: true,
+    terminal_id: "ghostty",
     panes: [samplePane],
   };
   assert.strictEqual(sampleSession.native_split, true);
+  assert.strictEqual(sampleSession.terminal_id, "ghostty");
   assert.strictEqual(samplePane.session_target, "workspace:1");
   assert.strictEqual(samplePane.slot, "1");
   assert.strictEqual(samplePane.attached, false);

@@ -7,6 +7,7 @@ This release adds Ghostty-native multi-agent workspaces while preserving tmux-ba
 - Ghostty 1.3+ workspaces use native terminal splits for smoother multi-agent interaction.
 - Each visible agent runs in its own single-pane tmux session, so closing a Ghostty split or window detaches the view without terminating the agent.
 - Supports deterministic 1, 2, 4, and 6-agent layouts, workspace restoration, adding agents, and exact slot termination.
+- Workspace cards remember and display their launch terminal with one clear start/restore action; pane previews use a stable scrollable layout and the full header acts as the card drag handle.
 - Other terminals continue to use the existing tmux multi-pane layout.
 
 ### Safer workspace lifecycle

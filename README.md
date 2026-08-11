@@ -10,6 +10,19 @@ Built with [Tauri](https://tauri.app/). macOS is the primary platform; Windows w
 
 ---
 
+## At a glance
+
+- **Orchestrate many agents at once.** Every workspace is a card; every pane shows what's running and how long it has been quiet.
+- **Native Ghostty splits.** 1/2/4/6-pane grids, each agent in its own tmux session — close the window, the agent keeps working.
+- **Plays well with classic setups.** Plain terminals and tmux multi-pane layouts are fully supported.
+- **Runs what you already use.** Pi, Claude Code, Codex, OpenCode, Gemini CLI, Aider, custom commands, or a plain shell — detected at runtime.
+- **One-click control.** Create, start, resume, kill a single agent, or destroy a whole workspace from the dashboard.
+- **Lives in the menu bar.** Close the window and it keeps running — status, previews, and control stay one click away.
+- **Agents find each other.** Registers on the Agent Intercom broker for cross-harness discovery, live status, and directed messaging.
+- **macOS first, WSL-ready.** Built on Tauri; Windows runs through WSL.
+
+---
+
 ## The idea
 
 Running one agent is easy — you watch it. Running twelve is a different problem entirely.

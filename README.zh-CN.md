@@ -10,6 +10,19 @@ TmuxDeck 是同时驾驭多个 AI 编码 agent 时的操作台。每个 agent �
 
 ---
 
+## 概述
+
+- **同时驾驭多个 agent。** 每个工作区是一张卡片，每个分屏显示正在跑什么、安静了多久。
+- **原生 Ghostty 分屏。** 1/2/4/6 分屏网格，每个 agent 独立 tmux 会话——关掉窗口，agent 照常干活。
+- **兼容经典环境。** 原生终端与 tmux 多 pane 布局完全可用。
+- **用你已经装了的工具。** Pi、Claude Code、Codex、OpenCode、Gemini CLI、Aider、自定义命令或纯 Shell——运行时自动检测。
+- **一键掌控。** 创建、启动、恢复、单独终止某个 agent、销毁整个工作区，都在仪表盘上完成。
+- **常驻菜单栏。** 关掉窗口继续运行——状态、预览与控制始终一键可达。
+- **agent 之间互相发现。** 注册进 Agent Intercom broker，跨 harness 发现、实时状态与定向通信。
+- **macOS 优先，WSL 可跑。** 基于 Tauri 构建；Windows 经 WSL 运行。
+
+---
+
 ## 这个软件在解决什么
 
 跑一个 agent 很简单——你盯着它就行。跑十二个，问题的性质就变了。

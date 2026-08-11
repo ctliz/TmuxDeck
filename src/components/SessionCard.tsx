@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Plus, Zap } from "lucide-react";
+import { Plus, Zap, Play } from "lucide-react";
 import { t, translateName } from "../i18n";
 import { Environment, TmuxPane, TmuxSession } from "../types";
 
@@ -92,6 +92,13 @@ export function SessionCard({
   );
   const activityInfo = getSessionActivityInfo(session);
 
+  const activeTermId =
+    session.terminal_id ?? (session.native_split ? "ghostty" : selectedTerminal);
+  const matchedTerm = env?.terminals.find((t) => t.id === activeTermId);
+  const termName = matchedTerm ? translateName(matchedTerm.name) : activeTermId;
+  const termIconSrc =
+    terminalIconUrls[activeTermId] || `/terminal-icons/${activeTermId}.svg`;
+
   // Pane drag state inside card
   const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null);
   const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
@@ -181,20 +188,21 @@ export function SessionCard({
       }`}
     >
       {/* Card Header */}
-      <div className="p-4 border-b border-white/10">
-        <div className="flex items-center justify-between">
+      <div
+        draggable={!isRenaming}
+        onDragStart={(e) => !isPaneDraggingRef.current && onCardDragStart?.(e, session.id)}
+        onDragEnd={(e) => !isPaneDraggingRef.current && onCardDragEnd?.(e)}
+        className="p-4 border-b border-white/10 cursor-grab active:cursor-grabbing"
+      >
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center space-x-2 min-w-0 flex-1">
-            <button
-              type="button"
-              draggable={!isRenaming}
-              onDragStart={(e) => onCardDragStart?.(e, session.id)}
-              onDragEnd={(e) => onCardDragEnd?.(e)}
-              className="shrink-0 px-1 text-slate-500 hover:text-cyan-300 cursor-grab active:cursor-grabbing"
+            <span
+              className="shrink-0 px-0.5 text-slate-500 hover:text-cyan-300 transition"
               title={t("card.drag")}
               aria-label={t("card.drag")}
             >
               ⠿
-            </button>
+            </span>
             <span
               className={`w-2.5 h-2.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
               title={activityInfo.statusTooltip}
@@ -211,40 +219,80 @@ export function SessionCard({
                 }
                 autoFocus
                 className="bg-slate-950 px-2 py-0.5 border border-cyan-500 rounded text-sm text-white w-full cursor-text"
+                onPointerDown={(e) => e.stopPropagation()}
                 onDragStart={(e) => e.stopPropagation()}
               />
             ) : (
-              <h2
-                onClick={
-                  session.native_split
-                    ? undefined
-                    : () => onRenameStart(session.name)
-                }
-                className={`font-semibold text-slate-100 truncate text-base transition ${
-                  session.native_split
-                    ? "cursor-default"
-                    : "hover:text-cyan-300 hover:underline cursor-pointer"
-                }`}
-                title={
-                  session.native_split
-                    ? t("card.nativeRenameUnsupported")
-                    : t("card.rename")
-                }
-              >
-                {session.name}
-              </h2>
+              <div className="flex items-center space-x-2 min-w-0">
+                <h2
+                  onClick={(e) => {
+                    if (session.native_split) return;
+                    e.stopPropagation();
+                    onRenameStart(session.name);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onDragStart={(e) => e.stopPropagation()}
+                  className={`font-semibold text-slate-100 truncate text-base transition ${
+                    session.native_split
+                      ? "cursor-default"
+                      : "hover:text-cyan-300 hover:underline cursor-pointer"
+                  }`}
+                  title={
+                    session.native_split
+                      ? t("card.nativeRenameUnsupported")
+                      : t("card.rename")
+                  }
+                >
+                  {session.name}
+                </h2>
+                <div
+                  className="flex items-center space-x-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 shrink-0 text-[10px] text-slate-400"
+                  title={termName}
+                >
+                  <img
+                    draggable={false}
+                    src={termIconSrc}
+                    onError={(e) => {
+                      e.currentTarget.src = "/terminal-icons/default.svg";
+                    }}
+                    alt={termName}
+                    className="w-3.5 h-3.5 rounded object-contain shrink-0"
+                  />
+                  <span className="truncate max-w-[5rem]">{termName}</span>
+                </div>
+              </div>
             )}
           </div>
-          <button
-            draggable={false}
-            onPointerDown={(e) => e.stopPropagation()}
-            onDragStart={(e) => e.stopPropagation()}
-            onClick={() => onKill(session.name, session.panes_count)}
-            className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-white/10 transition cursor-pointer text-sm font-bold leading-none shrink-0"
-            title={t("card.destroy")}
-          >
-            ✕
-          </button>
+          <div className="flex items-center space-x-1 shrink-0">
+            <button
+              type="button"
+              draggable={false}
+              onPointerDown={(e) => e.stopPropagation()}
+              onDragStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSession(session.name, activeTermId);
+              }}
+              className="p-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 hover:text-cyan-200 transition cursor-pointer flex items-center justify-center"
+              title={t("card.openWithTerminal", { name: termName })}
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+            </button>
+            <button
+              type="button"
+              draggable={false}
+              onPointerDown={(e) => e.stopPropagation()}
+              onDragStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onKill(session.name, session.panes_count);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-white/10 transition cursor-pointer text-sm font-bold leading-none shrink-0"
+              title={t("card.destroy")}
+            >
+              ✕
+            </button>
+          </div>
         </div>
       </div>
 
@@ -371,52 +419,6 @@ export function SessionCard({
                   </span>
                 )}
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Card Footer Actions: Row of Terminal Icons */}
-      <div className="p-3 border-t border-white/10 bg-black/20 flex items-center justify-between">
-        <span className="text-[10px] font-medium text-slate-400">
-          {t("card.selectTerminal")}
-        </span>
-        <div className="flex items-center space-x-2">
-          {env?.terminals
-            .filter((term) => !session.native_split || term.id === "ghostty")
-            .map((term) => {
-            const isDefault = selectedTerminal === term.id;
-            const iconSrc =
-              terminalIconUrls[term.id] || `/terminal-icons/${term.id}.svg`;
-            return (
-              <button
-                key={term.id}
-                draggable={false}
-                onPointerDown={(e) => e.stopPropagation()}
-                onDragStart={(e) => e.stopPropagation()}
-                onClick={() => onOpenSession(session.name, term.id)}
-                className={`p-1.5 rounded-xl transition-all duration-200 hover:scale-110 cursor-pointer relative ${
-                  isDefault
-                    ? "bg-cyan-500/20 border border-cyan-400/60 shadow-sm shadow-cyan-500/20"
-                    : "bg-white/5 border border-white/10 hover:bg-white/15"
-                }`}
-                title={t("card.openWithTerminal", {
-                  name: translateName(term.name),
-                })}
-              >
-                <img
-                  draggable={false}
-                  src={iconSrc}
-                  onError={(e) => {
-                    e.currentTarget.src = "/terminal-icons/default.svg";
-                  }}
-                  alt={term.name}
-                  className="w-5 h-5 rounded object-contain"
-                />
-                {isDefault && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 absolute -top-0.5 -right-0.5 shadow-sm shadow-cyan-400" />
-                )}
-              </button>
             );
           })}
         </div>
