@@ -2,7 +2,7 @@ const en: Record<string, string> = {
   // App Header
   "app.title": "TmuxDeck",
   "app.subtitle": "Multi-agent workspace console for tmux",
-  "app.version": "v1.9.0",
+  "app.version": "v1.9.1",
   "env.tmux_ok": "Tmux ✓",
   "env.terminals_one": "{n} available terminal",
   "env.terminals_other": "{n} available terminals",
@@ -160,7 +160,7 @@ const zh: Record<string, string> = {
   // App Header
   "app.title": "TmuxDeck",
   "app.subtitle": "tmux 多 Agent 工作区控制台",
-  "app.version": "v1.9.0",
+  "app.version": "v1.9.1",
   "env.tmux_ok": "Tmux ✓",
   "env.terminals_one": "{n} 个可用终端",
   "env.terminals_other": "{n} 个可用终端",
