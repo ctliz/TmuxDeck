@@ -264,7 +264,11 @@ pub(crate) fn open_native_workspace(workspace: &str, slots: &[NativeSlot]) -> Re
         .lock()
         .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
     let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let script = ghostty_layout_script(workspace, slots, &tmux);
+    let add_direction = match crate::tmux::get_attach_client_size() {
+        Some((w, h)) => split_direction_for_size(w, h),
+        None => "down",
+    };
+    let script = ghostty_layout_script(workspace, slots, &tmux, add_direction);
     let output = Command::new("osascript")
         .args(["-e", &script])
         .output()
@@ -379,7 +383,19 @@ fn title(workspace: &str, slot: &str) -> String {
     format!("TmuxDeck::{}::{}", workspace, slot)
 }
 
-fn ghostty_layout_script(workspace: &str, slots: &[NativeSlot], tmux: &str) -> String {
+/// `add_direction` 用于 else 分支（已有窗口补缺失 slot）的新增 split 方向：
+/// 横屏窗口用 down、竖屏窗口用 right（向短边分割，保持 pane 与窗口同方向）。
+/// 向短边分割：横屏（宽>=高）→ down（纵向新增），竖屏（高>宽）→ right（横向新增）。
+/// 保持新增 pane 与窗口同方向，避免竖屏窗口被横向切成窄条。
+pub(crate) fn split_direction_for_size(w: u32, h: u32) -> &'static str {
+    if h > w {
+        "right"
+    } else {
+        "down"
+    }
+}
+
+fn ghostty_layout_script(workspace: &str, slots: &[NativeSlot], tmux: &str, add_direction: &str) -> String {
     let prefix = format!("TmuxDeck::{}::", workspace);
     let mut script = String::from("tell application \"Ghostty\"\nset deckWindow to missing value\nset anchorTerminal to missing value\nrepeat with w in windows\nrepeat with term in terminals of w\nif name of term starts with \"");
     script.push_str(&applescript_string(&prefix));
@@ -416,7 +432,7 @@ fn ghostty_layout_script(workspace: &str, slots: &[NativeSlot], tmux: &str) -> S
             slot,
             tmux,
         ));
-        script.push_str(&format!("set addedTerminal to split anchorTerminal direction right with configuration missingCfg{n}\ndelay 0.5\nperform action \"set_surface_title:{slot_title}\" on addedTerminal\nset anchorTerminal to addedTerminal\nend if\n"));
+        script.push_str(&format!("set addedTerminal to split anchorTerminal direction {add_direction} with configuration missingCfg{n}\ndelay 0.5\nperform action \"set_surface_title:{slot_title}\" on addedTerminal\nset anchorTerminal to addedTerminal\nend if\n"));
     }
     script.push_str("end if\nperform action \"equalize_splits\" on anchorTerminal\nfocus anchorTerminal\nactivate\nend tell\n");
     script
@@ -442,6 +458,16 @@ mod tests {
         let target = slot_target(&workspace, 42);
         assert!(target.len() > 60);
         assert_eq!(validate_native_slot_target(&target), Ok(target.as_str()));
+    }
+
+    #[test]
+    fn test_split_direction_follows_screen_orientation() {
+        // 横屏（宽>=高）→ down
+        assert_eq!(split_direction_for_size(114, 55), "down");
+        assert_eq!(split_direction_for_size(100, 100), "down");
+        // 竖屏（高>宽）→ right
+        assert_eq!(split_direction_for_size(55, 114), "right");
+        assert_eq!(split_direction_for_size(40, 90), "right");
     }
 
     #[test]
@@ -527,7 +553,7 @@ mod tests {
                 slot: slot.to_string(),
             })
             .collect();
-        let script = ghostty_layout_script("deck", &slots, "/opt/homebrew/bin/tmux");
+        let script = ghostty_layout_script("deck", &slots, "/opt/homebrew/bin/tmux", "down");
         assert!(script.contains("set t2 to split t1 direction right"));
         assert!(script.contains("set t3 to split t1 direction down"));
         assert!(script.contains("set t4 to split t2 direction down"));
@@ -545,7 +571,7 @@ mod tests {
                 slot: slot.to_string(),
             })
             .collect();
-        let script = ghostty_layout_script("compile-test", &slots, "/opt/homebrew/bin/tmux");
+        let script = ghostty_layout_script("compile-test", &slots, "/opt/homebrew/bin/tmux", "down");
         let output_path = std::env::temp_dir().join(format!(
             "tmuxdeck-ghostty-script-{}.scpt",
             std::process::id()

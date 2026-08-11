@@ -156,6 +156,27 @@ pub fn get_session_first_pane_dir(session_name: &str) -> Option<String> {
     None
 }
 
+/// 取第一个 attached 客户端的窗口尺寸（字符宽×高），用于决定新增 split 的方向。
+/// 无法获取时返回 None（调用方保持旧行为）。
+pub fn get_attach_client_size() -> Option<(u32, u32)> {
+    let output = run_tmux(&["list-clients", "-F", "#{client_width}|#{client_height}"]);
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                let parts: Vec<&str> = line.split('|').collect();
+                if parts.len() >= 2 {
+                    let w = parts[0].trim().parse::<u32>().ok()?;
+                    let h = parts[1].trim().parse::<u32>().ok()?;
+                    if w > 0 && h > 0 {
+                        return Some((w, h));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>) -> Vec<TmuxPane> {
     let output = run_tmux(&[
         "list-panes",
