@@ -344,20 +344,35 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn config_script(var: &str, workspace: &str, slot: &NativeSlot, tmux: &str) -> String {
-    // 防御模板：attach 前先 has-session，session 消失时优雅降级到 shell，
-    // 避免 Ghostty 弹 "failed to launch" 窗口。注意 Ghostty 的 Cmd+D split
-    // 会继承 surface 的 command——新增屏同样走到这里，防御同样生效。
+    // Ghostty 用 `exec -l <command>` 包装 surface 的 command——多行 shell 逻辑
+    // （if/then/else）内联进去会被语法破坏（b18a22c 回归：所有 native workspace
+    // 打不开）。防御必须走脚本文件：脚本有 shebang，exec 脚本路径语法正确。
+    let script_path = native_slot_script_path(workspace, &slot.slot);
     let tmux_q = shell_single_quote(tmux);
     let target_q = shell_single_quote(&slot.target);
-    let command = format!(
-        "if {tmux_q} has-session -t {target_q} 2>/dev/null; then exec {tmux_q} attach-session -t {target_q}; else echo \"Session {target_q} no longer exists. Starting a shell instead.\"; exec \"$SHELL\"; fi"
+    let script_content = format!(
+        "#!/bin/bash\nif {tmux_q} has-session -t {target_q} 2>/dev/null; then\n  exec {tmux_q} attach-session -t {target_q}\nelse\n  echo \"Session {target_q} no longer exists. Starting a shell instead.\"\n  exec \"$SHELL\"\nfi\n"
     );
+    let _ = std::fs::write(&script_path, &script_content);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&script_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(&script_path, perms);
+        }
+    }
     format!(
         "set {var} to new surface configuration\nset command of {var} to \"{}\"\nset environment variables of {var} to {{\"TMUXDECK_WORKSPACE={}\", \"TMUXDECK_SLOT={}\"}}\nset wait after command of {var} to false\n",
-        applescript_string(&command),
+        applescript_string(&script_path),
         applescript_string(workspace),
         applescript_string(&slot.slot)
     )
+}
+
+fn native_slot_script_path(workspace: &str, slot: &str) -> String {
+    format!("/tmp/tmuxdeck-{}-slot-{}.sh", workspace, slot)
 }
 
 fn title(workspace: &str, slot: &str) -> String {
@@ -438,10 +453,16 @@ mod tests {
         };
         let script = config_script("cfg", workspace, &slot, "/opt/homebrew/bin/tmux");
         assert!(script.contains("TMUXDECK_WORKSPACE=alpha__td_slot_inside"));
-        // 防御模板：has-session 守卫 + attach 目标用 slot target（而非 workspace 本身）
-        assert!(script.contains(
-            "set command of cfg to \"if '/opt/homebrew/bin/tmux' has-session -t 'alpha__td_slot_inside__td_slot_01' 2>/dev/null; then exec '/opt/homebrew/bin/tmux' attach-session -t 'alpha__td_slot_inside__td_slot_01'; else echo \\\"Session 'alpha__td_slot_inside__td_slot_01' no longer exists. Starting a shell instead.\\\"; exec \\\"$SHELL\\\"; fi\""
-        ));
+        // command 必须是脚本文件路径（多行 shell 逻辑内联进 Ghostty 的
+        // `exec -l` 包装会被语法破坏——b18a22c 回归，必须走脚本文件）。
+        let expected_path = native_slot_script_path(workspace, "1");
+        assert!(script.contains(&format!("set command of cfg to \"{}\"", expected_path)));
+        assert!(!script.contains("has-session"));
+        let written =
+            std::fs::read_to_string(&expected_path).expect("script file should be written");
+        assert!(written.contains("has-session -t 'alpha__td_slot_inside__td_slot_01'"));
+        assert!(written.contains("attach-session -t 'alpha__td_slot_inside__td_slot_01'"));
+        let _ = std::fs::remove_file(&expected_path);
     }
 
     #[test]
