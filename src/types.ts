@@ -28,6 +28,9 @@ export interface TmuxPane {
   command: string;
   active: boolean;
   content?: string;
+  session_target?: string;
+  slot?: string | null;
+  attached?: boolean;
 }
 
 export interface TmuxSession {
@@ -39,4 +42,5 @@ export interface TmuxSession {
   created_at: string;
   last_active_ts: number;
   panes: TmuxPane[];
+  native_split?: boolean;
 }

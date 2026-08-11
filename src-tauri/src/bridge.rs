@@ -121,39 +121,53 @@ pub enum DeliveryRoute {
 // pane ↔ intercom 会话 的关联
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// 取某个进程的父进程 ID。
-///
-/// 关联的难点：intercom 上报的 `pid` 是 agent 进程本身，而 tmux 的 `pane_pid`
-/// 通常是 pane 里那个 shell。agent 一般是 shell 的子进程（有时隔着几层），
-/// 所以只能沿父链上溯去找匹配的 pane。
+/// 一次性读取系统进程父链。不能对每个 session、每层父进程单独 spawn `ps`：
+/// broker 会话较多时会造成严重 fork storm。
 #[cfg(unix)]
-fn parent_pid(pid: i64) -> Option<i64> {
-    let out = std::process::Command::new("ps")
-        .args(["-o", "ppid=", "-p", &pid.to_string()])
+fn process_parent_map() -> HashMap<i64, i64> {
+    let mut parents = HashMap::new();
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
         .output()
-        .ok()?;
+    else {
+        return parents;
+    };
     if !out.status.success() {
-        return None;
+        return parents;
     }
-    String::from_utf8_lossy(&out.stdout).trim().parse::<i64>().ok()
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut parts = line.split_whitespace();
+        let Some(pid) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        let Some(ppid) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        parents.insert(pid, ppid);
+    }
+    parents
 }
 
 #[cfg(not(unix))]
-fn parent_pid(_pid: i64) -> Option<i64> {
-    None
+fn process_parent_map() -> HashMap<i64, i64> {
+    HashMap::new()
 }
 
 /// 沿父链上溯，找到 `pid` 所属的 pane。
 ///
 /// `pane_pids` 是 pane_pid → pane_id 的映射。最多上溯 12 层，
 /// 足够覆盖 shell → agent → 包装脚本 这类嵌套，同时防止环形父链导致死循环。
-pub fn find_owning_pane(pid: i64, pane_pids: &HashMap<i64, String>) -> Option<String> {
+pub fn find_owning_pane(
+    pid: i64,
+    pane_pids: &HashMap<i64, String>,
+    parents: &HashMap<i64, i64>,
+) -> Option<String> {
     let mut current = pid;
     for _ in 0..12 {
         if let Some(pane) = pane_pids.get(&current) {
             return Some(pane.clone());
         }
-        match parent_pid(current) {
+        match parents.get(&current).copied() {
             Some(p) if p > 1 && p != current => current = p,
             _ => break,
         }
@@ -228,11 +242,15 @@ impl ConversationRegistry {
     /// 把 intercom 会话并入对话表：补上真实状态与可靠投递路径。
     pub fn apply_intercom_sessions(&mut self, sessions: &[SessionInfo], self_id: Option<&str>) {
         let pane_pids = pane_pid_map();
+        if pane_pids.is_empty() {
+            return;
+        }
+        let parents = process_parent_map();
         for s in sessions {
             if Some(s.id.as_str()) == self_id {
                 continue; // 跳过我们自己注册的人类会话
             }
-            if let Some(pane_id) = find_owning_pane(s.pid, &pane_pids) {
+            if let Some(pane_id) = find_owning_pane(s.pid, &pane_pids, &parents) {
                 if let Some(conv) = self.conversations.get_mut(&pane_id) {
                     conv.intercom_session_id = Some(s.id.clone());
                     if let Some(name) = &s.name {
@@ -496,6 +514,36 @@ mod tests {
             cwd: "/tmp/proj".to_string(),
             active: true,
         }
+    }
+
+    #[test]
+    fn test_find_owning_pane_uses_parent_snapshot() {
+        let pane_pids = HashMap::from([(100, "%1".to_string())]);
+        let parents = HashMap::from([(300, 200), (200, 100)]);
+        assert_eq!(
+            find_owning_pane(300, &pane_pids, &parents),
+            Some("%1".to_string())
+        );
+        assert_eq!(
+            find_owning_pane(100, &pane_pids, &parents),
+            Some("%1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_find_owning_pane_stops_on_missing_or_cyclic_parent() {
+        let pane_pids = HashMap::from([(100, "%1".to_string())]);
+        assert_eq!(find_owning_pane(300, &pane_pids, &HashMap::new()), None);
+
+        let cycle = HashMap::from([(300, 200), (200, 300)]);
+        assert_eq!(find_owning_pane(300, &pane_pids, &cycle), None);
+    }
+
+    #[test]
+    fn test_find_owning_pane_limits_parent_depth() {
+        let pane_pids = HashMap::from([(2, "%1".to_string())]);
+        let parents: HashMap<i64, i64> = (3..=15).map(|pid| (pid, pid - 1)).collect();
+        assert_eq!(find_owning_pane(15, &pane_pids, &parents), None);
     }
 
     #[test]

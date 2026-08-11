@@ -1,7 +1,8 @@
 # pi-intercom 线协议参考
 
-> 这份文档是从上游源码（`nicobailon/pi-intercom` 的 `types.ts` 与 `broker/framing.ts`）
-> 反推整理的，上游没有独立的协议文档。**写下来是为了不必再推一遍。**
+> 这份文档最初从 `nicobailon/pi-intercom` 反推整理，现已按本机
+> `@dataforxyz/agent-intercom-*` protocol v3 的 `types.ts`、`broker.ts` 与
+> `broker/framing.ts` 更新。**写下来是为了不必再推一遍。**
 >
 > 实现见 `src-tauri/src/intercom.rs`，验证脚本见 `scripts/intercom-probe.mjs`。
 
@@ -44,11 +45,12 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
 
 | `type` | 关键字段 | 说明 |
 |---|---|---|
-| `register` | `session`（见下）、`sessionId?`、`stateId?` | 连上后第一件事 |
-| `unregister` | — | 优雅退出 |
+| `register` | `protocol: "pi-intercom"`、`version: 3`、`session`（见下）、`sessionId?`、`stateId?` | 连上后第一件事；版本不匹配会断开 |
+| `unregister` | `preserveAsks?` | 优雅退出 |
 | `list` | `requestId` | 请求会话列表，异步经 `sessions` 返回 |
 | `send` | `to`、`message` | `to` 可以是会话名或会话 ID |
-| `message_receipt` | `receipt` | 告知发送方已收到 |
+| `message_received` | `deliveryId` | 收方持久入队后确认本次 delivery |
+| `message_rejected` | `deliveryId`、`code`、`reason` | 收方拒绝冲突 delivery |
 | `presence` | `status?`、`name?`、`model?` … | 更新自身状态 |
 | `cancel_message` / `cancel_ask` | `messageId` | 撤回 |
 | `extension_publish` / `extension_state_commit` | `namespace` … | 扩展总线，TmuxDeck 未用 |
@@ -76,15 +78,16 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
 
 | `type` | 关键字段 | 说明 |
 |---|---|---|
-| `registered` | `sessionId`、`features?` | 注册成功，拿到自己的会话 ID |
+| `registered` | `sessionId`、`protocol`、`version` | 注册成功，拿到自己的会话 ID |
 | `sessions` | `requestId`、`sessions[]` | `list` 的应答 |
-| `message` | `from`、`message` | 收到一条消息 |
+| `message` | `deliveryId`、`from`、`message` | 收到一条消息；处理后必须按 `deliveryId` ACK |
 | `presence_update` | `session` | 某会话状态变了 |
 | `session_joined` / `session_left` | `session` / `sessionId` | 上下线 |
-| `delivered` | `messageId` | 已投递 |
-| `delivery_failed` | `messageId`、`reason` | 投递失败 |
+| `delivery_accepted` | `messageId`、`deliveryId` | broker 已接纳并等待收方确认 |
+| `delivered` | `messageId`、`deliveryId` | 收方已确认持久接收 |
+| `delivery_failed` | `messageId`、`code`、`reason`、`retryable` | 投递失败 |
 | `error` | `error` | broker 报错 |
-| `message_receipt` / `message_control` / `extension_*` | — | TmuxDeck 未消费 |
+| `message_control` / `extension_*` | — | TmuxDeck 未消费 |
 
 **入站解析必须容忍未知 `type`**：上游协议在演进（跨 harness 分支已到 v3，
 新增了若干帧类型）。`intercom.rs` 因此手工分派而非使用 serde 内部标记枚举——
@@ -150,9 +153,9 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
 
 ## 投递语义
 
-broker 负责「目标忙时排队、空闲时才注入」，所以**不要**为了怕打断 agent
-而自己实现投递时机判断——直接 `send` 即可。这正是 intercom 优于
-`send-keys` 直塞字符的核心原因（后者会被正在思考的 TUI 吞掉或打断）。
+broker 负责寻址、ask 边和 delivery 状态；各 Harness 适配器负责持久入队，并在安全时机注入目标会话。所以**不要**为了怕打断 agent 而在 TmuxDeck 再实现一套投递时机判断——直接 `send` 即可。这正是 intercom 优于 `send-keys` 直塞字符的核心原因（后者会被正在思考的 TUI 吞掉或打断）。
+
+v3 投递分两步：`delivery_accepted` 只表示 broker 已接纳；收方必须在处理 `message` 后发送 `message_received { deliveryId }`，发送方才会收到 `delivered`。不能用业务 `message.id` 代替 `deliveryId`。
 
 ### 回复必须来自收到 ask 的那个 session
 
@@ -171,8 +174,7 @@ broker 对 `replyTo` 的校验是 **sessionId 级身份**（`broker.ts`：
 
 ## 两个分支的差异
 
-本机当前装的是 **`nicobailon/pi-intercom` 原版（pi-only）**。
-`dataforxyz` 的跨 harness 分支覆盖 Pi / Codex / Claude Code / OpenCode，差异：
+本机当前已统一安装 **`@dataforxyz/agent-intercom-*` 0.10.0 跨 Harness 适配器**，覆盖 Pi / Codex / Claude Code / OpenCode。下表保留与 `nicobailon/pi-intercom` 原版（pi-only）的历史差异，便于排查旧环境：
 
 | | 原版 | 跨 harness 版 |
 |---|---|---|

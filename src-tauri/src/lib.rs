@@ -112,6 +112,7 @@ pub fn run() {
             capture_pane,
             add_pane,
             kill_pane,
+            kill_slot,
             get_terminal_icon,
             send_pane_text,
             send_pane_key,

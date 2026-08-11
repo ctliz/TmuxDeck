@@ -14,7 +14,8 @@
 | 文档 | 内容 |
 |---|---|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 模块地图、数据流、两处不显眼的关键实现 |
-| [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | pi-intercom 线协议（从上游源码反推整理，避免重复推导） |
+| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Pi / OpenCode / Codex / Claude Code 跨 Harness Intercom 安装、命名与协作指南 |
+| [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom 线协议（从上游源码反推整理，避免重复推导） |
 | [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | 对话内容源设计（Claude Code JSONL 优先 + 兑底） |
 | [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | 手机端传输与安全方案 |
 | [ROADMAP.md](./ROADMAP.md) | 排期与进度，产品维护 |
@@ -47,8 +48,15 @@
 | [v1.11](./PRD-v1.11-focus-existing.md) | 防重复开窗 |
 | [v1.12](./PRD-v1.12-conversation-bridge.md) | **对话桥：intercom 接入 + 手机端多路对话** |
 
+## macOS E2E 安全规则
+
+真实 App E2E **禁止**通过 AppleScript 或 LaunchServices 按 bundle ID 退出 TmuxDeck，例如 `tell application id "com.ctliz.tmuxdeck" to quit`。该路径可能触发 Dock 的 coalition sweep，连带终止 App coalition 内的 tmux 与 Agent 进程。
+
+测试实例只能按启动时记录的**精确 PID**退出：先向该 PID 发送 `SIGTERM` 并等待退出；超时后再次核对仍是同一测试 PID，才可向该精确 PID 发送 `SIGKILL`。不得使用 bundle ID、应用名、`pkill`、`killall` 或进程名匹配。测试结束也不得自动恢复或启动用户 App，除非当次验收明确授权。
+
 ## 发布说明
 
 [v1.5.0](./RELEASE-NOTES-v1.5.0.md) · [v1.6.0](./RELEASE-NOTES-v1.6.0.md) ·
 [v1.7.0](./RELEASE-NOTES-v1.7.0.md) · [v1.7.1](./RELEASE-NOTES-v1.7.1.md) ·
-[v1.7.2](./RELEASE-NOTES-v1.7.2.md) · [v1.8.0](./RELEASE-NOTES-v1.8.0.md)
+[v1.7.2](./RELEASE-NOTES-v1.7.2.md) · [v1.8.0](./RELEASE-NOTES-v1.8.0.md) ·
+[v1.9.0](./RELEASE-NOTES-v1.9.0.md)

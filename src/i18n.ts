@@ -2,7 +2,7 @@ const en: Record<string, string> = {
   // App Header
   "app.title": "TmuxDeck",
   "app.subtitle": "Multi-agent workspace console for tmux",
-  "app.version": "v1.8.1",
+  "app.version": "v1.9.0",
   "env.tmux_ok": "Tmux ✓",
   "env.terminals_one": "{n} available terminal",
   "env.terminals_other": "{n} available terminals",
@@ -42,14 +42,18 @@ const en: Record<string, string> = {
   "card.panes_one": "{n} pane",
   "card.panes_other": "{n} panes",
   "card.attached": "Active (Attached)",
+  "card.runningDetached": "Running · Detached",
   "card.bgActive": "Running in background",
   "card.idle": "Idle",
   "card.openWithTerminal": "Open with {name}",
   "card.rename": "Rename",
+  "card.nativeRenameUnsupported": "Native-split workspaces cannot be renamed while running.",
   "card.drag": "Drag to reorder workspace",
   "card.destroy": "Destroy workspace",
   "card.killPane": "Kill this pane",
   "card.confirmKillPane": "Kill this pane?",
+  "card.confirmKillSlot": "Terminate this Agent slot? Its tmux session and process will end.",
+  "card.confirmKillLastSlot": "Terminate the final Agent and delete this workspace? Its tmux session and process will end.",
   "card.addPane": "Add pane",
   "card.agentReady": "Agent Ready",
   "card.selectTerminal": "Launch terminal:",
@@ -99,6 +103,8 @@ const en: Record<string, string> = {
   // Confirmations
   "confirm.destroy_one": "Destroy workspace \"{name}\"? This will terminate its {n} tmux pane.\n\nIf you only want to leave temporarily, close the terminal window (Cmd+W). Any Close Window warning comes from the terminal and refers to the terminal connection, not this tmux workspace; choosing Close should only detach while the workspace keeps running in the background.",
   "confirm.destroy_other": "Destroy workspace \"{name}\"? This will terminate its {n} tmux panes.\n\nIf you only want to leave temporarily, close the terminal window (Cmd+W). Any Close Window warning comes from the terminal and refers to the terminal connection, not this tmux workspace; choosing Close should only detach while the workspace keeps running in the background.",
+  "confirm.destroyNative_one": "Destroy workspace \"{name}\"? This will terminate its final Agent and delete the workspace.\n\nCmd+W only closes the current Ghostty split and detaches; the Agent keeps running in the background.",
+  "confirm.destroyNative_other": "Destroy workspace \"{name}\"? This will terminate all {n} Agent slots and their tmux sessions.\n\nCmd+W only closes a Ghostty split and detaches; the Agents keep running in the background.",
 
   // Error Code Mappings (from Rust)
   "ERR_ADD_PANE_FAILED": "Failed to add pane",
@@ -121,6 +127,14 @@ const en: Record<string, string> = {
   "ERR_KILL_PANE_LAST_IN_SESSION": "The last pane cannot be killed. Destroy the workspace explicitly instead.",
   "ERR_KILL_PANE_NOT_FOUND": "Pane not found",
   "ERR_KILL_PANE_OUTPUT_ERR": "Error killing pane",
+  "ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED": "Native-split workspaces cannot be renamed while running.",
+  "ERR_CREATE_NATIVE_SLOT_SETUP": "Failed to initialize native Agent slot",
+  "ERR_NATIVE_SLOT_AGENT_EXITED": "The Agent exited before its native slot finished starting",
+  "agent.exitStatus": "exit status {value}",
+  "agent.exitSignal": "signal {value}",
+  "ERR_KILL_SLOT_INVALID_TARGET": "Invalid native slot target",
+  "ERR_KILL_SLOT_NOT_NATIVE": "The target is not a native-split slot",
+  "ERR_GHOSTTY_LAYOUT_LOCK_POISONED": "Ghostty layout control is temporarily unavailable",
   "ERR_SWAP_PANE_FAILED": "Failed to swap panes",
   "ERR_READ_ICON": "Failed to read icon",
   "ERR_RENAME_FAILED": "Failed to rename workspace",
@@ -145,7 +159,7 @@ const zh: Record<string, string> = {
   // App Header
   "app.title": "TmuxDeck",
   "app.subtitle": "tmux 多 Agent 工作区控制台",
-  "app.version": "v1.8.1",
+  "app.version": "v1.9.0",
   "env.tmux_ok": "Tmux ✓",
   "env.terminals_one": "{n} 个可用终端",
   "env.terminals_other": "{n} 个可用终端",
@@ -185,14 +199,18 @@ const zh: Record<string, string> = {
   "card.panes_one": "{n} 分屏",
   "card.panes_other": "{n} 分屏",
   "card.attached": "活动中 (Attached)",
+  "card.runningDetached": "运行中 · 已分离",
   "card.idle": "空闲",
   "card.bgActive": "后台活跃",
   "card.openWithTerminal": "使用 {name} 打开",
   "card.rename": "重命名",
+  "card.nativeRenameUnsupported": "原生分屏工作区运行期间暂不支持重命名。",
   "card.drag": "拖动调整工作区顺序",
   "card.destroy": "销毁工作区",
   "card.killPane": "删除此分屏",
   "card.confirmKillPane": "确定删除此分屏格？",
+  "card.confirmKillSlot": "确定终止此 Agent 槽位？对应 tmux 会话和进程将结束。",
+  "card.confirmKillLastSlot": "确定终止最后一个 Agent 并删除此工作区？对应 tmux 会话和进程将结束。",
   "card.addPane": "新增分屏",
   "card.agentReady": "Agent Ready",
   "card.selectTerminal": "选择启动终端:",
@@ -242,6 +260,8 @@ const zh: Record<string, string> = {
   // Confirmations
   "confirm.destroy_one": "确定要销毁工作区「{name}」吗？这会终止其中的 {n} 个 tmux 分屏。\n\n若只是暂时离开，请关闭终端窗口（Cmd+W）。此时出现的 Close Window 提示来自终端，指的是终端连接而非该 tmux 工作区；确认关闭应只断开连接，工作区继续后台运行。",
   "confirm.destroy_other": "确定要销毁工作区「{name}」吗？这会终止其中的 {n} 个 tmux 分屏。\n\n若只是暂时离开，请关闭终端窗口（Cmd+W）。此时出现的 Close Window 提示来自终端，指的是终端连接而非该 tmux 工作区；确认关闭应只断开连接，工作区继续后台运行。",
+  "confirm.destroyNative_one": "确定销毁工作区「{name}」吗？这会终止最后一个 Agent 并删除工作区。\n\nCmd+W 只会关闭当前 Ghostty 分屏并断开连接，Agent 会继续在后台运行。",
+  "confirm.destroyNative_other": "确定销毁工作区「{name}」吗？这会终止全部 {n} 个 Agent 槽位及其 tmux 会话。\n\nCmd+W 只会关闭 Ghostty 分屏并断开连接，Agent 会继续在后台运行。",
 
   // Error Code Mappings (from Rust)
   "ERR_ADD_PANE_FAILED": "新增分屏失败",
@@ -264,6 +284,14 @@ const zh: Record<string, string> = {
   "ERR_KILL_PANE_LAST_IN_SESSION": "不能删除工作区的最后一个分屏；如需销毁，请明确使用“销毁工作区”。",
   "ERR_KILL_PANE_NOT_FOUND": "未找到该分屏",
   "ERR_KILL_PANE_OUTPUT_ERR": "删除分屏报错",
+  "ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED": "原生分屏工作区运行期间暂不支持重命名。",
+  "ERR_CREATE_NATIVE_SLOT_SETUP": "初始化原生 Agent 槽位失败",
+  "ERR_NATIVE_SLOT_AGENT_EXITED": "Agent 在原生槽位启动完成前已退出",
+  "agent.exitStatus": "退出状态 {value}",
+  "agent.exitSignal": "信号 {value}",
+  "ERR_KILL_SLOT_INVALID_TARGET": "原生分屏槽位目标无效",
+  "ERR_KILL_SLOT_NOT_NATIVE": "目标不是原生分屏槽位",
+  "ERR_GHOSTTY_LAYOUT_LOCK_POISONED": "Ghostty 布局控制暂时不可用",
   "ERR_SWAP_PANE_FAILED": "交换分屏格失败",
   "ERR_READ_ICON": "读取图标失败",
   "ERR_RENAME_FAILED": "重命名 session 失败",
@@ -311,10 +339,17 @@ export function translateName(name: string): string {
 
 export function translateError(raw: unknown): string {
   if (typeof raw !== "string") return t("ERR_TMUX_GENERIC");
-  const [code, details] = raw.split("|");
+  const [code, ...details] = raw.split("|");
   const translated = t(code);
-  if (details) {
-    return `${translated}: ${details}`;
+  if (code === "ERR_NATIVE_SLOT_AGENT_EXITED" && details.length >= 3) {
+    const [target, kind, value] = details;
+    const reason = t(kind === "signal" ? "agent.exitSignal" : "agent.exitStatus", {
+      value,
+    });
+    return `${translated}: ${target} (${reason})`;
+  }
+  if (details[0]) {
+    return `${translated}: ${details[0]}`;
   }
   return translated;
 }

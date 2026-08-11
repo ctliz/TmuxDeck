@@ -20,4 +20,5 @@ pub struct TmuxSession {
     pub created_at: String,
     pub last_active_ts: i64,
     pub panes: Vec<TmuxPane>,
+    pub native_split: bool,
 }

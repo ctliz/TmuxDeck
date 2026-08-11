@@ -17,7 +17,7 @@ interface SessionCardProps {
   onRenameCommit: (oldName: string) => void;
   onKill: (name: string, paneCount: number) => void;
   onAddPane: (name: string) => void;
-  onKillPane: (id: string) => void;
+  onKillPane: (id: string, sessionTarget?: string) => void;
   onOpenSession: (name: string, termId: string) => void;
   onSwapPane: (paneIdA: string, paneIdB: string) => void;
   onCardDragStart?: (e: React.DragEvent, sessionId: string) => void;
@@ -33,6 +33,13 @@ export function getSessionActivityInfo(session: TmuxSession) {
       statusClass:
         "bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse",
       statusTooltip: t("card.attached"),
+    };
+  }
+
+  if (session.native_split) {
+    return {
+      statusClass: "bg-amber-400 shadow-sm shadow-amber-400/80",
+      statusTooltip: t("card.runningDetached"),
     };
   }
 
@@ -90,18 +97,22 @@ export function SessionCard({
   const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
   const isPaneDraggingRef = useRef(false);
 
+  const panesCount = session.panes.length || session.panes_count;
+
   const gridCols =
-    session.panes_count === 1
+    panesCount === 1
       ? "grid-cols-1"
-      : session.panes_count === 2
+      : panesCount === 2
       ? "grid-cols-2"
-      : session.panes_count === 6
+      : panesCount === 3
+      ? "grid-cols-2"
+      : panesCount === 6
       ? "grid-cols-3"
       : "grid-cols-2";
 
   // Handlers for Pane Drag & Drop (inner-card)
   const handlePaneDragStart = (e: React.DragEvent, pane: TmuxPane) => {
-    if (session.panes_count <= 1) return;
+    if (session.native_split || session.panes_count <= 1) return;
     e.stopPropagation();
     isPaneDraggingRef.current = true;
     setDraggingPaneId(pane.id);
@@ -204,9 +215,21 @@ export function SessionCard({
               />
             ) : (
               <h2
-                onClick={() => onRenameStart(session.name)}
-                className="font-semibold text-slate-100 truncate text-base hover:text-cyan-300 hover:underline transition cursor-pointer"
-                title={t("card.rename")}
+                onClick={
+                  session.native_split
+                    ? undefined
+                    : () => onRenameStart(session.name)
+                }
+                className={`font-semibold text-slate-100 truncate text-base transition ${
+                  session.native_split
+                    ? "cursor-default"
+                    : "hover:text-cyan-300 hover:underline cursor-pointer"
+                }`}
+                title={
+                  session.native_split
+                    ? t("card.nativeRenameUnsupported")
+                    : t("card.rename")
+                }
               >
                 {session.name}
               </h2>
@@ -247,7 +270,7 @@ export function SessionCard({
           )}
         </div>
         <div
-          className={`grid ${gridCols} gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800/80`}
+          className={`grid ${gridCols} gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800/80 h-[11.5rem] overflow-y-auto`}
         >
           {session.panes.map((pane, idx) => {
             const cmdName = pane.command || "shell";
@@ -263,7 +286,10 @@ export function SessionCard({
 
             const isThisPaneDragging = draggingPaneId === pane.id;
             const isThisPaneDragOver = dragOverPaneId === pane.id;
-            const isPaneDraggable = session.panes_count > 1;
+            const isPaneDraggable = !session.native_split && session.panes_count > 1;
+
+            const isPaneColSpan = panesCount === 3 && idx === 0;
+            const isPaneFullHeight = panesCount <= 2;
 
             return (
               <div
@@ -274,7 +300,11 @@ export function SessionCard({
                 onDragLeave={(e) => handlePaneDragLeave(e, pane)}
                 onDrop={(e) => handlePaneDrop(e, pane)}
                 onDragEnd={handlePaneDragEnd}
-                className={`relative group/pane flex flex-col justify-between p-2 rounded-lg border text-[11px] min-h-[4.5rem] transition-all duration-200 ${
+                className={`relative group/pane flex flex-col justify-between p-2 rounded-lg border text-[11px] transition-all duration-200 ${
+                  isPaneColSpan ? "col-span-2" : ""
+                } ${
+                  isPaneFullHeight ? "h-full min-h-[9.8rem]" : "min-h-[4.8rem]"
+                } ${
                   isPaneDraggable ? "cursor-grab active:cursor-grabbing" : ""
                 } ${
                   isThisPaneDragging
@@ -289,19 +319,32 @@ export function SessionCard({
                 }`}
               >
                 <div className="flex items-center justify-between mb-1 select-none pointer-events-none">
-                  <span className="font-mono text-[9px] text-slate-500">
-                    #{idx + 1}{" "}
-                    {matchedAgent ? `· ${translateName(matchedAgent.name)}` : ""}
+                  <span className="font-mono text-[9px] text-slate-500 flex items-center space-x-1">
+                    <span>
+                      {pane.slot ? `Slot ${pane.slot}` : `#${idx + 1}`}
+                      {matchedAgent ? ` · ${translateName(matchedAgent.name)}` : ""}
+                    </span>
+                    {pane.attached !== undefined && (
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          pane.attached ? "bg-emerald-400" : "bg-amber-400"
+                        }`}
+                        title={pane.attached ? t("card.attached") : t("card.runningDetached")}
+                      />
+                    )}
                   </span>
                   <div className="flex items-center space-x-1 pointer-events-auto">
-                    {session.panes_count > 1 && (
+                    {(session.native_split || session.panes_count > 1) && (
                       <button
                         draggable={false}
                         onPointerDown={(e) => e.stopPropagation()}
                         onDragStart={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onKillPane(pane.id);
+                          onKillPane(
+                            pane.id,
+                            session.native_split ? pane.session_target : undefined
+                          );
                         }}
                         className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 opacity-0 group-hover/pane:opacity-100 transition-all duration-200 cursor-pointer text-[10px] leading-none"
                         title={t("card.killPane")}
@@ -315,7 +358,11 @@ export function SessionCard({
                   </div>
                 </div>
                 {hasContent ? (
-                  <pre className="font-mono text-[9px] text-slate-300 leading-tight whitespace-pre-wrap break-all overflow-hidden line-clamp-4 select-text">
+                  <pre
+                    className={`font-mono text-[9px] text-slate-300 leading-tight whitespace-pre-wrap break-all overflow-hidden select-text ${
+                      isPaneFullHeight ? "line-clamp-8" : "line-clamp-4"
+                    }`}
+                  >
                     {pane.content}
                   </pre>
                 ) : (
@@ -335,7 +382,9 @@ export function SessionCard({
           {t("card.selectTerminal")}
         </span>
         <div className="flex items-center space-x-2">
-          {env?.terminals.map((term) => {
+          {env?.terminals
+            .filter((term) => !session.native_split || term.id === "ghostty")
+            .map((term) => {
             const isDefault = selectedTerminal === term.id;
             const iconSrc =
               terminalIconUrls[term.id] || `/terminal-icons/${term.id}.svg`;

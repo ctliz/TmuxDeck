@@ -1,16 +1,23 @@
+use std::collections::HashMap;
 use std::process::Command;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use crate::audit::{observe_session_count, record_kill, tmux_counts};
-use crate::commands::utils::to_wsl_path;
+use crate::commands::native::{
+    create_native_workspace, destroy_native_workspace, ghostty_native_available, list_native_slots,
+    open_native_workspace,
+};
+use crate::commands::utils::{
+    append_identity_env_clears, isolated_agent_command, to_wsl_path,
+};
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
 use crate::registry::detect_environment;
 use crate::tmux::{
-    check_tmux_installed, get_session_panes, is_no_server_err, is_session_attached, run_tmux,
-    sanitize_session_name,
+    check_tmux_installed, get_session_panes, has_attached_clients, is_no_server_err,
+    is_session_attached, run_tmux, sanitize_session_name,
 };
 
 #[tauri::command]
@@ -18,6 +25,10 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+    let native_slots = list_native_slots(&sanitized_name)?;
+    if !native_slots.is_empty() {
+        return open_native_workspace(&sanitized_name, &native_slots);
     }
 
     if let Ok(out) = run_tmux(&["has-session", "-t", &sanitized_name]) {
@@ -98,13 +109,37 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     {
         let status = match terminal_id.as_str() {
             "wt" => Command::new("wt.exe")
-                .args(["new-tab", "--", "wsl.exe", "--", "tmux", "attach-session", "-t", &sanitized_name])
+                .args([
+                    "new-tab",
+                    "--",
+                    "wsl.exe",
+                    "--",
+                    "tmux",
+                    "attach-session",
+                    "-t",
+                    &sanitized_name,
+                ])
                 .status(),
             "powershell" => Command::new("powershell.exe")
-                .args(["-NoExit", "-Command", &format!("wsl.exe -- tmux attach-session -t '{}'", sanitized_name)])
+                .args([
+                    "-NoExit",
+                    "-Command",
+                    &format!("wsl.exe -- tmux attach-session -t '{}'", sanitized_name),
+                ])
                 .status(),
             _ => Command::new("cmd.exe")
-                .args(["/c", "start", "cmd", "/k", "wsl.exe", "--", "tmux", "attach-session", "-t", &sanitized_name])
+                .args([
+                    "/c",
+                    "start",
+                    "cmd",
+                    "/k",
+                    "wsl.exe",
+                    "--",
+                    "tmux",
+                    "attach-session",
+                    "-t",
+                    &sanitized_name,
+                ])
                 .status(),
         };
         return match status {
@@ -123,7 +158,8 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
             "#!/bin/bash\nexec '{}' attach-session -t '{}'\n",
             tmux, sanitized_name
         );
-        std::fs::write(&script_path, script_content).map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
+        std::fs::write(&script_path, script_content)
+            .map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
 
         #[cfg(unix)]
         {
@@ -227,29 +263,43 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             }
         });
 
-    let mut new_args = vec!["new-session", "-d", "-s", &sanitized_name];
-    if !work_dir_clean.is_empty() && work_dir_clean != "~" {
-        new_args.push("-c");
-        new_args.push(&work_dir_clean);
-    }
-    new_args.push(&agent_cmd);
+    let count = match opts.panes {
+        1 | 2 | 4 | 6 => opts.panes as usize,
+        _ => 4,
+    };
 
-    let output = run_tmux(&new_args).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    if opts.terminal_id == "ghostty" && ghostty_native_available() {
+        let slots = create_native_workspace(&sanitized_name, count, &work_dir_clean, &agent_cmd)?;
+        if open_native_workspace(&sanitized_name, &slots).is_ok() {
+            save_create_defaults(&opts);
+            return Ok(());
+        }
+        for slot in &slots {
+            let _ = run_tmux(&["kill-session", "-t", &slot.target]);
+        }
+    }
+
+    let mut new_args = vec![
+        "new-session".to_string(),
+        "-d".to_string(),
+        "-s".to_string(),
+        sanitized_name.clone(),
+    ];
+    if !work_dir_clean.is_empty() && work_dir_clean != "~" {
+        new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
+    }
+    new_args.push(isolated_agent_command(&agent_cmd));
+    append_identity_env_clears(&mut new_args, &sanitized_name);
+    let new_refs: Vec<&str> = new_args.iter().map(String::as_str).collect();
+
+    let output = run_tmux(&new_refs).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
         if is_no_server_err(&err_msg) {
             return Err("ERR_TMUX_NO_SERVER".to_string());
         }
-        return Err(format!(
-            "ERR_CREATE_OUTPUT_ERR|{}",
-            err_msg
-        ));
+        return Err(format!("ERR_CREATE_OUTPUT_ERR|{}", err_msg));
     }
-
-    let count = match opts.panes {
-        1 | 2 | 4 | 6 => opts.panes as usize,
-        _ => 4,
-    };
 
     for _ in 1..count {
         let mut split_args = vec!["split-window", "-t", &sanitized_name];
@@ -257,28 +307,30 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             split_args.push("-c");
             split_args.push(&work_dir_clean);
         }
-        split_args.push(&agent_cmd);
+        let isolated_agent = isolated_agent_command(&agent_cmd);
+        split_args.push(&isolated_agent);
 
         let _ = run_tmux(&split_args);
         let _ = run_tmux(&["select-layout", "-t", &sanitized_name, "tiled"]);
     }
 
+    save_create_defaults(&opts);
+    open_session(sanitized_name, opts.terminal_id)
+}
+
+fn save_create_defaults(opts: &CreateOpts) {
     let mut cfg = load_config();
     cfg.default_terminal = opts.terminal_id.clone();
     cfg.default_agent = opts.agent_id.clone();
     cfg.default_panes = opts.panes;
-    if let Some(dir) = opts.dir {
+    if let Some(dir) = &opts.dir {
         if !dir.trim().is_empty() {
-            cfg.recent_dirs.retain(|d| d != &dir);
-            cfg.recent_dirs.insert(0, dir);
-            if cfg.recent_dirs.len() > 5 {
-                cfg.recent_dirs.truncate(5);
-            }
+            cfg.recent_dirs.retain(|item| item != dir);
+            cfg.recent_dirs.insert(0, dir.clone());
+            cfg.recent_dirs.truncate(5);
         }
     }
     let _ = save_config(cfg);
-
-    open_session(sanitized_name, opts.terminal_id)
 }
 
 #[tauri::command]
@@ -290,7 +342,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     let output = run_tmux(&[
         "list-sessions",
         "-F",
-        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}|#{session_activity}",
+        "#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}|#{session_activity}|#{@tmuxdeck-native-split}|#{@tmuxdeck-workspace}|#{@tmuxdeck-slot}",
     ])
     .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
 
@@ -305,56 +357,89 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut sessions = Vec::new();
+    let mut native_groups: HashMap<String, TmuxSession> = HashMap::new();
 
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() >= 6 {
-            let id = parts[0].to_string();
-            let name = parts[1].to_string();
-            let windows_count = parts[2].parse::<usize>().unwrap_or(1);
-            let attached = parts[3] == "1";
-            let created_ts = parts[4].parse::<i64>().unwrap_or(0);
-            let last_active_ts = parts[5].parse::<i64>().unwrap_or(0);
+        if parts.len() < 9 {
+            continue;
+        }
+        let id = parts[0].to_string();
+        let target = parts[1].to_string();
+        let windows_count = parts[2].parse::<usize>().unwrap_or(1);
+        let attached = has_attached_clients(parts[3]);
+        let created_ts = parts[4].parse::<i64>().unwrap_or(0);
+        let last_active_ts = parts[5].parse::<i64>().unwrap_or(0);
+        let native = parts[6] == "1" && !parts[7].is_empty();
+        let workspace = parts[7].to_string();
+        let slot = (!parts[8].is_empty()).then_some(parts[8]);
+        let panes = get_session_panes(&target, attached, slot);
 
-            let created_at = if created_ts > 0 {
-                let datetime =
-                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(created_ts as u64);
-                if let Ok(elapsed) = datetime.elapsed() {
-                    let secs = elapsed.as_secs();
-                    if secs < 60 {
-                        format!("{}s", secs)
-                    } else if secs < 3600 {
-                        format!("{}m", secs / 60)
-                    } else if secs < 86400 {
-                        format!("{}h", secs / 3600)
-                    } else {
-                        format!("{}d", secs / 86400)
-                    }
-                } else {
-                    "0s".to_string()
-                }
-            } else {
-                "-".to_string()
-            };
-
-            let panes = get_session_panes(&name);
+        if native {
+            let entry = native_groups
+                .entry(workspace.clone())
+                .or_insert_with(|| TmuxSession {
+                    id: format!("native:{}", workspace),
+                    name: workspace.clone(),
+                    windows_count: 1,
+                    panes_count: 0,
+                    attached: false,
+                    created_at: created_age(created_ts),
+                    last_active_ts: 0,
+                    panes: Vec::new(),
+                    native_split: true,
+                });
+            entry.attached |= attached;
+            entry.last_active_ts = entry.last_active_ts.max(last_active_ts);
+            entry.panes.extend(panes);
+            entry.panes_count = entry.panes.len();
+        } else {
             let panes_count = panes.len();
-
             sessions.push(TmuxSession {
                 id,
-                name,
+                name: target,
                 windows_count,
                 panes_count,
                 attached,
-                created_at,
+                created_at: created_age(created_ts),
                 last_active_ts,
                 panes,
+                native_split: false,
             });
         }
+    }
+    for mut group in native_groups.into_values() {
+        group.panes.sort_by_key(|pane| {
+            pane.slot
+                .as_deref()
+                .and_then(|slot| slot.parse::<usize>().ok())
+                .unwrap_or(usize::MAX)
+        });
+        sessions.push(group);
     }
 
     observe_session_count(sessions.len(), false);
     Ok(sessions)
+}
+
+fn created_age(created_ts: i64) -> String {
+    if created_ts <= 0 {
+        return "-".to_string();
+    }
+    let datetime = std::time::UNIX_EPOCH + std::time::Duration::from_secs(created_ts as u64);
+    let Ok(elapsed) = datetime.elapsed() else {
+        return "0s".to_string();
+    };
+    let seconds = elapsed.as_secs();
+    if seconds < 60 {
+        format!("{}s", seconds)
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 86400 {
+        format!("{}h", seconds / 3600)
+    } else {
+        format!("{}d", seconds / 86400)
+    }
 }
 
 #[tauri::command]
@@ -362,6 +447,9 @@ pub fn kill_session(session_name: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&session_name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
+    }
+    if destroy_native_workspace(&sanitized_name)? {
+        return Ok(());
     }
 
     let before = tmux_counts();
@@ -405,6 +493,14 @@ pub fn kill_session(session_name: String) -> Result<(), String> {
     Ok(())
 }
 
+fn reject_native_rename(is_native: bool) -> Result<(), String> {
+    if is_native {
+        Err("ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
     let sanitized_old = sanitize_session_name(&old_name)?;
@@ -413,6 +509,7 @@ pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> 
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
+    reject_native_rename(!list_native_slots(&sanitized_old)?.is_empty())?;
 
     let output = run_tmux(&["rename-session", "-t", &sanitized_old, &sanitized_new])
         .map_err(|e| format!("ERR_RENAME_FAILED|{}", e))?;
@@ -425,4 +522,18 @@ pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> 
         return Err(format!("ERR_RENAME_OUTPUT_ERR|{}", err_msg));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_workspace_rename_is_rejected_before_mutation() {
+        assert_eq!(
+            reject_native_rename(true),
+            Err("ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED".to_string())
+        );
+        assert_eq!(reject_native_rename(false), Ok(()));
+    }
 }

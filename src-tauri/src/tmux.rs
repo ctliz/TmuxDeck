@@ -7,6 +7,9 @@ pub struct TmuxPane {
     pub id: String,
     pub command: String,
     pub active: bool,
+    pub session_target: String,
+    pub slot: Option<String>,
+    pub attached: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -115,11 +118,15 @@ pub fn strip_ansi(input: &str) -> String {
     result
 }
 
+pub(crate) fn has_attached_clients(value: &str) -> bool {
+    value.trim().parse::<usize>().unwrap_or(0) > 0
+}
+
 pub fn is_session_attached(session_name: &str) -> bool {
     if let Ok(out) = run_tmux(&["list-sessions", "-F", "#{session_attached}", "-t", session_name]) {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            return stdout.trim() == "1";
+            return has_attached_clients(&stdout);
         }
     }
     false
@@ -138,7 +145,7 @@ pub fn get_session_first_pane_dir(session_name: &str) -> Option<String> {
     None
 }
 
-pub fn get_session_panes(session_name: &str) -> Vec<TmuxPane> {
+pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>) -> Vec<TmuxPane> {
     let output = run_tmux(&[
         "list-panes",
         "-s",
@@ -159,6 +166,9 @@ pub fn get_session_panes(session_name: &str) -> Vec<TmuxPane> {
                         id: parts[0].to_string(),
                         command: parts[1].to_string(),
                         active: parts[2] == "1",
+                        session_target: session_name.to_string(),
+                        slot: slot.map(String::from),
+                        attached,
                     });
                 }
             }
@@ -324,6 +334,18 @@ pub fn swap_panes(pane_id_a: &str, pane_id_b: &str) -> Result<(), String> {
         return Err(format!("ERR_SWAP_PANE_FAILED|{}", err));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod attached_tests {
+    use super::has_attached_clients;
+
+    #[test]
+    fn attached_count_accepts_multiple_clients() {
+        assert!(!has_attached_clients("0"));
+        assert!(has_attached_clients("1"));
+        assert!(has_attached_clients("2"));
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]

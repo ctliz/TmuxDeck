@@ -7,7 +7,7 @@
 //! 这一层替代了「轮询 capture-pane + 静默启发式猜状态」的全部工作：
 //! broker 本身就持有会话注册表与实时状态（idle / thinking / tool:<name>）。
 //!
-//! 协议（对齐 nicobailon/pi-intercom 的 types.ts 与 broker/framing.ts）：
+//! 协议（对齐 @dataforxyz/agent-intercom-* protocol v3）：
 //!   传输：Unix domain socket，`~/.pi/agent/intercom/broker.sock`
 //!         （若设置了 `PI_CODING_AGENT_DIR`，则为 `$PI_CODING_AGENT_DIR/intercom/`）
 //!   分帧：4 字节大端长度前缀 + UTF-8 JSON，单帧上限 1 MiB
@@ -124,7 +124,11 @@ impl IntercomMessage {
 pub enum IntercomEvent {
     Registered { session_id: String, features: Vec<String> },
     Sessions { request_id: String, sessions: Vec<SessionInfo> },
-    Message { from: SessionInfo, message: IntercomMessage },
+    Message {
+        from: SessionInfo,
+        message: IntercomMessage,
+        delivery_id: String,
+    },
     PresenceUpdate { session: SessionInfo },
     SessionJoined { session: SessionInfo },
     SessionLeft { session_id: String },
@@ -205,6 +209,23 @@ fn new_id() -> String {
     format!("tmuxdeck-{}-{}", std::process::id(), now_ms())
 }
 
+fn registration_frame(name: &str, cwd: String, pid: u32, now: i64) -> Value {
+    json!({
+        "type": "register",
+        "protocol": "pi-intercom",
+        "version": 3,
+        "session": {
+            "name": name,
+            "cwd": cwd,
+            "model": "human",
+            "pid": pid,
+            "startedAt": now,
+            "lastActivity": now,
+            "status": "idle",
+        }
+    })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 客户端
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,20 +263,14 @@ impl IntercomClient {
         // 注册。cwd/model 是展示元数据，broker 不做校验；
         // model 填 "human" 让其他会话在 list 里一眼看出这是人不是 agent。
         let now = now_ms();
-        let register = json!({
-            "type": "register",
-            "session": {
-                "name": name,
-                "cwd": std::env::current_dir()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default(),
-                "model": "human",
-                "pid": std::process::id(),
-                "startedAt": now,
-                "lastActivity": now,
-                "status": "idle",
-            }
-        });
+        let register = registration_frame(
+            name,
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            std::process::id(),
+            now,
+        );
         {
             let mut w = writer.lock().map_err(|_| "ERR_LOCK_POISONED")?;
             write_frame(&mut *w, &register).map_err(|e| format!("ERR_REGISTER|{}", e))?;
@@ -338,15 +353,11 @@ impl IntercomClient {
         Ok(message_id)
     }
 
-    /// 回执：告诉发送方消息已被我们收到。
-    pub fn acknowledge(&self, message_id: &str) -> Result<(), String> {
+    /// v3 回执：确认 broker 分配的 deliveryId 已被我们收到。
+    pub fn acknowledge(&self, delivery_id: &str) -> Result<(), String> {
         self.send_frame(json!({
-            "type": "message_receipt",
-            "receipt": {
-                "messageId": message_id,
-                "status": "receiver_received",
-                "timestamp": now_ms(),
-            }
+            "type": "message_received",
+            "deliveryId": delivery_id,
         }))
     }
 
@@ -421,6 +432,7 @@ fn parse_broker_frame(v: &Value, session_id: &Arc<Mutex<Option<String>>>) -> Opt
         "message" => Some(IntercomEvent::Message {
             from: serde_json::from_value(v.get("from")?.clone()).ok()?,
             message: serde_json::from_value(v.get("message")?.clone()).ok()?,
+            delivery_id: v.get("deliveryId")?.as_str()?.to_string(),
         }),
         "presence_update" => Some(IntercomEvent::PresenceUpdate {
             session: serde_json::from_value(v.get("session")?.clone()).ok()?,
@@ -441,7 +453,7 @@ fn parse_broker_frame(v: &Value, session_id: &Arc<Mutex<Option<String>>>) -> Opt
         "error" => Some(IntercomEvent::BrokerError {
             error: v.get("error")?.as_str()?.to_string(),
         }),
-        // extension_* / message_control / message_receipt 等暂不消费
+        // extension_* / message_control 等暂不消费
         _ => None,
     }
 }
@@ -464,6 +476,15 @@ mod tests {
         );
         assert_eq!(mk(None).agent_status(), AgentStatus::Unknown);
         assert_eq!(mk(Some("weird")).agent_status(), AgentStatus::Unknown);
+    }
+
+    #[test]
+    fn test_registration_uses_protocol_v3() {
+        let frame = registration_frame("me", "/tmp".to_string(), 42, 1000);
+        assert_eq!(frame["type"], "register");
+        assert_eq!(frame["protocol"], "pi-intercom");
+        assert_eq!(frame["version"], 3);
+        assert_eq!(frame["session"]["name"], "me");
     }
 
     #[test]
@@ -506,16 +527,43 @@ mod tests {
         let sid = Arc::new(Mutex::new(None));
         let v = json!({
             "type": "message",
+            "deliveryId": "delivery-1",
             "from": { "id": "s-2", "name": "planner", "cwd": "/tmp", "model": "sonnet", "pid": 1, "startedAt": 0, "lastActivity": 0 },
             "message": { "id": "m-1", "timestamp": 0, "expectsReply": true, "content": { "text": "需要你确认" } }
         });
         match parse_broker_frame(&v, &sid) {
-            Some(IntercomEvent::Message { from, message }) => {
+            Some(IntercomEvent::Message {
+                from,
+                message,
+                delivery_id,
+            }) => {
                 assert_eq!(from.display_name(), "planner");
                 assert!(message.expects_reply());
                 assert_eq!(message.content.text, "需要你确认");
+                assert_eq!(delivery_id, "delivery-1");
             }
             _ => panic!("expected Message"),
         }
+
+        let mut missing_delivery = v;
+        missing_delivery.as_object_mut().unwrap().remove("deliveryId");
+        assert!(parse_broker_frame(&missing_delivery, &sid).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_acknowledge_uses_delivery_id_v3_frame() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let client = IntercomClient {
+            writer: Arc::new(Mutex::new(stream)),
+            session_id: Arc::new(Mutex::new(None)),
+            connected: Arc::new(AtomicBool::new(true)),
+        };
+
+        client.acknowledge("delivery-1").unwrap();
+        assert_eq!(
+            read_frame(&mut peer).unwrap(),
+            json!({ "type": "message_received", "deliveryId": "delivery-1" })
+        );
     }
 }

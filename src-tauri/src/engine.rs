@@ -252,7 +252,11 @@ impl BridgeEngine {
                     *b = true;
                 }
             }
-            IntercomEvent::Message { from, message } => {
+            IntercomEvent::Message {
+                from,
+                message,
+                delivery_id,
+            } => {
                 // agent 发给我们的消息：作为对话轮次 + 期待回复时推送 AwaitingHuman
                 let msg_id = message.id.clone();
                 let conv_id = self.registry.by_intercom_id(&from.id).map(|c| c.id.clone());
@@ -277,7 +281,7 @@ impl BridgeEngine {
                     }
                     // 回执：告知发送方已收到
                     if let Some(c) = &self.intercom {
-                        let _ = c.acknowledge(&msg_id);
+                        let _ = c.acknowledge(&delivery_id);
                     }
                 }
             }

@@ -28,6 +28,7 @@ export default function App() {
 
   // Modal & Form State
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const showCreateModalRef = useRef(false);
   const [newSessionName, setNewSessionName] = useState("");
   const [workingDir, setWorkingDir] = useState("");
   const [selectedAgent, setSelectedAgent] = useState("pi");
@@ -41,6 +42,10 @@ export default function App() {
   const [renamingSession, setRenamingSession] = useState<string | null>(null);
   const [renamedName, setRenamedName] = useState("");
   const [terminalIconUrls, setTerminalIconUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    showCreateModalRef.current = showCreateModal;
+  }, [showCreateModal]);
 
   useEffect(() => {
     if (!env?.terminals) return;
@@ -67,7 +72,6 @@ export default function App() {
   };
 
   const loadData = async () => {
-    setLoading(true);
     setErrorMsg("");
     try {
       const [envData, cfgData, sessionList] = await Promise.all([
@@ -105,24 +109,24 @@ export default function App() {
         setCustomAgentName(cfgData.custom_agent.name || "");
         setCustomAgentCmd(cfgData.custom_agent.command || "");
       }
-      if (cfgData.default_terminal && envData.terminals.some((t) => t.id === cfgData.default_terminal)) {
-        setSelectedTerminal(cfgData.default_terminal);
-      } else if (envData.terminals.length > 0) {
-        setSelectedTerminal(envData.terminals[0].id);
+      if (!showCreateModalRef.current) {
+        if (cfgData.default_terminal && envData.terminals.some((t) => t.id === cfgData.default_terminal)) {
+          setSelectedTerminal(cfgData.default_terminal);
+        } else if (envData.terminals.length > 0) {
+          setSelectedTerminal(envData.terminals[0].id);
+        }
+        if (cfgData.default_agent && envData.agents.some((a) => a.id === cfgData.default_agent)) {
+          setSelectedAgent(cfgData.default_agent);
+        } else if (envData.agents.length > 0) {
+          setSelectedAgent(envData.agents[0].id);
+        }
+        if (cfgData.default_panes) setSelectedPanes(cfgData.default_panes);
       }
-      if (cfgData.default_agent && envData.agents.some((a) => a.id === cfgData.default_agent)) {
-        setSelectedAgent(cfgData.default_agent);
-      } else if (envData.agents.length > 0) {
-        setSelectedAgent(envData.agents[0].id);
-      }
-      if (cfgData.default_panes) setSelectedPanes(cfgData.default_panes);
 
       sessionsRef.current = sessionList;
       failedPaneCountsRef.current.clear();
     } catch (err: any) {
       setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -197,7 +201,12 @@ export default function App() {
   };
 
   const handleOpenSession = async (sessionName: string, termId?: string) => {
-    const targetTerminal = termId || selectedTerminal || (env?.terminals[0]?.id || "terminal");
+    const isNative = sessionsRef.current.some(
+      (session) => session.name === sessionName && session.native_split
+    );
+    const targetTerminal = isNative
+      ? "ghostty"
+      : termId || selectedTerminal || (env?.terminals[0]?.id || "terminal");
     try {
       await invoke("open_session", { name: sessionName, terminalId: targetTerminal });
     } catch (err: any) {
@@ -225,7 +234,11 @@ export default function App() {
   };
 
   const handleKill = async (sessionName: string, paneCount: number) => {
-    if (!confirm(tPlural("confirm.destroy", paneCount, { name: sessionName }))) return;
+    const isNative = sessionsRef.current.some(
+      (session) => session.name === sessionName && session.native_split
+    );
+    const confirmKey = isNative ? "confirm.destroyNative" : "confirm.destroy";
+    if (!confirm(tPlural(confirmKey, paneCount, { name: sessionName }))) return;
     try {
       await invoke("kill_session", { sessionName });
       await loadData();
@@ -243,10 +256,24 @@ export default function App() {
     }
   };
 
-  const handleKillPane = async (paneId: string) => {
-    if (!confirm(t("card.confirmKillPane"))) return;
+  const handleKillPane = async (paneId: string, sessionTarget?: string) => {
+    const nativeWorkspace = sessionTarget
+      ? sessionsRef.current.find((session) =>
+          session.native_split && session.panes.some((pane) => pane.session_target === sessionTarget)
+        )
+      : undefined;
+    const confirmKey = nativeWorkspace
+      ? nativeWorkspace.panes_count === 1
+        ? "card.confirmKillLastSlot"
+        : "card.confirmKillSlot"
+      : "card.confirmKillPane";
+    if (!confirm(t(confirmKey))) return;
     try {
-      await invoke("kill_pane", { paneId });
+      if (sessionTarget) {
+        await invoke("kill_slot", { sessionTarget });
+      } else {
+        await invoke("kill_pane", { paneId });
+      }
       await loadData();
     } catch (err: any) {
       alert(translateError(err));

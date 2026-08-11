@@ -1,3 +1,4 @@
+mod native;
 mod pane;
 mod session;
 mod utils;

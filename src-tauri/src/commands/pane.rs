@@ -1,4 +1,8 @@
 use crate::audit::{record_kill, tmux_counts};
+use crate::commands::native::{
+    create_native_slot, kill_native_slot, list_native_slots, open_native_workspace,
+};
+use crate::commands::utils::isolated_agent_command;
 use crate::tmux::{
     check_tmux_installed, get_session_first_pane_dir, is_no_server_err, run_tmux,
     sanitize_session_name, strip_ansi, validate_pane_id,
@@ -41,15 +45,37 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
 
-    let work_dir = get_session_first_pane_dir(&sanitized).unwrap_or_else(|| "~".to_string());
+    let native_slots = list_native_slots(&sanitized)?;
+    let work_dir_target = native_slots
+        .first()
+        .map(|slot| slot.target.as_str())
+        .unwrap_or(sanitized.as_str());
+    let work_dir = get_session_first_pane_dir(work_dir_target).unwrap_or_else(|| "~".to_string());
     let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+
+    if !native_slots.is_empty() {
+        let next_slot = native_slots
+            .iter()
+            .filter_map(|slot| slot.slot.parse::<usize>().ok())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let created = create_native_slot(&sanitized, next_slot, &work_dir, &shell_path)?;
+        let slots = list_native_slots(&sanitized)?;
+        if let Err(error) = open_native_workspace(&sanitized, &slots) {
+            let _ = run_tmux(&["kill-session", "-t", &created.target]);
+            return Err(error);
+        }
+        return Ok(());
+    }
 
     let mut split_args = vec!["split-window", "-t", &sanitized];
     if !work_dir.is_empty() && work_dir != "~" {
         split_args.push("-c");
         split_args.push(&work_dir);
     }
-    split_args.push(&shell_path);
+    let isolated_shell = isolated_agent_command(&shell_path);
+    split_args.push(&isolated_shell);
 
     let output = run_tmux(&split_args).map_err(|e| format!("ERR_ADD_PANE_FAILED|{}", e))?;
     if !output.status.success() {
@@ -57,10 +83,7 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
         if is_no_server_err(&err_msg) {
             return Err("ERR_TMUX_NO_SERVER".to_string());
         }
-        return Err(format!(
-            "ERR_ADD_PANE_OUTPUT_ERR|{}",
-            err_msg
-        ));
+        return Err(format!("ERR_ADD_PANE_OUTPUT_ERR|{}", err_msg));
     }
 
     let _ = run_tmux(&["select-layout", "-t", &sanitized, "tiled"]);
@@ -81,6 +104,11 @@ fn pane_kill_context(stdout: &str) -> Result<(String, usize), String> {
         return Err("ERR_KILL_PANE_LAST_IN_SESSION".to_string());
     }
     Ok((session_name, pane_count))
+}
+
+#[tauri::command]
+pub fn kill_slot(session_target: String) -> Result<(), String> {
+    kill_native_slot(&session_target)
 }
 
 #[tauri::command]
