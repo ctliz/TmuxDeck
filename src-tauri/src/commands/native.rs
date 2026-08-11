@@ -344,10 +344,13 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn config_script(var: &str, workspace: &str, slot: &NativeSlot, tmux: &str) -> String {
+    // 防御模板：attach 前先 has-session，session 消失时优雅降级到 shell，
+    // 避免 Ghostty 弹 "failed to launch" 窗口。注意 Ghostty 的 Cmd+D split
+    // 会继承 surface 的 command——新增屏同样走到这里，防御同样生效。
+    let tmux_q = shell_single_quote(tmux);
+    let target_q = shell_single_quote(&slot.target);
     let command = format!(
-        "{} attach-session -t {}",
-        shell_single_quote(tmux),
-        shell_single_quote(&slot.target)
+        "if {tmux_q} has-session -t {target_q} 2>/dev/null; then exec {tmux_q} attach-session -t {target_q}; else echo \"Session {target_q} no longer exists. Starting a shell instead.\"; exec \"$SHELL\"; fi"
     );
     format!(
         "set {var} to new surface configuration\nset command of {var} to \"{}\"\nset environment variables of {var} to {{\"TMUXDECK_WORKSPACE={}\", \"TMUXDECK_SLOT={}\"}}\nset wait after command of {var} to false\n",
@@ -435,9 +438,9 @@ mod tests {
         };
         let script = config_script("cfg", workspace, &slot, "/opt/homebrew/bin/tmux");
         assert!(script.contains("TMUXDECK_WORKSPACE=alpha__td_slot_inside"));
-        assert!(!script.contains("exec "));
+        // 防御模板：has-session 守卫 + attach 目标用 slot target（而非 workspace 本身）
         assert!(script.contains(
-            "set command of cfg to \"'/opt/homebrew/bin/tmux' attach-session -t 'alpha__td_slot_inside__td_slot_01'\""
+            "set command of cfg to \"if '/opt/homebrew/bin/tmux' has-session -t 'alpha__td_slot_inside__td_slot_01' 2>/dev/null; then exec '/opt/homebrew/bin/tmux' attach-session -t 'alpha__td_slot_inside__td_slot_01'; else echo \\\"Session 'alpha__td_slot_inside__td_slot_01' no longer exists. Starting a shell instead.\\\"; exec \\\"$SHELL\\\"; fi\""
         ));
     }
 

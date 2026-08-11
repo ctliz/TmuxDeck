@@ -53,6 +53,17 @@ pub fn is_no_server_err(stderr: &str) -> bool {
         || (lower.contains("no such file or directory") && (lower.contains("tmux") || lower.contains("socket") || lower.contains("/tmp/")))
 }
 
+/// 判定 stderr 是否为「目标 session 不存在」类错误（server 在，但找不到指定 session）。
+///
+/// 与 `is_no_server_err` 互斥：前者说没有 server，这里说 server 在但 session 没了。
+/// 调用方应先查 no-server，再查本函数——两者都命不中时才是其他错误。
+pub fn is_session_missing_err(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    lower.contains("can't find session")
+        || lower.contains("invalid or unknown session")
+        || lower.contains("no session")
+}
+
 pub fn sanitize_session_name(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

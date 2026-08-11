@@ -183,6 +183,25 @@ mod tests {
     }
 
     #[test]
+    fn test_is_session_missing_err() {
+        // 正例：tmux 对已消失 session 的典型报错
+        assert!(is_session_missing_err("can't find session: Tmux-Deck"));
+        assert!(is_session_missing_err("invalid or unknown session: %foo"));
+        assert!(is_session_missing_err("no session"));
+        assert!(is_session_missing_err("can't find session: alpha__td_slot_inside__td_slot_01"));
+
+        // 反例：其他错误 / 空串
+        assert!(!is_session_missing_err("no server running on /tmp/tmux-501/default"));
+        assert!(!is_session_missing_err("error connecting to /tmp/tmux-501/default"));
+        assert!(!is_session_missing_err("duplicate session: bar"));
+        assert!(!is_session_missing_err(""));
+
+        // 与 is_no_server_err 互斥
+        assert!(!is_no_server_err("can't find session: foo"));
+        assert!(!is_session_missing_err("no server running on /tmp/tmux-501/default"));
+    }
+
+    #[test]
     fn test_run_tmux_smoke() {
         if check_tmux_installed().is_some() {
             let res = run_tmux(&["list-sessions"]);

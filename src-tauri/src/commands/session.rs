@@ -17,7 +17,7 @@ use crate::models::{CreateOpts, TmuxSession};
 use crate::registry::{detect_environment, ToolInfo};
 use crate::tmux::{
     check_tmux_installed, get_session_panes, has_attached_clients, is_no_server_err,
-    is_session_attached, run_tmux, sanitize_session_name,
+    is_session_attached, is_session_missing_err, run_tmux, sanitize_session_name,
 };
 
 #[tauri::command]
@@ -36,6 +36,11 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
             let err_msg = String::from_utf8_lossy(&out.stderr);
             if is_no_server_err(&err_msg) {
                 return Err("ERR_TMUX_NO_SERVER".to_string());
+            }
+            // session 已消失：不要继续生成脚本启动终端——attach 必败，
+            // 脚本 39ms 退出会让 Ghostty 弹 "failed to launch" 窗口。
+            if is_session_missing_err(&err_msg) {
+                return Err("ERR_SESSION_NOT_FOUND".to_string());
             }
         }
     }
@@ -155,8 +160,8 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
         let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
 
         let script_content = format!(
-            "#!/bin/bash\nexec '{}' attach-session -t '{}'\n",
-            tmux, sanitized_name
+            "#!/bin/bash\nif '{}' has-session -t '{}' 2>/dev/null; then\n  exec '{}' attach-session -t '{}'\nelse\n  echo \"Session '{}' no longer exists. Starting a shell instead.\"\n  exec \"$SHELL\"\nfi\n",
+            tmux, sanitized_name, tmux, sanitized_name, sanitized_name
         );
         std::fs::write(&script_path, script_content)
             .map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
