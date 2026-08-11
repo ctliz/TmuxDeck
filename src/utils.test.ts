@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { test } from "node:test";
+import { tPlural } from "./i18n.ts";
 import { sanitizeNameFrontend } from "./utils.ts";
 
 test("sanitizeNameFrontend - valid alphanumeric names", () => {
@@ -15,4 +16,12 @@ test("sanitizeNameFrontend - trims whitespace and special characters", () => {
 test("sanitizeNameFrontend - collapse multiple dashes and strips leading/trailing dashes", () => {
   assert.strictEqual(sanitizeNameFrontend("---foo---bar---"), "foo-bar");
   assert.strictEqual(sanitizeNameFrontend("!!!"), "");
+});
+
+test("destroy confirmation distinguishes pane termination from terminal detach", () => {
+  const message = tPlural("confirm.destroy", 4, { name: "workspace" });
+  assert.match(message, /workspace/);
+  assert.match(message, /4 tmux panes/);
+  assert.match(message, /Cmd\+W/);
+  assert.match(message, /detach/);
 });

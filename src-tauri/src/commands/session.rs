@@ -3,6 +3,7 @@ use std::process::Command;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+use crate::audit::{observe_session_count, record_kill, tmux_counts};
 use crate::commands::utils::to_wsl_path;
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
@@ -296,6 +297,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
         if is_no_server_err(&err_msg) {
+            observe_session_count(0, true);
             return Ok(Vec::new());
         }
         return Err(format!("ERR_TMUX_GENERIC|{}", err_msg));
@@ -351,6 +353,7 @@ pub fn get_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
         }
     }
 
+    observe_session_count(sessions.len(), false);
     Ok(sessions)
 }
 
@@ -361,8 +364,36 @@ pub fn kill_session(session_name: String) -> Result<(), String> {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
 
-    let output = run_tmux(&["kill-session", "-t", &sanitized_name])
-        .map_err(|e| format!("ERR_KILL_FAILED|{}", e))?;
+    let before = tmux_counts();
+    let output = match run_tmux(&["kill-session", "-t", &sanitized_name]) {
+        Ok(output) => output,
+        Err(e) => {
+            record_kill(
+                "kill_session",
+                &sanitized_name,
+                before,
+                tmux_counts(),
+                "spawn_error",
+            );
+            return Err(format!("ERR_KILL_FAILED|{}", e));
+        }
+    };
+    let status = if output.status.success() {
+        "success".to_string()
+    } else {
+        output
+            .status
+            .code()
+            .map(|code| format!("exit_{}", code))
+            .unwrap_or_else(|| "signal".to_string())
+    };
+    record_kill(
+        "kill_session",
+        &sanitized_name,
+        before,
+        tmux_counts(),
+        &status,
+    );
 
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);

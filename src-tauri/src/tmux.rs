@@ -325,3 +325,129 @@ pub fn swap_panes(pane_id_a: &str, pane_id_b: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod lifecycle_tests {
+    use super::*;
+    use std::process::{Child, Command, Output, Stdio};
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    struct IsolatedServer {
+        tmux: String,
+        socket: String,
+    }
+
+    impl Drop for IsolatedServer {
+        fn drop(&mut self) {
+            let _ = tmux_output(&self.tmux, &self.socket, &["kill-server"]);
+        }
+    }
+
+    fn tmux_output(tmux: &str, socket: &str, args: &[&str]) -> std::io::Result<Output> {
+        Command::new(tmux).arg("-L").arg(socket).args(args).output()
+    }
+
+    fn wait_for_client(tmux: &str, socket: &str) -> Option<String> {
+        for _ in 0..30 {
+            if let Ok(output) = tmux_output(tmux, socket, &["list-clients", "-F", "#{client_pid}"])
+            {
+                let pid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !pid.is_empty() {
+                    return Some(pid);
+                }
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        None
+    }
+
+    fn stop_child(child: &mut Child) {
+        if child.try_wait().ok().flatten().is_none() {
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn test_closing_attach_client_preserves_session_and_panes() {
+        let Some(tmux) = check_tmux_installed() else {
+            return;
+        };
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let socket = format!("tmuxdeck-test-{}-{}", std::process::id(), unique);
+        let _server = IsolatedServer {
+            tmux: tmux.clone(),
+            socket: socket.clone(),
+        };
+
+        let created = Command::new(&tmux)
+            .args([
+                "-L",
+                &socket,
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                "four",
+                "sleep 30",
+            ])
+            .output()
+            .unwrap();
+        assert!(created.status.success());
+        for _ in 1..4 {
+            let split =
+                tmux_output(&tmux, &socket, &["split-window", "-t", "four", "sleep 30"]).unwrap();
+            assert!(split.status.success());
+        }
+
+        let mut attach = Command::new("/usr/bin/script")
+            .args([
+                "-q",
+                "/dev/null",
+                &tmux,
+                "-L",
+                &socket,
+                "attach-session",
+                "-t",
+                "four",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let client_pid = wait_for_client(&tmux, &socket).expect("attach client did not connect");
+        let status = Command::new("kill")
+            .args(["-HUP", &client_pid])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let mut detached = false;
+        for _ in 0..30 {
+            let clients = tmux_output(&tmux, &socket, &["list-clients"])
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                .unwrap_or_default();
+            if clients.is_empty() {
+                detached = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        assert!(
+            detached,
+            "attach client should detach after its terminal closes"
+        );
+        stop_child(&mut attach);
+
+        let sessions =
+            tmux_output(&tmux, &socket, &["list-sessions", "-F", "#{session_name}"]).unwrap();
+        let panes = tmux_output(&tmux, &socket, &["list-panes", "-a", "-F", "#{pane_id}"]).unwrap();
+        assert_eq!(String::from_utf8_lossy(&sessions.stdout).lines().count(), 1);
+        assert_eq!(String::from_utf8_lossy(&panes.stdout).lines().count(), 4);
+    }
+}

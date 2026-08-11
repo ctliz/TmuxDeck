@@ -1,7 +1,11 @@
+use crate::audit::{record_kill, tmux_counts};
 use crate::tmux::{
     check_tmux_installed, get_session_first_pane_dir, is_no_server_err, run_tmux,
     sanitize_session_name, strip_ansi, validate_pane_id,
 };
+use std::sync::Mutex;
+
+static PANE_KILL_LOCK: Mutex<()> = Mutex::new(());
 
 /// 向 pane 发送一段文本。桌面端此前也没有这个能力。
 ///
@@ -63,6 +67,22 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
     Ok(())
 }
 
+fn pane_kill_context(stdout: &str) -> Result<(String, usize), String> {
+    let mut session_name = None;
+    let mut pane_count = 0;
+    for line in stdout.lines() {
+        if let Some((_, session)) = line.split_once('|') {
+            pane_count += 1;
+            session_name.get_or_insert_with(|| session.to_string());
+        }
+    }
+    let session_name = session_name.ok_or_else(|| "ERR_KILL_PANE_NOT_FOUND".to_string())?;
+    if pane_count <= 1 {
+        return Err("ERR_KILL_PANE_LAST_IN_SESSION".to_string());
+    }
+    Ok((session_name, pane_count))
+}
+
 #[tauri::command]
 pub fn kill_pane(pane_id: String) -> Result<(), String> {
     let trimmed = pane_id.trim();
@@ -72,17 +92,78 @@ pub fn kill_pane(pane_id: String) -> Result<(), String> {
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
+    let _guard = PANE_KILL_LOCK
+        .lock()
+        .map_err(|_| "ERR_KILL_PANE_FAILED|lock".to_string())?;
+    let before = tmux_counts();
 
-    let output = run_tmux(&["kill-pane", "-t", trimmed]).map_err(|e| format!("ERR_KILL_PANE_FAILED|{}", e))?;
+    let lookup = match run_tmux(&[
+        "list-panes",
+        "-s",
+        "-t",
+        trimmed,
+        "-F",
+        "#{pane_id}|#{session_name}",
+    ]) {
+        Ok(output) => output,
+        Err(e) => {
+            record_kill(
+                "kill_pane",
+                trimmed,
+                before,
+                tmux_counts(),
+                "guard_spawn_error",
+            );
+            return Err(format!("ERR_KILL_PANE_FAILED|{}", e));
+        }
+    };
+    if !lookup.status.success() {
+        let err_msg = String::from_utf8_lossy(&lookup.stderr);
+        record_kill(
+            "kill_pane",
+            trimmed,
+            before,
+            tmux_counts(),
+            "guard_query_failed",
+        );
+        if is_no_server_err(&err_msg) {
+            return Err("ERR_TMUX_NO_SERVER".to_string());
+        }
+        return Err(format!("ERR_KILL_PANE_OUTPUT_ERR|{}", err_msg));
+    }
+    if let Err(error) = pane_kill_context(&String::from_utf8_lossy(&lookup.stdout)) {
+        let status = if error == "ERR_KILL_PANE_LAST_IN_SESSION" {
+            "rejected_last_pane"
+        } else {
+            "guard_invalid_output"
+        };
+        record_kill("kill_pane", trimmed, before, tmux_counts(), status);
+        return Err(error);
+    }
+
+    let output = match run_tmux(&["kill-pane", "-t", trimmed]) {
+        Ok(output) => output,
+        Err(e) => {
+            record_kill("kill_pane", trimmed, before, tmux_counts(), "spawn_error");
+            return Err(format!("ERR_KILL_PANE_FAILED|{}", e));
+        }
+    };
+    let status = if output.status.success() {
+        "success".to_string()
+    } else {
+        output
+            .status
+            .code()
+            .map(|code| format!("exit_{}", code))
+            .unwrap_or_else(|| "signal".to_string())
+    };
+    record_kill("kill_pane", trimmed, before, tmux_counts(), &status);
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
         if is_no_server_err(&err_msg) {
             return Err("ERR_TMUX_NO_SERVER".to_string());
         }
-        return Err(format!(
-            "ERR_KILL_PANE_OUTPUT_ERR|{}",
-            err_msg
-        ));
+        return Err(format!("ERR_KILL_PANE_OUTPUT_ERR|{}", err_msg));
     }
     Ok(())
 }
@@ -115,4 +196,25 @@ pub fn capture_pane(pane_id: String, max_lines: usize) -> Result<String, String>
     }
 
     Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_last_pane_is_rejected() {
+        assert_eq!(
+            pane_kill_context("%3|workspace\n"),
+            Err("ERR_KILL_PANE_LAST_IN_SESSION".to_string())
+        );
+    }
+
+    #[test]
+    fn test_multiple_panes_can_be_killed() {
+        assert_eq!(
+            pane_kill_context("%3|workspace\n%4|workspace\n"),
+            Ok(("workspace".to_string(), 2))
+        );
+    }
 }

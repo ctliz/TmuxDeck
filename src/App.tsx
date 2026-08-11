@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { t, translateError } from "./i18n";
+import { t, tPlural, translateError } from "./i18n";
 import { sanitizeNameFrontend } from "./utils";
 import { Config, CustomAgent, Environment, TmuxSession } from "./types";
 import { TmuxMissingScreen } from "./components/TmuxMissingScreen";
@@ -224,8 +224,8 @@ export default function App() {
     }
   };
 
-  const handleKill = async (sessionName: string) => {
-    if (!confirm(t("confirm.destroy", { name: sessionName }))) return;
+  const handleKill = async (sessionName: string, paneCount: number) => {
+    if (!confirm(tPlural("confirm.destroy", paneCount, { name: sessionName }))) return;
     try {
       await invoke("kill_session", { sessionName });
       await loadData();

@@ -1,5 +1,6 @@
 use tauri::Emitter;
 
+mod audit;
 mod bridge;
 mod bridge_state;
 mod commands;

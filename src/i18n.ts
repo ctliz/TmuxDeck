@@ -2,7 +2,7 @@ const en: Record<string, string> = {
   // App Header
   "app.title": "TmuxDeck",
   "app.subtitle": "Multi-agent workspace console for tmux",
-  "app.version": "v1.8.0",
+  "app.version": "v1.8.1",
   "env.tmux_ok": "Tmux ✓",
   "env.terminals_one": "{n} available terminal",
   "env.terminals_other": "{n} available terminals",
@@ -46,6 +46,7 @@ const en: Record<string, string> = {
   "card.idle": "Idle",
   "card.openWithTerminal": "Open with {name}",
   "card.rename": "Rename",
+  "card.drag": "Drag to reorder workspace",
   "card.destroy": "Destroy workspace",
   "card.killPane": "Kill this pane",
   "card.confirmKillPane": "Kill this pane?",
@@ -96,7 +97,8 @@ const en: Record<string, string> = {
   "tray.viewMore": "View All ({n} total)...",
 
   // Confirmations
-  "confirm.destroy": "Destroy workspace \"{name}\"?",
+  "confirm.destroy_one": "Destroy workspace \"{name}\"? This will terminate its {n} tmux pane.\n\nIf you only want to leave temporarily, close the terminal window (Cmd+W). Any Close Window warning comes from the terminal and refers to the terminal connection, not this tmux workspace; choosing Close should only detach while the workspace keeps running in the background.",
+  "confirm.destroy_other": "Destroy workspace \"{name}\"? This will terminate its {n} tmux panes.\n\nIf you only want to leave temporarily, close the terminal window (Cmd+W). Any Close Window warning comes from the terminal and refers to the terminal connection, not this tmux workspace; choosing Close should only detach while the workspace keeps running in the background.",
 
   // Error Code Mappings (from Rust)
   "ERR_ADD_PANE_FAILED": "Failed to add pane",
@@ -116,6 +118,8 @@ const en: Record<string, string> = {
   "ERR_KILL_OUTPUT_ERR": "Error destroying workspace",
   "ERR_KILL_PANE_FAILED": "Failed to kill pane",
   "ERR_KILL_PANE_INVALID": "Invalid pane ID format",
+  "ERR_KILL_PANE_LAST_IN_SESSION": "The last pane cannot be killed. Destroy the workspace explicitly instead.",
+  "ERR_KILL_PANE_NOT_FOUND": "Pane not found",
   "ERR_KILL_PANE_OUTPUT_ERR": "Error killing pane",
   "ERR_SWAP_PANE_FAILED": "Failed to swap panes",
   "ERR_READ_ICON": "Failed to read icon",
@@ -141,7 +145,7 @@ const zh: Record<string, string> = {
   // App Header
   "app.title": "TmuxDeck",
   "app.subtitle": "tmux 多 Agent 工作区控制台",
-  "app.version": "v1.8.0",
+  "app.version": "v1.8.1",
   "env.tmux_ok": "Tmux ✓",
   "env.terminals_one": "{n} 个可用终端",
   "env.terminals_other": "{n} 个可用终端",
@@ -185,6 +189,7 @@ const zh: Record<string, string> = {
   "card.bgActive": "后台活跃",
   "card.openWithTerminal": "使用 {name} 打开",
   "card.rename": "重命名",
+  "card.drag": "拖动调整工作区顺序",
   "card.destroy": "销毁工作区",
   "card.killPane": "删除此分屏",
   "card.confirmKillPane": "确定删除此分屏格？",
@@ -235,7 +240,8 @@ const zh: Record<string, string> = {
   "tray.viewMore": "查看全部（共 {n} 个）…",
 
   // Confirmations
-  "confirm.destroy": "确定要销毁工作区「{name}」吗？",
+  "confirm.destroy_one": "确定要销毁工作区「{name}」吗？这会终止其中的 {n} 个 tmux 分屏。\n\n若只是暂时离开，请关闭终端窗口（Cmd+W）。此时出现的 Close Window 提示来自终端，指的是终端连接而非该 tmux 工作区；确认关闭应只断开连接，工作区继续后台运行。",
+  "confirm.destroy_other": "确定要销毁工作区「{name}」吗？这会终止其中的 {n} 个 tmux 分屏。\n\n若只是暂时离开，请关闭终端窗口（Cmd+W）。此时出现的 Close Window 提示来自终端，指的是终端连接而非该 tmux 工作区；确认关闭应只断开连接，工作区继续后台运行。",
 
   // Error Code Mappings (from Rust)
   "ERR_ADD_PANE_FAILED": "新增分屏失败",
@@ -255,6 +261,8 @@ const zh: Record<string, string> = {
   "ERR_KILL_OUTPUT_ERR": "销毁会话失败",
   "ERR_KILL_PANE_FAILED": "删除分屏失败",
   "ERR_KILL_PANE_INVALID": "非法的分屏 ID 格式",
+  "ERR_KILL_PANE_LAST_IN_SESSION": "不能删除工作区的最后一个分屏；如需销毁，请明确使用“销毁工作区”。",
+  "ERR_KILL_PANE_NOT_FOUND": "未找到该分屏",
   "ERR_KILL_PANE_OUTPUT_ERR": "删除分屏报错",
   "ERR_SWAP_PANE_FAILED": "交换分屏格失败",
   "ERR_READ_ICON": "读取图标失败",

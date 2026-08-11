@@ -15,7 +15,7 @@ interface SessionCardProps {
   onRenameStart: (name: string) => void;
   onRenameChange: (val: string) => void;
   onRenameCommit: (oldName: string) => void;
-  onKill: (name: string) => void;
+  onKill: (name: string, paneCount: number) => void;
   onAddPane: (name: string) => void;
   onKillPane: (id: string) => void;
   onOpenSession: (name: string, termId: string) => void;
@@ -158,12 +158,9 @@ export function SessionCard({
 
   return (
     <div
-      draggable={!isRenaming}
-      onDragStart={(e) => !isPaneDraggingRef.current && onCardDragStart?.(e, session.id)}
       onDragOver={(e) => !isPaneDraggingRef.current && onCardDragOver?.(e, session.id)}
       onDragLeave={(e) => !isPaneDraggingRef.current && onCardDragLeave?.(e, session.id)}
       onDrop={(e) => !isPaneDraggingRef.current && onCardDrop?.(e, session.id)}
-      onDragEnd={(e) => !isPaneDraggingRef.current && onCardDragEnd?.(e)}
       className={`flex flex-col justify-between rounded-2xl bg-white/10 backdrop-blur-xl border transition-all duration-300 shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15 group animate-fade-in-up ${
         isDraggingCard
           ? "opacity-40 border-cyan-500/70 scale-95 cursor-grabbing"
@@ -173,9 +170,20 @@ export function SessionCard({
       }`}
     >
       {/* Card Header */}
-      <div className="p-4 border-b border-white/10 cursor-grab active:cursor-grabbing">
+      <div className="p-4 border-b border-white/10">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 min-w-0 flex-1">
+            <button
+              type="button"
+              draggable={!isRenaming}
+              onDragStart={(e) => onCardDragStart?.(e, session.id)}
+              onDragEnd={(e) => onCardDragEnd?.(e)}
+              className="shrink-0 px-1 text-slate-500 hover:text-cyan-300 cursor-grab active:cursor-grabbing"
+              title={t("card.drag")}
+              aria-label={t("card.drag")}
+            >
+              ⠿
+            </button>
             <span
               className={`w-2.5 h-2.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
               title={activityInfo.statusTooltip}
@@ -205,7 +213,10 @@ export function SessionCard({
             )}
           </div>
           <button
-            onClick={() => onKill(session.name)}
+            draggable={false}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDragStart={(e) => e.stopPropagation()}
+            onClick={() => onKill(session.name, session.panes_count)}
             className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-white/10 transition cursor-pointer text-sm font-bold leading-none shrink-0"
             title={t("card.destroy")}
           >
@@ -218,6 +229,9 @@ export function SessionCard({
       <div className="p-4 flex-1">
         <div className="flex items-center justify-between mb-2">
           <button
+            draggable={false}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDragStart={(e) => e.stopPropagation()}
             onClick={() => onAddPane(session.name)}
             className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-[10px] text-slate-300 hover:text-cyan-300 transition-all duration-200 cursor-pointer flex items-center space-x-1"
             title={t("card.addPane")}
@@ -282,6 +296,9 @@ export function SessionCard({
                   <div className="flex items-center space-x-1 pointer-events-auto">
                     {session.panes_count > 1 && (
                       <button
+                        draggable={false}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onDragStart={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           onKillPane(pane.id);
@@ -325,6 +342,9 @@ export function SessionCard({
             return (
               <button
                 key={term.id}
+                draggable={false}
+                onPointerDown={(e) => e.stopPropagation()}
+                onDragStart={(e) => e.stopPropagation()}
                 onClick={() => onOpenSession(session.name, term.id)}
                 className={`p-1.5 rounded-xl transition-all duration-200 hover:scale-110 cursor-pointer relative ${
                   isDefault
@@ -336,6 +356,7 @@ export function SessionCard({
                 })}
               >
                 <img
+                  draggable={false}
                   src={iconSrc}
                   onError={(e) => {
                     e.currentTarget.src = "/terminal-icons/default.svg";

@@ -27,13 +27,19 @@ impl Default for Config {
     }
 }
 
-pub fn get_config_path() -> std::path::PathBuf {
+pub fn get_config_dir() -> std::path::PathBuf {
     if let Some(config_dir) = dirs::config_dir() {
-        config_dir.join("tmuxdeck").join("config.json")
+        config_dir.join("tmuxdeck")
     } else {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        std::path::PathBuf::from(home).join(".config").join("tmuxdeck").join("config.json")
+        std::path::PathBuf::from(home)
+            .join(".config")
+            .join("tmuxdeck")
     }
+}
+
+pub fn get_config_path() -> std::path::PathBuf {
+    get_config_dir().join("config.json")
 }
 
 #[tauri::command]
