@@ -1,94 +1,94 @@
-# TmuxDeck v1.12 对话桥：intercom 接入 + 手机端多路对话
+# TmuxDeck v1.12 Conversation Bridge: Intercom Integration + Multi-Conversation on Mobile
 
-> 目标：**在手机上同时跟多个 pane 里的 agent 对话**，并能把 A 的内容转给 B。
-> 不是终端模拟，不是通知收件箱，而是一组可以并行进行的对话——每个 pane 是一个对话对象。
-> 传输是持久连接（WebSocket 形态），不是「推一条通知」的单向通道。
+> Goal: **talk to the agents in multiple panes at once from your phone**, and be able to hand content from A to B.
+> This is not terminal emulation and not a notification inbox — it's a set of conversations that can run in parallel, one conversation object per pane.
+> Transport is a persistent connection (WebSocket-shaped), not a one-way "push a notification" channel.
 
 ---
 
-## 0. 决策记录
+## 0. Decision record
 
-| 项 | 决定 | 理由 |
+| Item | Decision | Rationale |
 |---|---|---|
-| 总线 | **复用 pi-intercom broker，不自造** | 已有跨 harness 家族，且已解决状态、排队投递、回执 |
-| TmuxDeck 定位 | **intercom 的「人类适配器」** | 家族里 Pi/Codex/Claude/OpenCode 都有适配器，唯独没有「人」 |
-| 手机端形态 | 多路对话客户端（持久连接） | 用户诉求：能进每个 pane 聊，也能跨 pane 转发 |
-| 推送通道 | **先只做抽象层**（`Transport` trait） | 具体接 ntfy / 飞书 / TG 待定，不提前绑定 |
-| ~~四态判定 / 静默启发式~~ | **删除** | broker 直接给 `idle` / `thinking` / `tool:<name>`，是事实不是猜测 |
-| ~~自造消息总线~~ | **撤销** | 见 `PRIOR-ART-agent-bus.md` |
+| Bus | **Reuse the pi-intercom broker, don't build our own** | A cross-harness family already exists and has solved status, queued delivery, and receipts |
+| TmuxDeck's role | **intercom's "human adapter"** | Every harness in the family (Pi/Codex/Claude/OpenCode) has an adapter; only "the human" is missing |
+| Mobile shape | Multi-conversation client (persistent connection) | User need: enter any pane to chat, and forward across panes |
+| Push channel | **Abstract layer only for now** (`Transport` trait) | Concrete integration with ntfy / Feishu / TG is undecided; don't bind early |
+| ~~Four-state heuristic / silent inference~~ | **Removed** | The broker reports `idle` / `thinking` / `tool:<name>` directly — fact, not guesswork |
+| ~~Self-built message bus~~ | **Reverted** | See `PRIOR-ART-agent-bus.md` |
 
-调研依据见 [`PRIOR-ART-agent-bus.md`](./PRIOR-ART-agent-bus.md)。
+Research basis in [`PRIOR-ART-agent-bus.md`](./PRIOR-ART-agent-bus.md).
 
 ---
 
-## 1. 架构
+## 1. Architecture
 
 ```
 ┌──────────────────── TmuxDeck ────────────────────┐
 │                                                   │
-│  React 桌面 UI ──invoke──┐                        │
-│                          ├──▶ tmux.rs ──▶ tmux    │
-│  bridge.rs（对话桥）──────┘                        │
+│  React desktop UI ──invoke──┐                     │
+│                             ├──▶ tmux.rs ──▶ tmux │
+│  bridge.rs (conversation bridge)──────┘          │
 │      │                                            │
 │      ├── ConversationRegistry                     │
-│      │     pane 清单 ⊕ intercom 会话 → 对话表      │
+│      │     pane list ⊕ intercom sessions → conversation table │
 │      │                                            │
 │      ├── intercom.rs ──unix socket──▶ broker.sock │
-│      │     注册为 "me"，收发定向消息、订阅状态      │
+│      │     registers as "me"; sends/receives directed messages, subscribes to status │
 │      │                                            │
-│      └── Transport（trait）──▶ 手机端              │
+│      └── Transport (trait)──▶ mobile client       │
 └───────────────────────────────────────────────────┘
 ```
 
-三条数据通路，各有各的来源：
+Three data paths, each with its own source:
 
-| 用途 | 来源 | 状态 |
+| Purpose | Source | Status |
 |---|---|---|
-| 有哪些对话、各自什么状态 | broker 注册表 + `tmux list-panes -a` | ✅ 已实现 |
-| 我 → agent | `intercom send`（优先）/ `send-keys`（兜底） | ✅ 已实现 |
-| agent → 我 | `TranscriptSource` | ⚠️ 见第 4 节，唯一未定 |
+| Which conversations exist, and their status | broker registry + `tmux list-panes -a` | ✅ implemented |
+| me → agent | `intercom send` (preferred) / `send-keys` (fallback) | ✅ implemented |
+| agent → me | `TranscriptSource` | ⚠️ see section 4; the only undecided piece |
 
 ---
 
-## 2. 已实现（本次）
+## 2. Implemented (this round)
 
 ### `tmux.rs`
 
-- `list_all_panes()` — 一次 `list-panes -a` 拿全部 pane 的 session / 进程 / cwd
-- `send_keys(pane, text, submit)` — 自由文本走 `-l` literal 通道，多行逐行发送
-- `send_key_name(pane, key)` — 控制键**白名单**通道（`Escape` / `C-c` / 方向键等）
+- `list_all_panes()` — one `list-panes -a` to get every pane's session / process / cwd
+- `send_keys(pane, text, submit)` — free-form text goes through the `-l` literal channel; multi-line is sent line by line
+- `send_key_name(pane, key)` — control-key **whitelist** channel (`Escape` / `C-c` / arrow keys etc.)
 
-> 两条通道刻意分开：不分开的话，消息里出现 "C-c" 会被 tmux 当控制键执行。
+> The two channels are deliberately separated: without that, a "C-c" inside a message would be executed by tmux as a control key.
 
 ### `intercom.rs`
 
-pi-intercom broker 客户端，对齐上游 `types.ts` 与 `broker/framing.ts`：
+pi-intercom broker client, aligned with upstream `types.ts` and `broker/framing.ts`:
 
-- 传输 Unix domain socket，分帧 4 字节大端长度 + JSON，单帧上限 1 MiB
-- `connect()` 注册为 `me`（`model: "human"`，其他会话在 list 里一眼看出这是人）
+- Transport is a Unix domain socket; framing is 4-byte big-endian length + JSON, 1 MiB max per frame
+- `connect()` registers as `me` (`model: "human"`, so other sessions instantly see in `list` that this is a person)
 - `request_list` / `send` / `reply` / `acknowledge` / `update_presence`
-- 独立读线程 → `mpsc::Receiver<IntercomEvent>`
-- **入站帧手工分派**：遇到未知类型忽略而非报错。上游协议在演进
-  （dataforxyz 分支已到 v3），容忍未知是必需的
-- 无新增依赖（复用已有的 serde / serde_json / dirs）
+- Dedicated reader thread → `mpsc::Receiver<IntercomEvent>`
+- **Inbound frames dispatched by hand**: unknown types are ignored rather than erroring. The upstream protocol is evolving
+  (the dataforxyz branch is already at v3); tolerating unknowns is mandatory
+- No new dependencies (reuses existing serde / serde_json / dirs)
 
 ### `bridge.rs`
 
-- `AgentKind::from_command` — 从 `pane_current_command` 识别 agent 类型；
-  **agent 执行工具时进程名会临时变成 `bash`，此时不把 kind 打回 Shell**
-- `ConversationRegistry` — pane 表 ⊕ intercom 会话表 → 统一对话表，
-  `list()` 按「等人的排最前」排序
-- **pane ↔ intercom 会话关联**：intercom 报的是 agent 进程 pid，
-  tmux 的 `pane_pid` 通常是那个 shell，所以沿父进程链上溯匹配（最多 12 层，防环）
-- `deliver()` — 有 intercom 走 broker（忙时排队、不打断思考中的 agent），否则退回 send-keys
-- `forward()` — 跨对话转发，自动加来源标注
-- `Transport` / `ClientEvent` / `ClientCommand` — 手机端传输抽象 + `LogTransport`
+- `AgentKind::from_command` — recognizes the agent type from `pane_current_command`;
+  **when an agent is running a tool, its process name temporarily becomes `bash`; don't downgrade kind back to Shell then**
+- `ConversationRegistry` — pane table ⊕ intercom session table → unified conversation table,
+  `list()` sorts with "waiting for a human" first
+- **pane ↔ intercom session association**: intercom reports the agent process pid,
+  tmux's `pane_pid` is usually that shell, so walk up the parent-process chain to match (max 12 levels, cycle-guarded)
+- `deliver()` — with intercom, go through the broker (queues when busy, doesn't interrupt a thinking agent); otherwise fall back to send-keys
+- `forward()` — cross-conversation forwarding, auto-prefixing the source
+- `Transport` / `ClientEvent` / `ClientCommand` — mobile transport abstraction + `LogTransport`
 
 ---
 
-## 3. 手机端协议（已定义，待接传输）
+## 3. Mobile protocol (defined; transport not yet connected)
 
-事件（服务端 → 手机）：
+Events (server → mobile):
 
 ```jsonc
 { "type": "conversations",   "items": [ /* Conversation[] */ ] }
@@ -97,130 +97,131 @@ pi-intercom broker 客户端，对齐上游 `types.ts` 与 `broker/framing.ts`�
 { "type": "awaiting-human",  "id": "%3", "title": "backend", "preview": "…", "replyTo": "m-1" }
 ```
 
-指令（手机 → 服务端）：
+Commands (mobile → server):
 
 ```jsonc
-{ "type": "say",     "id": "%3", "text": "继续" }
+{ "type": "say",     "id": "%3", "text": "continue" }
 { "type": "key",     "id": "%3", "key": "Escape" }
 { "type": "forward", "from": "%1", "to": "%3", "text": "…" }
 { "type": "refresh" }
-{ "type": "subscribe",     "id": "%3" }  // 进入某个对话：只推它的 turn
-{ "type": "unsubscribe" }                  // 退出当前对话：停止推 turn
+{ "type": "subscribe",     "id": "%3" }  // enter a conversation: push only its turns
+{ "type": "unsubscribe" }                  // leave the current conversation: stop pushing turns
 ```
 
-**订阅规则（v1.14 新增，分诊与内容分离）**：
+**Subscription rules (new in v1.14; triage and content separated)**:
 
-| 事件 | 推送范围 |
+| Event | Push scope |
 |---|---|
-| `conversations` / `status-changed` / `awaiting-human` | **全量推**——分诊信息必须全知道 |
-| `turn`（对话内容） | **仅推被订阅的对话**——单活跃订阅，新 `subscribe` 替换旧订阅；`unsubscribe` 清空 |
+| `conversations` / `status-changed` / `awaiting-human` | **Push everything** — triage information must be fully known |
+| `turn` (conversation content) | **Push only the subscribed conversation** — single active subscription; a new `subscribe` replaces the old one; `unsubscribe` clears it |
 
-- 单活跃订阅：手机一次只看一个对话，`subscribe` 新 id 即切换（极简；多路并行查看需改为订阅集合，v1.14 不做）
-- `subscribe` 时服务端立即推一次该对话的 transcript 尾部（增量游标续读的起始快照），否则手机切过去会看到空白
-- **transcript 轮询成本收窄到订阅粒度**：未订阅的对话不跑轮询（十几路输出不费流量/CPU）
+- Single active subscription: the phone views one conversation at a time; `subscribe` with a new id switches (minimal; parallel multi-view would need a subscription set, not in v1.14)
+- On `subscribe`, the server immediately pushes that conversation's transcript tail once (the starting snapshot for incremental-cursor resume); otherwise the phone would see a blank when switching over
+- **Transcript polling cost narrows to subscription granularity**: unsubscribed conversations run no polling (a dozen outputs don't burn bandwidth/CPU)
 
-`Conversation.status` 取值：`idle` / `thinking` / `running-tool` / `awaiting-human` / `unknown`。
-其中 `awaiting-human` 来自 intercom 消息的 `expectsReply`——**对方正阻塞等你回话**，
-这是手机端唯一应当触发推送的信号。
+`Conversation.status` values: `idle` / `thinking` / `running-tool` / `awaiting-human` / `unknown`.
+`awaiting-human` comes from an intercom message's `expectsReply` — **the peer is blocked waiting for you**.
+That is the only signal that should trigger a push on the phone.
 
 ---
 
-## 3.5 让 agent 知道「可以找人」
+## 3.5 Tell agents "you can reach a human"
 
-技术链路通了不等于会被用到——**agent 得知道 `me` 这个地址存在，以及什么时候该用。**
-这一步是纯文档动作，但没有它整个功能不会自己发生。
+The technical chain working doesn't mean it gets used — **an agent must know the `me` address exists, and when to use it.**
+This step is pure documentation, but without it the whole feature won't happen on its own.
 
-在各项目的 `AGENTS.md` / `CLAUDE.md` 里加入：
+Add to each project's `AGENTS.md` / `CLAUDE.md`:
 
 ```xml
 <intercom-human>
-本机有一个名为 `me` 的 intercom 会话，它是人（TmuxDeck 的手机端）。
+There is an intercom session named `me` on this machine. It is a human (TmuxDeck's mobile client).
 
-**什么时候找 me：**
-- 被卡住且无法自行决定（需要产品判断、需要授权、方案有分歧）
-- 要做不可逆的操作前（删数据、改线上配置、force push）
-- 任务完成，且后续方向需要人来定
+**When to reach me:**
+- Stuck and unable to decide on your own (needs product judgment, needs authorization, disagreement on approach)
+- Before irreversible actions (deleting data, changing production config, force push)
+- Task complete, and the next direction needs a human to decide
 
-**什么时候不要找：**
-- 能自己查清楚的事
-- 例行进度播报
-- 另一个 agent 就能回答的问题——先用 intercom 问它
+**When not to reach me:**
+- Things you can verify yourself
+- Routine progress reports
+- Questions another agent can answer — ask it over intercom first
 
-**用哪个：** 需要等答复用 `ask`（人会收到推送）；只是知会用 `send`。
+**Which to use:** need an answer, use `ask` (the human gets a push); just informing, use `send`.
 </intercom-human>
 ```
 
-> `ask` 与 `send` 的区别在手机端是**是否推送**：`ask` 意味着有 agent 正阻塞
-> 等你回话，会推送；`send` 只在对话里留一条未读。让 agent 用对，通知才不会变成噪音。
+> The difference between `ask` and `send` on the phone is **whether it pushes**: `ask` means an agent is blocked
+> waiting for your reply and will push; `send` just leaves an unread message in the conversation. Get agents to use
+> the right one and notifications won't become noise.
 
 ---
 
-## 4. 唯一未定：对话内容从哪来
+## 4. The one undecided piece: where conversation content comes from
 
-「有哪些对话、状态如何」和「我怎么说话」都已解决。剩下的是
-**agent 说了什么**——这需要拿到分轮次的对话内容，三个候选：
+"Which conversations exist and their status" and "how I talk" are both solved. What remains is
+**what the agent said** — we need per-turn conversation content. Three candidates:
 
-| 方案 | 可行性 | 问题 |
+| Approach | Feasibility | Problems |
 |---|---|---|
-| `capture-pane` | 已实现为兜底（`CapturePaneSource`） | 只有当前屏幕，无历史，TUI 重绘导致内容抖动，没有轮次边界 |
-| `pipe-pane` 抓原始流 | 拿得到全部字节 | 混着大量光标移动与重绘转义序列，还原「谁说了什么」极难 |
-| **读 agent 自己的结构化会话记录** | **推荐** | 本身就是干净的分轮次数据（如 Claude Code 的 `~/.claude/projects/**/*.jsonl`）；代价是每个 agent 一个读取器，且要把 pane 关联到对应记录文件 |
+| `capture-pane` | Implemented as fallback (`CapturePaneSource`) | Current screen only, no history; TUI redraws make content flicker; no turn boundaries |
+| `pipe-pane` raw stream | Can capture all bytes | Full of cursor movement and redraw escape sequences; reconstructing "who said what" is very hard |
+| **Read the agent's own structured session records** | **Recommended** | Natively clean per-turn data (e.g. Claude Code's `~/.claude/projects/**/*.jsonl`); the cost is one reader per agent, and associating a pane with its record file |
 
-`TranscriptSource` trait 已就位，实现待定。建议按方案 3 做主路径、方案 1 兜底。
+The `TranscriptSource` trait is in place; the implementation is undecided. Recommendation: option 3 as the primary path, option 1 as fallback.
 
-> 关联问题其实已经解决了一半：`bridge.rs` 的父进程链上溯能把 pane 关到 agent 进程，
-> 拿到 pid 与 cwd 之后，定位该 agent 的会话记录文件是可做的。
+> The association problem is already half-solved: `bridge.rs`'s parent-process-chain walk can tie a pane to the agent process,
+> and once pid + cwd are known, locating that agent's session-record file is doable.
 
 ---
 
-## 5. 前置：本机 intercom 版本
+## 5. Prerequisite: local intercom version
 
-`ls ~/.pi/agent/intercom/` 的结果显示当前装的是 **`nicobailon/pi-intercom` 原版（pi-only）**，
-不是 `dataforxyz` 的跨 harness 分支：
+`ls ~/.pi/agent/intercom/` shows the locally installed version is **`nicobailon/pi-intercom` original (pi-only)**,
+not the `dataforxyz` cross-harness fork:
 
-| 文件 | 本机 | 原版 | 跨 harness 版 |
+| File | Local | Original | Cross-harness version |
 |---|---|---|---|
 | `broker.sock` / `broker.pid` / `extension-state` | ✅ | ✅ | ✅ |
-| `broker.owner` | ❌ | 无 | 有 |
-| `inbox/` `outbox/` `broker-asks.json` | ❌ | 无 | 有 |
+| `broker.owner` | ❌ | none | yes |
+| `inbox/` `outbox/` `broker-asks.json` | ❌ | none | yes |
 
-**影响**：现在只有 pi 会话能接入总线，Claude Code / Codex 仍是孤岛，
-只能走 `send-keys` 兜底。要打通需整体迁移到 dataforxyz 家族——
-上游明确警告新旧适配器混用会分裂成互不可见的 broker「岛」，**必须全部升级并 `/reload`**。
+**Impact**: only pi sessions can join the bus right now; Claude Code / Codex remain islands
+and can only go through the `send-keys` fallback. Wiring them up requires migrating wholesale to the dataforxyz family —
+upstream explicitly warns that mixing old and new adapters splits the broker into mutually-invisible "islands"; **you must upgrade everything and `/reload`**.
 
-两版还有个对手机场景很关键的差异：原版 `ask` 是客户端硬阻塞 10 分钟、
-消息只存在 pi 会话历史里；新版有持久化 inbox/outbox、ACK、断线重放，
-`ask` 改为软等 30 秒转异步。**人不在电脑前时，后者的语义明显更合适。**
-
----
-
-## 6. 验收
-
-已可验证（`cargo test`）：
-
-- [ ] `send_keys` 对 `%abc`、空文本、超 8 KiB 分别返回对应错误码
-- [ ] `send_key_name` 拒绝白名单外的键
-- [ ] intercom 分帧读写往返一致，长度前缀为 4 字节大端
-- [ ] 未知类型的 broker 帧被忽略而非导致错误
-- [ ] agent 执行工具时 `AgentKind` 不被打回 `Shell`
-- [ ] 对话列表把 `awaiting-human` 排在最前
-- [ ] pane 消失后对话表与 intercom 映射同步清理
-
-需真机验证（先跑 `scripts/intercom-probe.mjs`）：
-
-- [ ] 探针能连上 broker 并注册成功
-- [ ] 其他 pi 会话的 `intercom list` 里能看到我们
-- [ ] pi 发给我们的消息能收到，`expectsReply` 能正确识别
-- [ ] 我们发给 pi 会话的消息能送达
-- [ ] 父进程链上溯能把 intercom 会话正确关到它所在的 pane
+The two versions also differ on something critical for mobile: the original's `ask` hard-blocks the client for 10 minutes,
+and messages only live in the pi session's history; the new version has persistent inbox/outbox, ACK, and offline replay,
+and `ask` soft-waits 30 seconds then goes async. **When you're not at your desk, the latter's semantics are clearly better.**
 
 ---
 
-## 7. 后续
+## 6. Acceptance
 
-| 版本 | 内容 |
+Verifiable already (`cargo test`):
+
+- [ ] `send_keys` returns the corresponding error code for `%abc`, empty text, and content over 8 KiB
+- [ ] `send_key_name` rejects keys outside the whitelist
+- [ ] intercom frame read/write round-trips consistently; length prefix is 4-byte big-endian
+- [ ] Unknown-type broker frames are ignored rather than causing errors
+- [ ] `AgentKind` is not downgraded to `Shell` while an agent runs a tool
+- [ ] The conversation list puts `awaiting-human` first
+- [ ] After a pane disappears, the conversation table and intercom mapping are cleaned up in sync
+
+Requires real-device verification (run `scripts/intercom-probe.mjs` first):
+
+- [ ] Probe can connect to the broker and register successfully
+- [ ] Other pi sessions can see us in their `intercom list`
+- [ ] Messages pi sends us arrive; `expectsReply` is correctly recognized
+- [ ] Messages we send to pi sessions are delivered
+- [ ] The parent-process-chain walk correctly ties the intercom session to its pane
+
+---
+
+## 7. Roadmap
+
+| Version | Content |
 |---|---|
-| v1.13 | `TranscriptSource` 具体实现（Claude Code JSONL 优先），对话内容打通 |
-| v1.14 | `Transport` 的 WebSocket 实现 + 手机端 UI |
-| v1.15 | 推送通道接入（ntfy / 飞书 / TG 三选一） |
-| v1.16 | 桌面端也用同一套对话表：卡片按「等你」置顶 |
+| v1.13 | Concrete `TranscriptSource` implementation (Claude Code JSONL first); conversation content wired through |
+| v1.14 | `Transport`'s WebSocket implementation + mobile UI |
+| v1.15 | Push channel integration (ntfy / Feishu / TG, pick one) |
+| v1.16 | Desktop uses the same conversation table: cards sorted with "waiting for you" on top |

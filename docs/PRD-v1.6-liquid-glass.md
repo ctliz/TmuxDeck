@@ -1,78 +1,75 @@
-# TmuxDeck v1.6 液态玻璃 UI 重构 PRD
+# TmuxDeck v1.6 Liquid Glass UI Rework PRD
 
-> 目标：从「厚重深色科技风」改为「macOS Liquid Glass 极简风」：
-> 去掉顶部全部区域，搜索框半透明居中，新建入口变为卡片列表第一张虚线卡片。
-> 纯前端重构，后端零改动。
-
----
-
-## 1. 背景与问题
-
-当前 UI 是「厚重深色科技风」：
-- 顶部有一个大 header（logo + 标题 + 环境指示器 + 刷新 + 新建按钮）
-- 其下还有一条搜索/统计横条
-- 两层横条占掉大量垂直空间，视觉很重
-
-用户反馈：不够简洁、看着太重。
+> Goal: move from "heavy dark tech style" to "macOS Liquid Glass minimal style":
+> remove the entire top area, make the search box semi-transparent and centered, and turn the new-workspace entry into the first dashed card in the card list.
+> Pure frontend rework; zero backend changes.
 
 ---
 
-## 2. 目标设计（Liquid Glass）
+## 1. Background and problem
 
-整体基调：**毛玻璃（backdrop-blur）+ 半透明 + 淡入淡出 + 平滑过渡**，
-参考 macOS Tahoe (26) 的 Liquid Glass 设计语言。
+The current UI is "heavy dark tech style":
+- A big header at the top (logo + title + environment indicator + refresh + new button)
+- A search/stats bar beneath it
+- Two stacked bars eat a lot of vertical space; visually heavy
 
-### 2.1 顶部区域：全部移除
+User feedback: not clean enough, looks too heavy.
 
-删除：
-- header（logo / 标题 / 版本号 / 副标题）
-- 环境状态指示器（tmux/terminals/agents 计数）
-- 刷新按钮
-- 新建按钮（移动到卡片列表，见 2.3）
-- 搜索/统计横条
+---
 
-**保留功能，不保留形态**：
-- 刷新 → 仍然 4s 轮询 + 手动下拉刷新？**v1.6 手动刷新去掉**（自动轮询已够，极简），
-  或放一个极小的刷新按钮到搜索框右侧（可选，见 2.2）
-- 环境指示 → 仅在 tmux 缺失的硬阻断引导页出现（已存在），正常状态不显示
-- 统计 → 保留在搜索框 placeholder 或 tooltip 里，不占常驻空间
+## 2. Target design (Liquid Glass)
 
-### 2.2 搜索框：半透明，居中
+Overall tone: **frosted glass (backdrop-blur) + semi-transparency + fades + smooth transitions**, referencing macOS Tahoe (26)'s Liquid Glass design language.
+
+### 2.1 Top area: remove all of it
+
+Delete:
+- header (logo / title / version / subtitle)
+- environment status indicator (tmux/terminals/agents counts)
+- refresh button
+- new button (moves to the card list, see 2.3)
+- search/stats bar
+
+**Keep the function, not the form:**
+- Refresh → still 4s polling + manual pull-to-refresh? **v1.6 drops the manual refresh** (auto-polling is enough; minimal), or put a tiny refresh button to the right of the search box (optional, see 2.2)
+- Environment indicator → appears only on the hard-block guide page when tmux is missing (already exists); not shown in the normal state
+- Stats → kept in the search box placeholder or tooltip; doesn't occupy permanent space
+
+### 2.2 Search box: semi-transparent, centered
 
 ```
 ┌──────────────────────────────────────────┐
-│                    🔍                    │   ← 居中，窄，半透明
+│                    🔍                    │   ← centered, narrow, semi-transparent
 └──────────────────────────────────────────┘
 ```
 
-- 固定宽度约 240-320px，垂直居中于内容区顶部
-- 样式：`backdrop-blur-xl bg-white/10 border border-white/15 rounded-full`
-- 无标签、无外部框，就是一个漂浮的 pill 输入框
-- 聚焦时轻微放大 + 高亮（transition）
-- placeholder：`t("search.placeholder")`
+- Fixed width ~240-320px, vertically centered at the top of the content area
+- Style: `backdrop-blur-xl bg-white/10 border border-white/15 rounded-full`
+- No label, no outer frame; just a floating pill input
+- Slight scale-up + highlight on focus (transition)
+- placeholder: `t("search.placeholder")`
 
-### 2.3 新建入口：卡片列表第一张
+### 2.3 New-workspace entry: first card in the list
 
-卡片网格的第一张卡片是「新建工作区」入口：
+The first card in the card grid is the "New workspace" entry:
 
 ```
 ┌─ ─ ─ ─ ─ ─ ─ ┐   ┌──────────────┐   ┌──────────────┐
 │      +        │   │  project-a   │   │  project-b   │
-│  新建工作区    │   │  ...         │   │  ...         │
+│   New workspace│   │  ...         │   │  ...         │
 └─ ─ ─ ─ ─ ─ ─ ┘   └──────────────┘   └──────────────┘
-   虚线边框 + 加号     实卡片             实卡片
+   dashed border + plus   real card         real card
 ```
 
-- 样式：`border-2 border-dashed border-white/20` + 半透明背景 + 大加号图标
-- hover：边框变亮 + 淡入淡出箭头/文字提示
-- 点击 → 打开现有「新建工作区」Modal（不新增表单）
-- **永远在第一位**（即使有卡片），搜索时不参与过滤
-- **空状态处理**：当 `filteredSessions.length === 0` 时，**不再显示整屏空状态页**，而是只显示
-  「新建卡片」+ 一行小字提示（`empty.hint`）。原「立即新建」按钮逻辑并入新建卡片。
+- Style: `border-2 border-dashed border-white/20` + semi-transparent background + large plus icon
+- hover: border brightens + faded arrow/text hint
+- Click → opens the existing "New workspace" Modal (no new form)
+- **Always first** (even when cards exist); excluded from search filtering
+- **Empty-state handling:** when `filteredSessions.length === 0`, **don't show the full-screen empty state**; show only the "new card" + one small hint line (`empty.hint`). The old "create now" button logic merges into the new card.
 
-### 2.4 卡片视觉升级（液态玻璃）
+### 2.4 Card visual upgrade (liquid glass)
 
-现有卡片从 `bg-slate-900/80 border-slate-800` 改为：
+The existing card goes from `bg-slate-900/80 border-slate-800` to:
 
 ```css
 bg-white/10 backdrop-blur-xl border border-white/15 rounded-2xl
@@ -80,20 +77,20 @@ shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15
 transition-all duration-300
 ```
 
-- 三态点、实时预览、agent 名高亮等**逻辑全部保留**，只换皮肤
-- 背景：全局从 `bg-slate-950` 改为**渐变 + 暗色毛玻璃底**：
+- Three-state dot, live preview, agent-name highlight, etc. — **all logic preserved, only the skin changes**
+- Background: global change from `bg-slate-950` to **gradient + dark frosted-glass base**:
   `bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/60`
-  （保持深色底才能让白色半透明毛玻璃有对比度）
+  (the dark base is what gives the white translucent glass its contrast)
 
-### 2.5 过渡与动画
+### 2.5 Transitions and animations
 
-- 卡片进入：`animate-fade-in-up`（淡入 + 上移 8px，300ms ease-out）
-- 卡片删除/刷新：过渡动画（`transition-opacity`）
-- 搜索过滤：卡片淡出淡入而非瞬间消失
-- Modal：现有 `backdrop-blur-sm` 升级为 Liquid Glass 样式 + 淡入缩放
-- 所有 hover/active 状态：`transition-all duration-200`
+- Card enter: `animate-fade-in-up` (fade in + move up 8px, 300ms ease-out)
+- Card delete/refresh: transition animation (`transition-opacity`)
+- Search filtering: cards fade out/in rather than vanishing instantly
+- Modal: existing `backdrop-blur-sm` upgraded to Liquid Glass style + fade-in scale
+- All hover/active states: `transition-all duration-200`
 
-新增 CSS（index.css）：
+New CSS (index.css):
 
 ```css
 @keyframes fade-in-up {
@@ -104,50 +101,50 @@ transition-all duration-300
 
 ---
 
-## 3. 组件结构变化
+## 3. Component structure changes
 
-| 现状 | 重构后 |
+| Current | After rework |
 |---|---|
-| `<header>`（logo/标题/环境/按钮） | **删除** |
-| 搜索+统计横条 `<div>` | 搜索框独立居中 + 统计进 placeholder/tooltip |
-| 卡片网格 | 第一张插「新建」虚线卡片 |
-| 卡片样式 | 液态玻璃 |
+| `<header>` (logo/title/environment/buttons) | **deleted** |
+| search+stats bar `<div>` | standalone centered search box + stats into placeholder/tooltip |
+| card grid | dashed "new" card inserted first |
+| card style | liquid glass |
 
-**i18n**：新增 key：
-- `search.hint`（可选，tooltip 显示统计，如 en: "3 workspaces · 1 running"）
-
----
-
-## 4. 验收标准
-
-1. 顶部**无任何**常驻横条（header/搜索条），内容区从视口顶部开始
-2. 搜索框半透明圆角居中，聚焦有过渡动画
-3. 卡片网格第一张是虚线「新建工作区」卡片，点击打开现有 Modal
-4. 卡片、Modal 均为液态玻璃样式（半透明 + 毛玻璃 + 细边框）
-5. 卡片有淡入动画，搜索过滤有过渡（非瞬间消失）
-6. 功能零回归：创建/打开/删除/重命名/实时预览/三态全部可用
-7. macOS build + CI 双平台通过
-8. i18n 三方对齐脚本通过（新增的 key 双语齐全）
+**i18n:** new key:
+- `search.hint` (optional, tooltip shows stats, e.g. en: "3 workspaces · 1 running")
 
 ---
 
-## 5. 明确不做
+## 4. Acceptance criteria
 
-- ❌ 改变任何后端逻辑 / 注册表 / 命令
-- ❌ 深色/浅色主题切换（v1.6 只做深色液态玻璃）
-- ❌ 自定义主题色 / 背景图
-- ❌ 窗口透明穿透（Tauri 透明窗口是另一个工程，需改 tauri.conf.json + 平台配置，另立项）
-- ❌ 侧边栏 / 导航重构
-- ❌ 移动响应式布局调整（桌面应用，保持桌面优先）
-- ❌ 手动刷新按钮（自动 4s 轮询已够）——若验收时发现确实需要，加到搜索框旁，极小尺寸
+1. **No** persistent bars at the top (header/search bar); content starts at the viewport top
+2. Search box semi-transparent, rounded, centered; focus has a transition animation
+3. First card in the grid is the dashed "New workspace" card; clicking opens the existing Modal
+4. Cards and Modal all use the liquid-glass style (semi-transparent + frosted + thin border)
+5. Cards have a fade-in animation; search filtering has a transition (not instant disappearance)
+6. Zero functional regression: create/open/delete/rename/live-preview/three-state all work
+7. macOS build + CI dual-platform pass
+8. i18n three-way alignment script passes (new keys bilingual complete)
 
 ---
 
-## 6. 工作量预估
+## 5. Explicitly out of scope
 
-| 项 | 估算 |
+- ❌ changing any backend logic / registry / commands
+- ❌ dark/light theme toggle (v1.6 does dark liquid glass only)
+- ❌ custom theme colors / background images
+- ❌ window transparency passthrough (Tauri transparent windows are a separate engineering effort: tauri.conf.json + platform config; separate initiative)
+- ❌ sidebar / navigation rework
+- ❌ mobile responsive layout adjustments (desktop app; keep desktop-first)
+- ❌ manual refresh button (auto 4s polling is enough) — if acceptance shows it's truly needed, add a tiny one beside the search box
+
+---
+
+## 6. Effort estimate
+
+| Item | Estimate |
 |---|---|
-| 删除 header/搜索条 + 重构布局 | 0.5 天 |
-| 液态玻璃卡片样式 + 新建卡片 | 0.5 天 |
-| 动画/过渡 + Modal 皮肤 | 0.5 天 |
-| **合计** | **约 1.5 人日** |
+| delete header/search bar + rework layout | 0.5 day |
+| liquid-glass card styles + new card | 0.5 day |
+| animations/transitions + Modal skin | 0.5 day |
+| **Total** | **about 1.5 person-days** |

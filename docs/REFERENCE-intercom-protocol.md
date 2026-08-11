@@ -1,97 +1,89 @@
-# pi-intercom 线协议参考
+# pi-intercom wire protocol reference
 
-> 这份文档最初从 `nicobailon/pi-intercom` 反推整理，现已按本机
-> `@dataforxyz/agent-intercom-*` protocol v3 的 `types.ts`、`broker.ts` 与
-> `broker/framing.ts` 更新。**写下来是为了不必再推一遍。**
+> This document was originally reconstructed from `nicobailon/pi-intercom`, and is now updated against `@dataforxyz/agent-intercom-*` protocol v3's `types.ts`, `broker.ts`, and `broker/framing.ts` on this machine. **Written down so we never have to re-derive it.**
 >
-> 实现见 `src-tauri/src/intercom.rs`，验证脚本见 `scripts/intercom-probe.mjs`。
+> Implementation lives in `src-tauri/src/intercom.rs`; the verification script is `scripts/intercom-probe.mjs`.
 
 ---
 
-## 传输
+## Transport
 
-| 平台 | 传输 |
+| Platform | Transport |
 |---|---|
 | macOS / Linux | Unix domain socket |
-| Windows | 命名管道（TmuxDeck 尚未实现） |
+| Windows | named pipe (TmuxDeck does not implement it yet) |
 
-socket 路径：
+Socket path:
 
 ```
-$PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
-~/.pi/agent/intercom/broker.sock            （默认）
+$PI_CODING_AGENT_DIR/intercom/broker.sock   (when that env var is set)
+~/.pi/agent/intercom/broker.sock            (default)
 ```
 
-**broker 的生命周期不归我们管**：它由第一个 intercom 会话自动拉起，
-最后一个会话断开 5 秒后自行退出。因此「socket 不存在」是常态而非错误，
-调用方应降级到 `send-keys` 通道，而不是尝试拉起 broker。
+**The broker's lifecycle is not ours to manage**: it is launched automatically by the first intercom session and exits on its own 5 seconds after the last session disconnects. So "socket doesn't exist" is the norm, not an error — callers should degrade to the `send-keys` channel rather than trying to start the broker.
 
 ---
 
-## 分帧
+## Framing
 
 ```
 ┌────────────────┬─────────────────────────┐
-│ 4 字节大端长度  │  UTF-8 JSON（长度即此段） │
+│ 4-byte big-endian length │ UTF-8 JSON (length applies to this segment) │
 └────────────────┴─────────────────────────┘
 ```
 
-单帧上限 **1 MiB**，超限方应报错并断开。注意 TCP/UDS 会拆包粘包，
-读取端必须做重组——`intercom-probe.mjs` 和 `intercom.rs` 都实现了。
+Single-frame cap is **1 MiB**; the side exceeding it should error and disconnect. Note that TCP/UDS split and coalesce packets, so the reader must reassemble — both `intercom-probe.mjs` and `intercom.rs` implement this.
 
 ---
 
-## 客户端 → broker
+## Client → broker
 
-| `type` | 关键字段 | 说明 |
+| `type` | Key fields | Notes |
 |---|---|---|
-| `register` | `protocol: "pi-intercom"`、`version: 3`、`session`（见下）、`sessionId?`、`stateId?` | 连上后第一件事；版本不匹配会断开 |
-| `unregister` | `preserveAsks?` | 优雅退出 |
-| `list` | `requestId` | 请求会话列表，异步经 `sessions` 返回 |
-| `send` | `to`、`message` | `to` 可以是会话名或会话 ID |
-| `message_received` | `deliveryId` | 收方持久入队后确认本次 delivery |
-| `message_rejected` | `deliveryId`、`code`、`reason` | 收方拒绝冲突 delivery |
-| `presence` | `status?`、`name?`、`model?` … | 更新自身状态 |
-| `cancel_message` / `cancel_ask` | `messageId` | 撤回 |
-| `extension_publish` / `extension_state_commit` | `namespace` … | 扩展总线，TmuxDeck 未用 |
+| `register` | `protocol: "pi-intercom"`, `version: 3`, `session` (see below), `sessionId?`, `stateId?` | the first thing after connecting; a version mismatch disconnects |
+| `unregister` | `preserveAsks?` | graceful exit |
+| `list` | `requestId` | request the session list; returned asynchronously via `sessions` |
+| `send` | `to`, `message` | `to` can be a session name or session ID |
+| `message_received` | `deliveryId` | the receiver confirms this delivery after durable enqueue |
+| `message_rejected` | `deliveryId`, `code`, `reason` | receiver rejects a conflicting delivery |
+| `presence` | `status?`, `name?`, `model?` … | update own status |
+| `cancel_message` / `cancel_ask` | `messageId` | recall |
+| `extension_publish` / `extension_state_commit` | `namespace` … | extension bus; unused by TmuxDeck |
 
-### register 的 session 字段
+### The `session` field of `register`
 
 ```jsonc
 {
-  "name": "me",          // 其他会话据此寻址
-  "cwd": "/path",        // 展示元数据
-  "model": "human",      // 填 human 让别人一眼看出这是人不是 agent
-  "pid": 12345,          // 关联 pane 的关键：需沿父链上溯匹配 pane_pid
+  "name": "me",          // other sessions address by this
+  "cwd": "/path",        // display metadata
+  "model": "human",      // "human" so others can see at a glance this is a person, not an agent
+  "pid": 12345,          // key for pane association: walk up the parent chain to match pane_pid
   "startedAt": 1754870400000,
   "lastActivity": 1754870400000,
   "status": "idle"
 }
 ```
 
-> `cwd` / `model` / `pid` / `status` 都是**展示元数据，不构成身份认证**。
-> broker 的信任边界是「同一 OS 用户」，不是密码学主体。
+> `cwd` / `model` / `pid` / `status` are all **display metadata, not authentication**. The broker's trust boundary is "same OS user", not a cryptographic principal.
 
 ---
 
-## broker → 客户端
+## Broker → client
 
-| `type` | 关键字段 | 说明 |
+| `type` | Key fields | Notes |
 |---|---|---|
-| `registered` | `sessionId`、`protocol`、`version` | 注册成功，拿到自己的会话 ID |
-| `sessions` | `requestId`、`sessions[]` | `list` 的应答 |
-| `message` | `deliveryId`、`from`、`message` | 收到一条消息；处理后必须按 `deliveryId` ACK |
-| `presence_update` | `session` | 某会话状态变了 |
-| `session_joined` / `session_left` | `session` / `sessionId` | 上下线 |
-| `delivery_accepted` | `messageId`、`deliveryId` | broker 已接纳并等待收方确认 |
-| `delivered` | `messageId`、`deliveryId` | 收方已确认持久接收 |
-| `delivery_failed` | `messageId`、`code`、`reason`、`retryable` | 投递失败 |
-| `error` | `error` | broker 报错 |
-| `message_control` / `extension_*` | — | TmuxDeck 未消费 |
+| `registered` | `sessionId`, `protocol`, `version` | registration succeeded; you get your own session ID |
+| `sessions` | `requestId`, `sessions[]` | the response to `list` |
+| `message` | `deliveryId`, `from`, `message` | a message arrived; you must ACK by `deliveryId` after handling |
+| `presence_update` | `session` | some session's status changed |
+| `session_joined` / `session_left` | `session` / `sessionId` | went online / offline |
+| `delivery_accepted` | `messageId`, `deliveryId` | broker accepted it and is awaiting receiver confirmation |
+| `delivered` | `messageId`, `deliveryId` | receiver confirmed durable receipt |
+| `delivery_failed` | `messageId`, `code`, `reason`, `retryable` | delivery failed |
+| `error` | `error` | broker error |
+| `message_control` / `extension_*` | — | not consumed by TmuxDeck |
 
-**入站解析必须容忍未知 `type`**：上游协议在演进（跨 harness 分支已到 v3，
-新增了若干帧类型）。`intercom.rs` 因此手工分派而非使用 serde 内部标记枚举——
-遇到未知类型忽略即可，不会导致整条连接反序列化失败。
+**Inbound parsing must tolerate unknown `type`**: the upstream protocol is evolving (the cross-harness branch is at v3, with several new frame types). `intercom.rs` therefore dispatches manually rather than using serde's internally tagged enums — unknown types can simply be ignored without failing deserialization of the whole connection.
 
 ---
 
@@ -99,31 +91,30 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
 
 ```jsonc
 {
-  "id": "20d43841…",     // 稳定会话 ID，寻址的可信键
-  "name": "planner",     // 可重名；重名时发送会失败，应改用 id
+  "id": "20d43841…",     // stable session ID, the trustworthy addressing key
+  "name": "planner",     // duplicates allowed; sending to a duplicate name fails, switch to id
   "cwd": "/projects/api",
   "model": "claude-sonnet-4",
   "pid": 12345,
   "startedAt": 1754870400000,
   "lastActivity": 1754870400000,
-  "status": "thinking",  // 见下
-  "contextPct": 43       // 上下文占用百分比，可能缺失
+  "status": "thinking",  // see below
+  "contextPct": 43       // context usage percent; may be absent
 }
 ```
 
-### status —— 四态判定的事实来源
+### status — the factual source for four-state detection
 
-| 值 | 含义 |
+| Value | Meaning |
 |---|---|
-| `idle` | 空闲，可接收输入 |
-| `thinking` | 模型正在生成 |
-| `tool:<name>` | 正在执行某个工具 |
-| 缺失 / 其他 | 未知（不要猜） |
+| `idle` | idle, can receive input |
+| `thinking` | model is generating |
+| `tool:<name>` | running some tool |
+| absent / other | unknown (don't guess) |
 
-由各会话在 pi 生命周期事件中**自动上报**。
+Auto-reported by each session at pi lifecycle events.
 
-> 这一条就取消了「轮询 capture-pane + 内容 hash 比对 + 静默启发式」的全部必要性。
-> 不要再实现那套东西。
+> This single item eliminates all need for the "poll capture-pane + hash-compare content + silence heuristic" machinery. Do not re-implement that.
 
 ---
 
@@ -133,10 +124,10 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
 {
   "id": "m-1",
   "timestamp": 1754870400000,
-  "replyTo": "m-0",       // 回复某条消息；收方据此匹配到对应的 ask
-  "expectsReply": true,   // 对方在 ask，正阻塞等待 ← 最高优先级信号
+  "replyTo": "m-0",       // reply to some message; the receiver matches the corresponding ask with this
+  "expectsReply": true,   // the other side is asking, blocked waiting ← highest-priority signal
   "content": {
-    "text": "需要你确认",
+    "text": "Need your confirmation",
     "attachments": [
       { "type": "snippet", "name": "auth.ts", "language": "typescript", "content": "…" }
     ]
@@ -144,61 +135,54 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   （若该环境变量已设置）
 }
 ```
 
-`attachments.type` 取值：`file` / `snippet` / `context`。
+`attachments.type` values: `file` / `snippet` / `context`.
 
-**`expectsReply: true` 是手机端唯一应当触发推送的信号**——它意味着有 agent
-正阻塞等你回话，而不只是发了条通知。
-
----
-
-## 投递语义
-
-broker 负责寻址、ask 边和 delivery 状态；各 Harness 适配器负责持久入队，并在安全时机注入目标会话。所以**不要**为了怕打断 agent 而在 TmuxDeck 再实现一套投递时机判断——直接 `send` 即可。这正是 intercom 优于 `send-keys` 直塞字符的核心原因（后者会被正在思考的 TUI 吞掉或打断）。
-
-v3 投递分两步：`delivery_accepted` 只表示 broker 已接纳；收方必须在处理 `message` 后发送 `message_received { deliveryId }`，发送方才会收到 `delivered`。不能用业务 `message.id` 代替 `deliveryId`。
-
-### 回复必须来自收到 ask 的那个 session
-
-broker 对 `replyTo` 的校验是 **sessionId 级身份**（`broker.ts`：
-`replyEdge.to !== currentId` 即返回 `delivery_failed`）：
-
-- 新开一条连接重新注册（即使同名）会拿到新的 sessionId，**回不了同一个 ask**；
-- 回复只能在**收到 ask 的那条连接**上发出（`intercom.rs` 的 `reply()` 正是如此——
-  同一持久连接、同一 sessionId）；
-- 实测：独立进程带 `replyTo` 发送被拒，报 `Reply target does not match the pending ask`。
-
-对手机端的影响：TmuxDeck 必须保持单一持久连接，回复永远走它，
-不能为每条回复临时建连接。
+**`expectsReply: true` is the only signal that should trigger a push on the phone** — it means an agent is blocked waiting on you to reply, not merely sending a notification.
 
 ---
 
-## 两个分支的差异
+## Delivery semantics
 
-本机当前已统一安装 **`@dataforxyz/agent-intercom-*` 0.10.0 跨 Harness 适配器**，覆盖 Pi / Codex / Claude Code / OpenCode。下表保留与 `nicobailon/pi-intercom` 原版（pi-only）的历史差异，便于排查旧环境：
+The broker owns addressing, the ask edges, and delivery state; each Harness adapter owns durable enqueue and injecting into the target session at a safe moment. So **don't re-implement a delivery-timing judgment in TmuxDeck to avoid interrupting an agent** — just `send`. That's the core reason intercom beats `send-keys` shoving characters in blindly (the latter gets swallowed or interrupts a thinking TUI).
 
-| | 原版 | 跨 harness 版 |
+v3 delivery is two-phase: `delivery_accepted` only means the broker accepted it; the receiver must send `message_received { deliveryId }` after processing the `message`, and only then does the sender see `delivered`. The business `message.id` cannot substitute for `deliveryId`.
+
+### A reply must come from the session that received the ask
+
+The broker validates `replyTo` at the **sessionId level** (`broker.ts`: `replyEdge.to !== currentId` returns `delivery_failed`):
+
+- Opening a new connection and re-registering (even with the same name) gets a new sessionId and **cannot reply to the same ask**;
+- A reply can only be sent on **the connection that received the ask** (`intercom.rs`'s `reply()` does exactly this — same persistent connection, same sessionId);
+- Tested: an independent process sending with `replyTo` is rejected with `Reply target does not match the pending ask`.
+
+Impact on the phone: TmuxDeck must hold a single persistent connection and always reply through it; it cannot open a fresh connection per reply.
+
+---
+
+## Differences between the two branches
+
+This machine is now uniformly installed with **`@dataforxyz/agent-intercom-*` 0.10.0 cross-harness adapters**, covering Pi / Codex / Claude Code / OpenCode. The table below keeps the historical differences from the original `nicobailon/pi-intercom` (pi-only), for troubleshooting older environments:
+
+| | Original | Cross-harness |
 |---|---|---|
-| 支持的 agent | 仅 pi | Pi、Codex、Claude Code、OpenCode |
-| 运行时文件 | `broker.sock` `broker.pid` `config.json` | 另有 `broker.owner`、`broker-asks.json`、`inbox/`、`outbox/` |
-| 投递持久化 | 无（仅存 pi 会话历史） | 持久化 inbox/outbox + ACK + 断线重放 |
-| `ask` 语义 | 客户端硬阻塞 10 分钟 | 软等 30 秒后转异步，10 分钟内可迟回 |
-| 工具形态 | 单个 `intercom({action})` | 拆分为 `intercom_send` / `_ask` / `_reply` / … |
-| 许可证 | MIT | AGPL-3.0-or-later |
+| Supported agents | pi only | Pi, Codex, Claude Code, OpenCode |
+| Runtime files | `broker.sock` `broker.pid` `config.json` | plus `broker.owner`, `broker-asks.json`, `inbox/`, `outbox/` |
+| Delivery persistence | none (only pi session history) | persistent inbox/outbox + ACK + offline replay |
+| `ask` semantics | client hard-blocks for 10 minutes | soft-wait 30s then async; a late reply within 10 minutes is fine |
+| Tool shape | single `intercom({action})` | split into `intercom_send` / `_ask` / `_reply` / … |
+| License | MIT | AGPL-3.0-or-later |
 
-**迁移是全有或全无**：上游明确警告新旧适配器混用会分裂成互不可见的
-broker「岛」，必须全部升级并在每个会话 `/reload`。
+**Migration is all-or-nothing**: upstream explicitly warns that mixing old and new adapters splits into mutually invisible broker "islands"; you must upgrade everything and `/reload` every session.
 
-> 对手机场景而言跨 harness 版明显更合适：人不在电脑前时，
-> `ask` 硬阻塞 10 分钟是很差的语义。
+> For the phone scenario the cross-harness version is clearly the better fit: when you're away from the desk, a hard 10-minute blocking `ask` is a bad semantic.
 
-### 许可证注意
+### License note
 
-按线协议自行实现客户端**不构成衍生作品**；`intercom.rs` 即为独立实现，
-未复制上游任何源码。若将来需要修改上游适配器本身，则受 AGPL 约束。
+Implementing a client yourself against the wire protocol **does not constitute a derivative work**; `intercom.rs` is an independent implementation and copies no upstream source. If you later need to modify the upstream adapter itself, the AGPL applies.
 
 ---
 
-## 上游
+## Upstream
 
-- [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom)（MIT，pi-only）
-- [dataforxyz/agent-intercom-pi](https://github.com/dataforxyz/agent-intercom-pi)（AGPL，跨 harness）
+- [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom) (MIT, pi-only)
+- [dataforxyz/agent-intercom-pi](https://github.com/dataforxyz/agent-intercom-pi) (AGPL, cross-harness)

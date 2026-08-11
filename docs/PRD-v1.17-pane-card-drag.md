@@ -1,83 +1,83 @@
-# TmuxDeck v1.17 拖拽排序：卡片内 pane 换位 + 卡片重排 PRD
+# TmuxDeck v1.17 Drag-and-Drop Reordering: Swap Panes Within a Card + Reorder Cards PRD
 
-> 目标：两级拖拽——卡片**内**的 pane 格可以交换位置（真实交换 tmux 布局），
-> 整张卡片也可以在网格中重排。**pane 不允许拖到另一张卡片**。
-> 定位：纯交互增强，不改变数据模型与后端语义。
+> Goal: two levels of drag-and-drop — pane cells **within** a card can swap positions (really swapping the tmux layout),
+> and whole cards can be reordered in the grid. **Panes may not be dragged onto another card**.
+> Positioning: pure interaction enhancement; no change to the data model or backend semantics.
 
 ---
 
-## 1. 交互形态
+## 1. Interaction shape
 
 ```
 ┌─ card-A ──────────────┐    ┌─ card-B ──────────────┐
-│ [pane1] [pane2]  ←拖→ │    │ [pane1] [pane2]        │
+│ [pane1] [pane2]  ←drag→ │    │ [pane1] [pane2]        │
 │ [pane3] [pane4]       │    │ [pane3] [pane4]        │
 └───────────────────────┘    └───────────────────────┘
-   ↕ 整卡拖拽重排（网格内）
+   ↕ whole-card drag reorder (within the grid)
 ```
 
-- **卡片内**：拖 pane 格到同卡另一格 → 两者交换（`swap-pane`，tmux 布局真实交换）
-- **整卡**：拖卡片头部/任意空白处 → 网格内重排（纯前端状态）
-- **禁止**：pane 拖出所属卡片（视觉上 drop 目标只限同卡格，拖到卡片外不响应）
+- **Within a card**: drag a pane cell onto another cell of the same card → they swap (`swap-pane`; the tmux layout really swaps)
+- **Whole card**: drag the card header / any blank area → reorder within the grid (pure frontend state)
+- **Forbidden**: dragging a pane out of its card (visually, drop targets are limited to same-card cells; dragging outside a card does nothing)
 
-## 2. 后端（tmux-backend）
+## 2. Backend (tmux-backend)
 
-### 新增 `swap_pane(pane_id_a, pane_id_b) -> Result<(), String>`
+### New `swap_pane(pane_id_a, pane_id_b) -> Result<(), String>`
 
 ```rust
 #[tauri::command]
 fn swap_pane(pane_id_a: String, pane_id_b: String) -> Result<(), String> {
-    // 1. 两个 id 都过 validate_pane_id（复用，格式 %\d+）
+    // 1. both ids pass validate_pane_id (reuse; format %\d+)
     // 2. run_tmux(&["swap-pane", "-s", &a, "-t", &b])
-    // 3. 失败返回 ERR_SWAP_PANE_FAILED（含 is_no_server_err 拦截）
+    // 3. on failure return ERR_SWAP_PANE_FAILED (including the is_no_server_err interception)
 }
 ```
 
-- 跨 session 的 pane 交换 tmux 也支持，但**前端禁止**，后端不做额外限制（极简）
-- i18n：新增 `ERR_SWAP_PANE_FAILED` 双语
+- tmux also supports swapping panes across sessions, but the **frontend forbids it**; the backend adds no extra restriction (minimal)
+- i18n: add `ERR_SWAP_PANE_FAILED` in both languages
 
-## 3. 前端（tmux-front）
+## 3. Frontend (tmux-front)
 
-### 3.1 卡片内 pane 拖拽
+### 3.1 Dragging panes within a card
 
-- 拖源：pane 格（`draggable` / pointer 事件，**不引新依赖**，HTML5 DnD 或手写）
-- 放置目标：**仅同卡内其他 pane 格**；拖到卡外/其他卡 → 无 drop 响应（自然禁止跨卡）
-- drop → `invoke("swap_pane", { paneIdA, paneIdB })` → 成功后 `loadData()`（4s 轮询也会自然刷新）
-- 拖拽中视觉：源格半透明、目标格高亮
-- 单 pane 卡片：无可拖对象，不显示拖拽提示
+- Drag source: the pane cell (`draggable` / pointer events, **no new dependencies**, HTML5 DnD or hand-written)
+- Drop target: **only other pane cells in the same card**; dragging outside the card / onto another card → no drop response (naturally forbids cross-card)
+- Drop → `invoke("swap_pane", { paneIdA, paneIdB })` → on success `loadData()` (the 4s polling also refreshes naturally)
+- Visuals while dragging: source cell semi-transparent, target cell highlighted
+- Single-pane card: nothing draggable; no drag hint shown
 
-### 3.2 卡片级重排
+### 3.2 Card-level reordering
 
-- 拖源：整张卡片
-- 实现：前端维护 `cardOrder: string[]`（session id 顺序），`loadData` 合并时**按 cardOrder 重排**，用户顺序不被 4s 轮询覆盖；新 session 追加到尾部
-- 持久化：**不做**（重启后回默认顺序；后续需要再立项）
+- Drag source: the whole card
+- Implementation: the frontend keeps `cardOrder: string[]` (order of session ids); when `loadData` merges, **reorder by cardOrder** so the 4s polling doesn't override the user's order; new sessions append at the end
+- Persistence: **none** (back to default order after restart; a separate initiative if ever needed)
 
-### 3.3 边界
+### 3.3 Boundaries
 
-- pane 拖拽与现有 hover 删除 ×、重命名输入框不冲突（拖拽只在 pane 格空白/命令区触发）
-- 拖拽期间禁用点击（避免误触发打开会话）
+- Pane dragging doesn't conflict with the existing hover delete × or the rename input (drag only triggers on the pane cell's blank/command area)
+- Click is disabled during a drag (avoid accidentally opening the session)
 
-## 4. 验收
+## 4. Acceptance
 
-1. 同卡拖 pane 格 A 到 B → 两格交换，tmux 实际布局交换（`list-panes` 顺序变化），4s 刷新后保持
-2. 拖卡片到另一位置 → 网格重排，4s 轮询后顺序保持
-3. 拖 pane 到另一张卡片上方 → 无任何反应（不交换、不报错）
-4. 单 pane 卡：无拖拽源
-5. 新增/删除 pane 后：卡片内顺序正确，cardOrder 对新 session 追加尾部
-6. npm run build + npm test + cargo test 全绿；CI 双平台绿
+1. Dragging pane cell A to B within the same card → the two swap; the actual tmux layout swaps (`list-panes` order changes); order holds after the 4s refresh
+2. Dragging a card to another position → grid reorders; order holds after the 4s polling
+3. Dragging a pane over another card → no reaction at all (no swap, no error)
+4. Single-pane card: no drag source
+5. After adding/deleting panes: in-card order is correct; cardOrder appends new sessions at the end
+6. npm run build + npm test + cargo test all green; CI on both platforms green
 
-## 5. 明确不做
+## 5. Explicitly out of scope
 
-- ❌ pane 跨卡片移动（需求明确禁止）
-- ❌ 拖拽顺序持久化到 config（重启即默认）
-- ❌ 触摸设备拖拽（手机端 v1.14 另议）
-- ❌ 拖拽库依赖（手写，极简）
+- ❌ Moving panes across cards (explicitly forbidden by the requirement)
+- ❌ Persisting drag order to config (back to default on restart)
+- ❌ Touch-device dragging (mobile v1.14 is a separate discussion)
+- ❌ A drag library dependency (hand-written, minimal)
 
-## 6. 工作量预估
+## 6. Effort estimate
 
-| 项 | 估算 |
+| Item | Estimate |
 |---|---|
-| 后端 swap_pane + 校验 + i18n | 0.25 天 |
-| 前端 pane 拖拽 + 卡片重排 + cardOrder | 1 天 |
-| 验证 | 0.5 天 |
-| **合计** | **约 1.5-2 人日** |
+| Backend swap_pane + validation + i18n | 0.25 day |
+| Frontend pane drag + card reorder + cardOrder | 1 day |
+| Verification | 0.5 day |
+| **Total** | **about 1.5-2 person-days** |

@@ -1,34 +1,34 @@
-# TmuxDeck v1.2 国际化 PRD
+# TmuxDeck v1.2 Internationalization PRD
 
-> 目标：面向全球开发者开源，界面语言跟随系统，**默认英文优先**。
-> 原则：极简。不引入 i18n 框架，不做翻译管理后台，只解决"看得懂"。
-
----
-
-## 1. 背景
-
-项目即将开源。当前 UI 与错误信息**全部为中文**，非中文用户无法使用。
-
-实测统计：
-- 前端 `src/App.tsx`：约 **45 处** 中文 UI 文案
-- 后端 `src-tauri/src/lib.rs`：**17 处** 中文字符串（错误信息 + 3 个显示名）
+> Goal: open-source for developers worldwide; UI language follows the system, **English-first by default**.
+> Principle: minimal. No i18n framework, no translation-management backend, just "readable".
 
 ---
 
-## 2. 范围
+## 1. Background
 
-**v1.2 只做两种语言：`en` / `zh-CN`。**
+The project is about to be open-sourced. The current UI and error messages are **entirely in Chinese**, unusable for non-Chinese speakers.
 
-- `en` 为**默认与兜底**（开源项目首要受众）
-- 其他语言等社区 PR，本期不做
+Measured:
+- Frontend `src/App.tsx`: about **45** Chinese UI strings
+- Backend `src-tauri/src/lib.rs`: **17** Chinese strings (error messages + 3 display names)
 
 ---
 
-## 3. 技术方案（不引框架）
+## 2. Scope
 
-### 3.1 前端
+**v1.2 does only two languages: `en` / `zh-CN`.**
 
-新建 `src/i18n.ts`，一个文件搞定：
+- `en` is **default and fallback** (primary audience for an open-source project)
+- Other languages wait for community PRs; out of scope this release
+
+---
+
+## 3. Technical approach (no framework)
+
+### 3.1 Frontend
+
+Create `src/i18n.ts`, one file does it all:
 
 ```ts
 const en = { "app.subtitle": "Multi-agent workspace console for tmux", ... };
@@ -43,26 +43,26 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 }
 ```
 
-- 语言检测：`navigator.language`，只判断是否以 `zh` 开头
-- 缺 key 时回落 `en`，`en` 也缺则原样返回 key（开发期能立刻看出漏翻）
-- **不要**引入 i18next / react-intl —— 45 条文案用不上框架
+- Language detection: `navigator.language`, only checks whether it starts with `zh`
+- Missing key falls back to `en`; missing in `en` too → return the key as-is (instantly visible during development that a translation is missing)
+- **Don't** bring in i18next / react-intl — 45 strings don't justify a framework
 
-### 3.2 后端（Rust）
+### 3.2 Backend (Rust)
 
-**原则：Rust 不做翻译，改为返回稳定的错误码，由前端翻译。**
+**Principle: Rust does not translate. It returns stable error codes, and the frontend translates.**
 
-理由：错误信息最终都显示在前端，让两侧各维护一套语言包必然不同步。
+Rationale: error messages ultimately all render in the frontend; having each side maintain its own language pack guarantees drift.
 
 ```rust
-// 改造前
+// before
 return Err("项目名称不能为空".to_string());
-// 改造后
+// after
 return Err("ERR_NAME_EMPTY".to_string());
 ```
 
-错误码清单（全部大写下划线）：
+Error-code list (all uppercase underscore):
 
-| 错误码 | 原中文 |
+| Error code | Original Chinese |
 |---|---|
 | `ERR_NAME_EMPTY` | 项目名称不能为空 |
 | `ERR_NAME_INVALID` | 非法的项目名称 |
@@ -75,54 +75,52 @@ return Err("ERR_NAME_EMPTY".to_string());
 | `ERR_SCRIPT_WRITE_FAILED` | 写入脚本失败 |
 | `ERR_TERMINAL_LAUNCH_FAILED` | 终端打开失败 |
 
-**带系统详情的错误**（原来拼了 `{}` 的）统一格式 `CODE|详情`，前端按 `|` 切分：
-翻译码 + 原样附加详情（系统报错不翻译，那是给开发者看的）。
+**Errors carrying system details** (those that used to concatenate `{}`) use the uniform format `CODE|details`, split on `|` in the frontend: translated code + raw details appended (system errors aren't translated — those are for developers).
 
-**3 个非错误的显示名**特殊处理：
-- `"Terminal (系统)"` → 注册表里改为 `"terminal.system"` 这类 key，前端 `t()` 翻译
+**3 non-error display names** handled specially:
+- `"Terminal (系统)"` → change in the registry to a key like `"terminal.system"`, translated by frontend `t()`
 - `"纯 Shell"` → key `agent.shell`
 - `"自定义 Agent"` → key `agent.custom`
-> 注意：这三个是 `ToolInfo.name`，前端渲染 chip 时判断 —— 若 `name` 以 `terminal.` / `agent.` 开头则走 `t()`，否则原样显示（第三方工具名如 "Ghostty" 不翻译）。
+> Note: these three are `ToolInfo.name`; when the frontend renders a chip it checks — if `name` starts with `terminal.` / `agent.` it goes through `t()`, otherwise shown as-is (third-party tool names like "Ghostty" are not translated).
 
 ---
 
-## 4. 两个必须处理的坑
+## 4. Two pitfalls that must be handled
 
-### 4.1 禁止字符串拼接
+### 4.1 No string concatenation
 
-当前代码大量存在 `共 {n} 个项目工作区` 这类由多段拼成的写法。英文语序不同，拼接必然出错。
+The current code has a lot of `共 {n} 个项目工作区`-style constructs built from multiple segments. English word order differs, so concatenation is guaranteed to break.
 
-**要求：一条完整句子必须是一个 key，变量用 `{n}` 占位。**
+**Requirement: one complete sentence is one key; variables use `{n}` placeholders.**
 
 ```
 ❌ <span>共 <b>{n}</b> 个项目工作区</span>
 ✅ t("stats.total", { n })   →  en: "{n} workspaces"   zh: "共 {n} 个工作区"
 ```
 
-若必须在句中嵌入高亮样式，就把数字单独渲染、句子拆成 `stats.total.prefix` / `suffix` 两个 key，
-**但优先选择整句不带样式**（更简单，视觉损失可接受）。
+If highlighting must be embedded mid-sentence, render the number separately and split the sentence into `stats.total.prefix` / `suffix` keys — **but prefer a whole un-styled sentence** (simpler; the visual loss is acceptable).
 
-### 4.2 英文复数
+### 4.2 English plurals
 
-英文有单复数，中文没有。
+English has singular/plural; Chinese doesn't.
 
-**做法：需要复数的 key 提供两条 `_one` / `_other`，由 `t()` 之外的简单判断选择。**
+**Approach: keys needing plurals provide two variants `_one` / `_other`, selected by a simple check outside `t()`.**
 
 ```ts
-// 只有确实需要的地方这么做，不要给所有 key 都加
+// only do this where actually needed; don't add it to every key
 const key = n === 1 ? "stats.total_one" : "stats.total_other";
 ```
 
-涉及位置：工作区数量、窗口数、分屏数、可用终端/Agent 数。
-zh 两条填相同文案即可。
+Affected locations: workspace count, window count, pane count, available terminal/agent count.
+For zh, both variants are filled with the same string.
 
 ---
 
-## 5. 文案翻译要求
+## 5. Copy translation requirements
 
-**英文是给全球开发者看的第一印象，不要机翻腔。**
+**English is the first impression for global developers; no machine-translation tone.**
 
-参考对照（README 已定调，保持一致）：
+Reference table (README has set the tone; stay consistent):
 
 | key | en | zh-CN |
 |---|---|---|
@@ -138,33 +136,32 @@ zh 两条填相同文案即可。
 | `terminal.system` | Terminal (System) | 终端 (系统) |
 | `confirm.destroy` | Destroy workspace "{name}"? | 确定销毁工作区「{name}」？ |
 
-其余按此风格补齐。**英文用 sentence case**（只首字母大写），不要每个词都大写。
+Fill in the rest in this style. **English uses sentence case** (only first letter capitalized), not all-caps words.
 
 ---
 
-## 6. 顺带清理
+## 6. Incidental cleanup
 
-代码里的**中文注释**（如 `{/* 卡片头部 */}`、`// 硬阻断：...`）请一并改为英文。
-开源后这些注释是给全球贡献者读的。
-
----
-
-## 7. 验收标准
-
-1. 系统语言为英文时，UI **无任何中文**（含错误弹窗、confirm 对话框、placeholder、tooltip）
-2. 系统语言为中文时，显示效果与 v1.1 一致，无遗漏、无 key 泄漏（不出现 `app.subtitle` 这种原文）
-3. 触发一次真实错误（如新建时输入 `!!!`），英文环境下显示英文提示，中文环境显示中文
-4. 数字为 1 时英文单复数正确（`1 workspace` 而非 `1 workspaces`）
-5. 第三方工具名不被翻译（Ghostty / iTerm2 / Claude Code 等保持原样）
-6. `npm run tauri build` 通过
-7. 代码中无中文注释残留
+**Chinese comments** in code (e.g. `{/* 卡片头部 */}`, `// 硬阻断：...`) should also be changed to English. After open-sourcing, these comments are read by global contributors.
 
 ---
 
-## 8. 明确不做
+## 7. Acceptance criteria
 
-- ❌ 应用内语言切换下拉框（跟随系统即可，v1.2 不做设置项）
-- ❌ 英文/中文以外的语言
-- ❌ 引入任何 i18n 框架或翻译平台
-- ❌ 语言偏好持久化到 config.json
-- ❌ README / CONTRIBUTING 的英文版（文档国际化单独排期）
+1. With the system language set to English, the UI shows **no Chinese at all** (including error popups, confirm dialogs, placeholders, tooltips)
+2. With the system language set to Chinese, the display matches v1.1, no omissions, no key leakage (no raw `app.subtitle`-style strings)
+3. Trigger a real error (e.g. enter `!!!` when creating): English environment shows the English message, Chinese environment shows Chinese
+4. English singular/plural correct for a count of 1 (`1 workspace`, not `1 workspaces`)
+5. Third-party tool names are not translated (Ghostty / iTerm2 / Claude Code etc. stay as-is)
+6. `npm run tauri build` passes
+7. No Chinese comments remain in the code
+
+---
+
+## 8. Explicitly out of scope
+
+- ❌ in-app language-switch dropdown (follow the system; no setting item in v1.2)
+- ❌ languages other than English/Chinese
+- ❌ any i18n framework or translation platform
+- ❌ persisting a language preference to config.json
+- ❌ English versions of README / CONTRIBUTING (documentation internationalization scheduled separately)

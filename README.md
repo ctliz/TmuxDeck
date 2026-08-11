@@ -8,6 +8,8 @@ TmuxDeck is a control surface for working with many AI coding agents at once. Ea
 
 Built with [Tauri](https://tauri.app/). macOS is the primary platform; Windows works through WSL.
 
+![TmuxDeck Dashboard](docs/assets/dashboard-en.png)
+
 ---
 
 ## At a glance
@@ -91,7 +93,7 @@ flowchart TB
 
 TmuxDeck registers on that broker as a session named `me`. An agent that needs a decision addresses you the same way it would address another agent — and because the broker already tracks who is idle, who is thinking, and who is blocked waiting for a reply, **the "which one needs me" question is answered by data, not guesswork**.
 
-> Status: the intercom client and secure WebSocket transport are implemented; the complete mobile client UI is still pending. See [docs/PRD-v1.12](docs/PRD-v1.12-conversation-bridge.md).
+> Status: the intercom client and secure WebSocket transport are implemented; the complete mobile client UI is still pending.
 
 ---
 
@@ -105,25 +107,67 @@ Shipped today:
 - **Lives in the menu bar.** Close the window and TmuxDeck keeps running — open a session, add a pane, or create a workspace without reopening the main window.
 - **Pane-level control.** Hover a pane preview to kill just that pane, or add one to grow the grid.
 - **No duplicate windows.** Clicking a session that is already open focuses its window instead of spawning another terminal.
-- **Remembers your choices.** Last terminal, agent, and pane count persist to `~/.config/tmuxdeck/config.json`.
+- **Remembers your choices.** Last terminal, agent, and pane count persist to the platform config directory.
 - **No setup required.** With nothing else installed, it falls back to the system terminal and your shell.
 
 Conversation bridge foundation (v1.8): directed pane input, intercom broker client, structured transcripts, unified conversation model, and subscription-scoped WebSocket transport. The complete mobile UI remains in progress.
 
 ---
 
+## Quick Start
+
+### 1. Install Prerequisites & Agent CLIs
+
+```bash
+# Required: tmux multiplexer
+brew install tmux
+
+# Optional: AI Agent CLIs
+npm install -g @earendil-works/pi-coding-agent
+npm install -g @anthropic-ai/claude-code
+npm install -g @openai/codex
+npm install -g opencode-ai
+```
+
+### 2. Set up Agent Intercom (Optional)
+
+Enable cross-harness discovery, live status, and direct messaging across agent sessions:
+
+| Agent | Adapter Installation | Registration / Activation |
+| :--- | :--- | :--- |
+| **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | Automatic on start (`/reload` in open sessions) |
+| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` | `claude mcp add -s user claude-intercom -- claude-intercom-mcp` |
+| **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
+| **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json` |
+
+### 3. Use Intercom
+
+Communicate across agent sessions using the shared broker:
+
+- **Session discovery & messaging:** Use `intercom_list`, `intercom_send`, `intercom_ask`, and `intercom_reply` to discover and exchange messages.
+- **Claude Code integration:** Registering via MCP (`claude mcp add`) provides tools; slash commands require plugin metadata.
+- **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
+
+See [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md) for complete configuration instructions.
+
+---
+
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
+- macOS (Apple Silicon; Intel builds supported from source)
 - [tmux](https://github.com/tmux/tmux) — `brew install tmux`
 
 Terminals and agents are optional; the app offers only what you have installed.
 
 ## Installation
 
-Download the latest release from the [Releases page](https://github.com/ctliz/TmuxDeck/releases) and drag the `.dmg` into Applications.
+Download the latest Apple Silicon (`aarch64`) `.dmg` release from the [Releases page](https://github.com/ctliz/TmuxDeck/releases) and drag `TmuxDeck.app` into Applications.
 
-If macOS warns that the app cannot be verified, right-click it and choose Open, then confirm. This is expected for unsigned builds.
+Release builds are ad-hoc signed but not notarized. On first launch, right-click `TmuxDeck.app`, choose **Open**, and confirm. If macOS reports that the application is damaged or cannot be opened, run:
+
+```bash
+xattr -cr /Applications/TmuxDeck.app
+```
 
 ## Usage
 
@@ -132,11 +176,13 @@ If macOS warns that the app cannot be verified, right-click it and choose Open, 
 3. Enter a name, pick a directory, choose the agent, pane count, and terminal.
 4. Click **Create**.
 
+![New Workspace Setup](docs/assets/create-workspace-en.png)
+
 The terminal opens attached to the new session. Closing the terminal window does not destroy the workspace — the session keeps running and can be reopened any time. Only the delete button on a card destroys a session.
 
 ## Configuration
 
-Settings live in `~/.config/tmuxdeck/config.json` and are written automatically.
+Settings are written automatically to `~/Library/Application Support/tmuxdeck/config.json` on macOS and `%APPDATA%\tmuxdeck\config.json` on Windows.
 
 ```json
 {

@@ -1,66 +1,60 @@
 # scripts
 
-开发与验证用的一次性脚本。不参与构建，不打进发布包。
+One-off scripts for development and verification. Not part of the build, not shipped in release packages.
 
 ---
 
 ## `intercom-probe.mjs`
 
-验证 TmuxDeck 能否作为「人类适配器」接入 pi-intercom broker。
-**在写任何依赖 intercom 的功能之前，先跑通这个。**
+Verifies that TmuxDeck can join the pi-intercom broker as a "human adapter".
+**Run this before writing any intercom-dependent feature.**
 
-协议实现对齐上游 `types.ts` 与 `broker/framing.ts`，
-细节见 [`docs/REFERENCE-intercom-protocol.md`](../docs/REFERENCE-intercom-protocol.md)。
+The protocol implementation aligns with the upstream `types.ts` and `broker/framing.ts`; details in [`docs/REFERENCE-intercom-protocol.md`](../docs/REFERENCE-intercom-protocol.md).
 
-### 前置
+### Prerequisites
 
-至少有一个装了 `pi-intercom` 的 pi 会话正在运行——broker 由它拉起，
-最后一个会话退出 5 秒后 broker 会自行关闭。
+At least one pi session with `pi-intercom` installed must be running — the broker is launched by it, and the broker shuts itself down 5 seconds after the last session exits.
 
 ```sh
-ls ~/.pi/agent/intercom/broker.sock   # 存在即 broker 在跑
+ls ~/.pi/agent/intercom/broker.sock   # exists → broker is running
 ```
 
-### 用法
+### Usage
 
 ```sh
-# 注册并常驻：列出所有在线会话，打印收到的消息
+# Register and stay resident: list all online sessions, print received messages
 node scripts/intercom-probe.mjs
 
-# 发一条消息后退出
-node scripts/intercom-probe.mjs send <目标会话名或ID> "消息内容"
+# Send one message and exit
+node scripts/intercom-probe.mjs send <target-session-name-or-id> "message text"
 
-# 常驻时自动回复 ask（验证 ask→reply 全链路，避免等待方阻塞 10 分钟）
+# While resident, auto-reply to asks (verifies the full ask→reply path, avoiding blocking the waiter for 10 minutes)
 PROBE_AUTOREPLY=1 node scripts/intercom-probe.mjs
 ```
 
-> **为什么不能单独回 ask**：broker 强制「回复必须来自收到 ask 的那个 session」
-> （sessionId 级身份，`broker.ts` 中 `replyEdge.to !== currentId` 即拒）。
-> 独立进程重新注册是新 session，回不了同一个 ask——回复只能在同一条连接上发生。
-> 真实 TmuxDeck 用同一持久连接（`intercom.rs` 的 `reply()`），语义一致；
-> 探针用 `PROBE_AUTOREPLY=1` 在同一连接上自动回，验证同一条链路。
+> **Why an ask can't be answered standalone**: the broker enforces "a reply must come from the session that received the ask" (sessionId-level identity; `broker.ts` rejects `replyEdge.to !== currentId`). An independent process re-registers as a new session and cannot reply to the same ask — a reply can only happen on the same connection. The real TmuxDeck uses one persistent connection (`intercom.rs`'s `reply()`), matching semantics; the probe auto-replies on the same connection via `PROBE_AUTOREPLY=1` to exercise the same path.
 
-### 验证清单
+### Verification checklist
 
-| # | 步骤 | 通过标准 |
+| # | Step | Pass criterion |
 |---|---|---|
-| 1 | `node scripts/intercom-probe.mjs` | 打印 `✓ 注册成功 sessionId=…` |
-| 2 | 观察会话列表 | 每个 pi 会话都带状态（`idle` / `thinking` / `tool:…`） |
-| 3 | 在任一 pi 会话执行 `intercom({ action: "list" })` | 列表里能看到 `tmuxdeck-probe` |
-| 4 | 在 pi 里 `intercom({ action: "send", to: "tmuxdeck-probe", message: "hi" })` | 探针打印 `📨 来自 …` |
-| 5 | 在 pi 里改用 `action: "ask"`（探针以 `PROBE_AUTOREPLY=1` 运行） | 探针打印 `⚠ 对方在等回复（ask）`，并自动回复解除等待 |
-| 6 | `node scripts/intercom-probe.mjs send <pi会话名> "收到"` | 打印 `✓ 已送达`，且 pi 会话里出现该消息 |
+| 1 | `node scripts/intercom-probe.mjs` | prints `✓ registered sessionId=…` |
+| 2 | Observe the session list | every pi session has a status (`idle` / `thinking` / `tool:…`) |
+| 3 | In any pi session run `intercom({ action: "list" })` | the list shows `tmuxdeck-probe` |
+| 4 | In pi run `intercom({ action: "send", to: "tmuxdeck-probe", message: "hi" })` | the probe prints `📨 from …` |
+| 5 | In pi switch to `action: "ask"` (probe running with `PROBE_AUTOREPLY=1`) | the probe prints `⚠ the other side is waiting for a reply (ask)` and auto-replies to release the wait |
+| 6 | `node scripts/intercom-probe.mjs send <pi-session-name> "received"` | prints `✓ delivered`, and the message appears in the pi session |
 
-第 2 条通过即证明**不需要**自己实现状态判定；
-第 4、5 条通过即证明通知链路成立；第 6 条通过即证明手机回复链路成立。
+Passing #2 proves you do **not** need to implement state detection yourself;
+passing #4 and #5 proves the notification path works; #6 proves the phone-reply path works.
 
-三条都通，`src-tauri/src/bridge.rs` 的全部假设即成立。
+If all three are green, every assumption in `src-tauri/src/bridge.rs` holds.
 
-### 常见结果
+### Common results
 
-| 现象 | 原因 |
+| Symptom | Cause |
 |---|---|
-| `✗ 找不到 broker socket` | 没有 pi 会话在跑，或 broker 已因空闲退出 |
-| 会话列表只有自己 | 其他 pi 会话没装 `pi-intercom`，或装后未 `/reload` |
-| 看不到 Claude Code / Codex | 本机装的是 pi-only 原版；跨 harness 需迁移到 `dataforxyz` 家族 |
-| `✗ 投递失败: …` | 目标名重复或不存在——重名时应改用会话 ID |
+| `✗ cannot find broker socket` | no pi session running, or the broker exited due to idleness |
+| Session list only shows yourself | other pi sessions don't have `pi-intercom` installed, or it wasn't `/reload`ed after install |
+| Can't see Claude Code / Codex | this machine has the pi-only original; cross-harness requires migrating to the `dataforxyz` family |
+| `✗ delivery failed: …` | target name duplicated or nonexistent — use the session ID when names collide |

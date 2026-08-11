@@ -1,74 +1,71 @@
-# TmuxDeck 路线图（Roadmap）
+# TmuxDeck roadmap
 
-> 维护人：产品（tmux-producter）。每完成一项勾选并记录版本；排期变更须在此更新。
-> 版本约定：功能代号沿用 PRD 编号（v1.x）；发布版本号从 v1.7.0 起按实际发布递增。
+> Maintained by product (tmux-producter). Check an item off and record the version when it's done; schedule changes must be updated here.
+> Version convention: feature code names follow the PRD numbering (v1.x); release version numbers increment from v1.7.0 by actual releases.
 
-## 当前状态
+## Current status
 
-- **最新发布**：v1.8.0（2026-08-11）— 对话桥后端与安全 WebSocket 传输、pane/card 拖拽排序、新图标体系、定向通信修复
-- **主线**：main 分支直推，CI（macOS + Windows 构建 + 前后端测试）全绿
-- **测试体系**：后端 43 项通过（另 1 项真机测试 ignored）+ 前端 3 项通过 + CI 测试步骤
-- **质量基线**：tmux 无 server 报错已治理（ERR_TMUX_NO_SERVER 双语友好提示）
+- **Latest release:** v1.8.0 (2026-08-11) — conversation-bridge backend and secure WebSocket transport, pane/card drag reordering, new icon system, targeted-communication fixes
+- **Trunk:** direct pushes to main, CI (macOS + Windows build + frontend/backend tests) all green
+- **Test suite:** 43 backend tests passing (plus 1 on-device test ignored) + 3 frontend tests + CI test step
+- **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 
-## 规划队列
+## Planning queue
 
-### P0 · v1.12 对话桥（进行中）
+### P0 · v1.12 Conversation bridge (in progress)
 
-手机端接入。定位：TmuxDeck 成为 **pi-intercom 的「人类适配器」**——
-该家族已有 Pi / Codex / Claude Code / OpenCode 适配器，唯独没有「人」。
+Mobile access. Positioning: TmuxDeck becomes pi-intercom's **"human adapter"** — the family already has Pi / Codex / Claude Code / OpenCode adapters, but no "human".
 
-- 需求与验收：`docs/PRD-v1.12-conversation-bridge.md`
-- 架构：`docs/ARCHITECTURE.md` · 协议：`docs/REFERENCE-intercom-protocol.md`
-- 决策留痕：`docs/DECISIONS-v1.12.md`（五个被否决的方案）· `docs/PRIOR-ART-agent-bus.md`
+- Requirements & acceptance: `docs/PRD-v1.12-conversation-bridge.md`
+- Architecture: `docs/ARCHITECTURE.md` · Protocol: `docs/REFERENCE-intercom-protocol.md`
+- Decision log: `docs/DECISIONS-v1.12.md` (five rejected approaches) · `docs/PRIOR-ART-agent-bus.md`
 
-进度：
+Progress:
 
-- [x] `tmux.rs`：`send_keys` / `send_key_name`（白名单）/ `list_all_panes`
-- [x] `intercom.rs`：broker 客户端（UDS + 4 字节大端分帧 + 手工帧分派），无新增依赖
-- [x] `bridge.rs`：对话模型、pane↔会话父链关联、投递路由、`Transport` 抽象
-- [x] 文档落地（架构 / 协议 / 决策 / 脚本说明 / CONTRIBUTING 同步）
-- [x] **真机验证**：`node scripts/intercom-probe.mjs` 6 条清单全过（2026-08-10，tmux-backend）
-- [x] `cargo test` 通过（27 项，2026-08-10）
-- [x] `TranscriptSource`：Pi / Claude Code 结构化会话记录读取，`capture-pane` 兜底
-- [x] WebSocket 传输：token 鉴权、订阅过滤、心跳与连接级定向回复
-- [ ] 完整手机端 UI 与推送入口
+- [x] `tmux.rs`: `send_keys` / `send_key_name` (allow-list) / `list_all_panes`
+- [x] `intercom.rs`: broker client (UDS + 4-byte big-endian framing + manual frame dispatch), no new dependencies
+- [x] `bridge.rs`: conversation model, pane↔session parent-chain association, delivery routing, `Transport` abstraction
+- [x] Docs landed (architecture / protocol / decisions / script notes / CONTRIBUTING sync)
+- [x] **On-device verification:** all 6 items of `node scripts/intercom-probe.mjs` pass (2026-08-10, tmux-backend)
+- [x] `cargo test` passes (27 items, 2026-08-10)
+- [x] `TranscriptSource`: structured session-log reading for Pi / Claude Code, `capture-pane` fallback
+- [x] WebSocket transport: token auth, subscription filtering, heartbeat and connection-level targeted replies
+- [ ] Full mobile UI and push entry point
 
-**未解决**：完整手机端 UI 尚未交付；当前已具备安全 WebSocket 传输与对话协议。
+**Unresolved:** the full mobile UI is not yet delivered; the secure WebSocket transport and conversation protocol are in place.
 
-**外部依赖**：本机装的是 `nicobailon/pi-intercom` 原版（pi-only），
-Claude Code / Codex 仍是孤岛。打通需整体迁移到 `dataforxyz` 跨 harness 家族，
-且**必须全量迁移**（新旧混用会分裂 broker）。属用户决策项。
+**External dependency:** this machine runs the original `nicobailon/pi-intercom` (pi-only); Claude Code / Codex are still islands. Going cross-harness requires an overall migration to the `dataforxyz` family, and it **must be all-or-nothing** (mixing old and new splits the broker). This is a user decision item.
 
-### P1 · Windows 实机验证（暂缓，排期待定）
+### P1 · Windows on-device verification (deferred, schedule TBD)
 
-- 验收清单：`docs/WINDOWS-VERIFICATION-v1.7.0.md`（A 环境预检 / B 安装 / C 桥接 / D GUI）
-- 进度：A1–A3 已 PASS（tmux 3.4、codex/opencode 可探测、wt/cmd/powershell 齐全）；B/C/D 待排期
-- 主机：`tsiji@192.168.1.17`（访问方式见 server-deploy skill「Windows host access」）
-- 触发条件：用户排期确认后执行；A/B/C 走 SSH，D 需 Windows 机器 GUI 配合
-- 完成标准：全部 PASS 或仅 D8 跳过 → Windows 从「编译级」升级为「实机可用」
+- Acceptance checklist: `docs/WINDOWS-VERIFICATION-v1.7.0.md` (A env pre-check / B install / C bridging / D GUI)
+- Progress: A1–A3 PASS (tmux 3.4, codex/opencode detected, wt/cmd/powershell all present); B/C/D to be scheduled
+- Host: `tsiji@192.168.1.17` (access via server-deploy skill "Windows host access")
+- Trigger: executed after user confirms schedule; A/B/C over SSH, D needs GUI cooperation on the Windows machine
+- Completion criterion: all PASS or only D8 skipped → Windows upgraded from "compiles" to "usable on real hardware"
 
-### P2 · 里程碑候选（待用户决策立项）
+### P2 · Milestone candidates (awaiting user decision to launch)
 
-| 候选 | 价值 | 成本预估 | 备注 |
+| Candidate | Value | Effort estimate | Notes |
 |---|---|---|---|
-| per-pane agent 混搭 | 单个工作区跑不同 agent 编排 | 中 | v1.1 PRD 曾明确不做，需求待验证 |
-| 工作区模板/布局预设 | 常用布局一键复用 | 低-中 | 同上 |
-| macOS 签名 + 自动更新 | 消除 Gatekeeper 警告、用户自动升级 | 中-高 | 涉及 Apple 开发者账号 + tauri-updater |
-| 拆分 App.tsx | 控技术债，功能增长前重构 | 中 | 单文件 987 行；`lib.rs` 已于 2026-08-10 拆分完成 |
+| Per-pane agent mixing | run different agent orchestrations in a single workspace | medium | v1.1 PRD explicitly ruled this out; demand not yet validated |
+| Workspace templates / layout presets | reuse common layouts in one click | low-medium | same |
+| macOS signing + auto-update | remove Gatekeeper warning, users auto-upgrade | medium-high | needs Apple developer account + tauri-updater |
+| Split App.tsx | pay down tech debt, refactor before features grow | medium | single 987-line file; `lib.rs` already split on 2026-08-10 |
 
-### P3 · 技术债与持续改进
+### P3 · Tech debt and continuous improvement
 
-- [x] 拆分 `lib.rs` 为模块（tmux / registry / config / models / tray / commands，2026-08-10）
-- [x] 引入自动化测试（v1.7.0，2026-08-10）
-- [x] tmux 无 server 报错治理（v1.7.0，2026-08-10）
-- [x] 发布流程命令行化（gh CLI 接入，draft → 正式发布）
-- [x] create_session 字段命名修复（v1.7.1，2026-08-10）
-- [x] v1.7.2：Ghostty 打开会话多实例 bug（AppleScript new window，2026-08-11）
-- [ ] 终端启动方式评估：wezterm / kitty / alacritty 的 open -na 潜在同类多实例问题（Ghostty 修复后评估，不主动扩大范围）
-- [ ] README 措辞：Windows 验证通过后，从「macOS 为 battle-tested」更新为双平台声明
+- [x] Split `lib.rs` into modules (tmux / registry / config / models / tray / commands, 2026-08-10)
+- [x] Introduce automated tests (v1.7.0, 2026-08-10)
+- [x] tmux no-server error handling (v1.7.0, 2026-08-10)
+- [x] Command-line release flow (gh CLI, draft → formal release)
+- [x] create_session field-naming fix (v1.7.1, 2026-08-10)
+- [x] v1.7.2: Ghostty opening-session multi-instance bug (AppleScript new window, 2026-08-11)
+- [ ] Terminal-launch method evaluation: potential same-class multi-instance issue with `open -na` on wezterm / kitty / alacritty (evaluate after the Ghostty fix; don't widen scope proactively)
+- [ ] README wording: after Windows verification passes, update from "macOS is battle-tested" to a dual-platform statement
 
-## 原则（沿用 PRD 惯例）
+## Principles (following PRD conventions)
 
-- 极简优先：未验证的需求不进队列；每期明确「不做」清单
-- 小步快跑：单期工作量 ≤ 2 人日，发布即打 tag
-- 文档纪律：功能立项先写 PRD，发布必写 RELEASE-NOTES
+- Minimal-first: unvalidated demand doesn't enter the queue; every release has an explicit "not doing" list
+- Small, fast steps: single release ≤ 2 person-days, tag at release
+- Documentation discipline: write a PRD before starting a feature, always write RELEASE-NOTES at release

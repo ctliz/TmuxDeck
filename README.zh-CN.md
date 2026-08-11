@@ -2,75 +2,77 @@
 
 *[English](README.md) · [简体中文](README.zh-CN.md)*
 
-**十个 agent 在跑，哪一个在等你？**
+**十个 Agent 正在并行运行，哪一个正在等待你处理？**
 
-TmuxDeck 是同时驾驭多个 AI 编码 agent 时的操作台。每个 agent 跑在自己的 tmux 分屏里，TmuxDeck 把它们全部呈现出来，告诉你哪一个需要人，并让你能直接回它。
+TmuxDeck 是专为多 AI Coding Agent 打造的并行工作区控制台。每个 Agent 运行在独立的 tmux 分屏或会话中；TmuxDeck 为你统一展现所有工作区，实时标明哪些 Agent 需要人工确认，并支持一键交互。
 
-基于 [Tauri](https://tauri.app/) 构建。macOS 为主要平台，Windows 通过 WSL 支持。
+基于 [Tauri](https://tauri.app/) 构建。macOS 为首要支持平台；Windows 支持通过 WSL 运行。
+
+![TmuxDeck 仪表盘界面](docs/assets/dashboard-zh.png)
 
 ---
 
 ## 概述
 
-- **同时驾驭多个 agent。** 每个工作区是一张卡片，每个分屏显示正在跑什么、安静了多久。
-- **原生 Ghostty 分屏。** 1/2/4/6 分屏网格，每个 agent 独立 tmux 会话——关掉窗口，agent 照常干活。
-- **兼容经典环境。** 原生终端与 tmux 多 pane 布局完全可用。
-- **用你已经装了的工具。** Pi、Claude Code、Codex、OpenCode、Gemini CLI、Aider、自定义命令或纯 Shell——运行时自动检测。
-- **一键掌控。** 创建、启动、恢复、单独终止某个 agent、销毁整个工作区，都在仪表盘上完成。
-- **常驻菜单栏。** 关掉窗口继续运行——状态、预览与控制始终一键可达。
-- **agent 之间互相发现。** 注册进 Agent Intercom broker，跨 harness 发现、实时状态与定向通信。
-- **macOS 优先，WSL 可跑。** 基于 Tauri 构建；Windows 经 WSL 运行。
+- **多 Agent 并行编排。** 每个工作区即为一张卡片，实时展示分屏状态、运行命令与静默时长。
+- **Native Ghostty 原生分屏。** 支持 1/2/4/6 屏无缝网格，每个 Agent 在独立的 tmux session 中运行 — 关闭终端窗口，Agent 在后台持续工作。
+- **兼容经典终端工作流。** 完美支持经典单/多分屏 tmux 布局与系统各类常用终端。
+- **开箱即用常用 Agent。** 运行时自动检测已安装的 Pi、Claude Code、Codex、OpenCode、Gemini CLI、Aider、自定义命令或纯 Shell。
+- **一键掌控全局。** 在控制面板上一键新建、启动、恢复或销毁整套工作区与单 Agent 槽位。
+- **常驻系统菜单栏。** 关闭主窗口后继续后台运行 — 状态监测、预览与控制随时一键拉起。
+- **Agent 跨平台通信。** 自动注册至 Agent Intercom 消息总线，实现跨 Harness 发现、实时状态同步与定向消息交互。
+- **macOS 优先，WSL 随时就绪。** 基于 Tauri 研发，Windows 环境支持在 WSL 中原生运行。
 
 ---
 
-## 这个软件在解决什么
+## 核心理念
 
-跑一个 agent 很简单——你盯着它就行。跑十二个，问题的性质就变了。
+运行一个 Agent 很简单 — 你看着它就行。但同时运行十几个 Agent，则是完全不同的挑战。
 
-它们在不同时刻结束，会卡在你没预料到的问题上，然后安静地等着。而**一个卡住的 agent，看上去和一个正忙的 agent 一模一样**。工作的重心于是从「写提示词」变成了**分诊**：这么多东西在跑，现在到底哪一个需要我？
+它们在不同的时间完成，在未预料的问题上阻塞，安静地等待；而一个卡住的 Agent 看起来和正在思考的 Agent 毫无区别。你的核心工作不再是*编写 Prompt*，而是**分诊 (Triage)**：在所有运行的工作区中，哪一个现在最需要我？
 
 ```
    ┌─ project-api ───────────┐   ┌─ mes-refactor ──────────┐
-   │  ◐  pi        tool:bash │   │  ●  claude    思考中     │
-   │  ○  pi        空闲       │   │  ◐  codex     tool:edit │
+   │  ◐  pi        tool:bash │   │  ●  claude    thinking  │
+   │  ○  pi        idle      │   │  ◐  codex     tool:edit │
    └─────────────────────────┘   └─────────────────────────┘
 
    ┌─ wms-migrate ───────────┐   ┌─ docs ──────────────────┐
-   │  ●  pi        思考中     │   │  ▲  claude    等待中     │ ←── 需要你
+   │  ●  pi        thinking  │   │  ▲  claude    waiting   │ ←── 等待你的决策
    │  ○  zsh                 │   │  ○  zsh                 │
    └─────────────────────────┘   └─────────────────────────┘
 
-        ●  正在工作      ◐  正在执行工具
-        ○  空闲          ▲  在等人
+        ●  运行中      ◐  正在执行工具
+        ○  空闲        ▲  等待人工输入
 ```
 
-最后那张卡片就是全部意义所在。其他都可以再等等。
+最后一张卡片就是关键所在。其他工作区都可以先等一等。
 
 ---
 
-## 三层
+## 三层架构
 
 ```mermaid
 flowchart LR
-    A["<b>看见</b><br/>哪个需要我？<br/><i>已发布</i>"]
-    B["<b>说话</b><br/>一句话把它解开<br/><i>v1.12 开发中</i>"]
-    C["<b>随处</b><br/>人不在电脑前也行<br/><i>规划中</i>"]
+    A["<b>感知 (See)</b><br/>哪个需要我？<br/><i>已发布</i>"]
+    B["<b>交互 (Speak)</b><br/>一行代码直接回复<br/><i>v1.12 开发中</i>"]
+    C["<b>无处不在 (Anywhere)</b><br/>离开桌面也能处理<br/><i>规划中</i>"]
     A --> B --> C
 ```
 
-**看见** —— 每个会话是一张卡片，每个分屏显示正在跑什么、安静了多久。点一下就在你选的终端里重新连上。这是今天已经能用的部分。
+**感知 (See)** — 每个会话呈现为一张卡片，每个分屏展示运行状态与静默时间。点击一次即可在选定的终端中重新附着。这是当前版本所提供的能力。
 
-**说话** —— 卡住的 agent 只有能被解开才有意义。TmuxDeck 可以往任意分屏发送文本，回一个 agent 不再需要先找到它的窗口。
+**交互 (Speak)** — 只有能够快速解除阻塞，卡住的 Agent 才有价值。TmuxDeck 支持向任意分屏发送文本，无需手动寻找终端窗口即可直接回复。
 
-**随处** —— 分诊这件事不会因为你离开座位就停止。晚上九点卡住的 agent，如果没有东西来找你，就会一直卡到第二天早上。
+**无处不在 (Anywhere)** — 离开桌面时分诊需求依然存在。夜间阻塞的 Agent 会一直挂起直到次日，除非有移动端通知能及时触达你。
 
 ---
 
-## agent 之间已经能对话了，缺的那个参与者是你
+## Agent 之间已建立通信。你才是唯一的缺失参与者。
 
-编码 agent 正在长出自己的协作层——[Agent Intercom](https://github.com/dataforxyz/agent-intercom-pi) 让 Pi、Codex、Claude Code、OpenCode 的会话共用一个本地 broker，彼此可以发现并互发消息。
+AI Coding Agent 正在形成它们自己的协作层 — [Agent Intercom](https://github.com/dataforxyz/agent-intercom-pi) 为 Pi、Codex、Claude Code 和 OpenCode 提供本地共享 Broker，使它们可以互相发现和发消息。
 
-而这条总线上唯一没有适配器的，是**人**。
+但这个总线此前唯独缺少**人类接口**。
 
 ```mermaid
 flowchart TB
@@ -89,54 +91,94 @@ flowchart TB
     ME -.->|推送| PHONE["你的手机"]
 ```
 
-TmuxDeck 在那条总线上注册成一个名为 `me` 的会话。需要决策的 agent 找你的方式，和它找另一个 agent 完全一样。而由于 broker 本身就在跟踪谁空闲、谁在思考、谁正阻塞等待回复，**「哪个需要我」这个问题是被数据回答的，不是猜出来的**。
+TmuxDeck 在该 Broker 上注册为名为 `me` 的会话。Agent 需要决策时，联系你与联系其他 Agent 完全一致 — 并且因为 Broker 实时跟踪谁在空闲、谁在思考、谁在等待回复，**「哪个 Agent 需要我」这个问题由数据直接回答，无需猜测**。
 
-> 当前状态：intercom 客户端与安全 WebSocket 传输已实现，完整手机端 UI 仍待完成。详见 [docs/PRD-v1.12](docs/PRD-v1.12-conversation-bridge.md)。
+> 状态：Intercom 客户端与安全 WebSocket 传输层已实现；完整移动端 UI 正在持续开发中。
 
 ---
 
-## 功能
+## 功能特性
 
-已发布：
+- **会话全局视图。** 每个 tmux 会话展示为卡片，标明窗口数、分屏数、各分屏指令及最后活跃时间。
+- **一键新建工作区。** 指定名称、工作目录、Agent 引擎、分屏数与终端，自动创建分屏并拉起终端。
+- **适配现有环境。** 运行时自动检测已安装的终端与 Agent，未安装的自动隐藏。终端支持：Ghostty、iTerm2、WezTerm、kitty、Alacritty、系统 Terminal。Agent 支持：Claude Code、Codex、OpenCode、Gemini CLI、Aider、Pi 或纯 Shell。
+- **常驻系统菜单栏。** 关闭窗口后 TmuxDeck 仍在后台运行 — 无需重新打开主窗口即可快捷管理会话或创建工作区。
+- **分屏格精细控制。** 支持独立终止单个分屏/槽位，或动态新增分屏扩展网格。
+- **防止重复开窗。** 点击已附着的会话会自动聚焦现有终端窗口，不会重复创建冗余终端。
+- **自动记忆设置。** 常用终端、Agent 与分屏数量自动保存到对应平台的配置目录。
+- **零额外配置。** 在极简环境下，可无缝回退至系统终端与默认 Shell。
 
-- **会话总览。** 每个 tmux 会话以卡片呈现，含窗口数、分屏数、每个分屏的运行命令和最后活跃时间。
-- **一键创建工作区。** 输入会话名、选目录、选 agent、分屏数和终端，分屏自动创建，终端自动打开。
-- **用你已经装了的工具。** 运行时检测已安装的终端与 agent，未装的不显示。终端：Ghostty、iTerm2、WezTerm、kitty、Alacritty、系统终端。Agent：Claude Code、Codex、OpenCode、Gemini CLI、Aider、Pi，或纯 Shell。
-- **常驻菜单栏。** 关掉窗口后仍在运行——不打开主窗口即可打开会话、新增分屏或建工作区。
-- **分屏级管理。** 悬停分屏预览格可单独删除，也可新增分屏扩展网格。
-- **不会重复开窗。** 点击已打开的会话会聚焦其已有窗口，而不是再拉起一个终端。
-- **记住你的选择。** 上次的终端、agent、分屏数保存在 `~/.config/tmuxdeck/config.json`。
-- **零配置。** 什么都没装时，回退到系统终端和默认 Shell。
+---
 
-对话桥基础能力（v1.8）：定向 pane 输入、intercom broker 客户端、结构化 transcript、统一对话模型与按订阅分发的 WebSocket 传输。完整手机端 UI 仍在开发中。
+## 快速开始
+
+### 1. 安装基础依赖与 Agent CLI
+
+```bash
+# 必需依赖：tmux 复用器
+brew install tmux
+
+# 可选：AI Agent CLI
+npm install -g @earendil-works/pi-coding-agent
+npm install -g @anthropic-ai/claude-code
+npm install -g @openai/codex
+npm install -g opencode-ai
+```
+
+### 2. 配置 Agent Intercom (可选)
+
+开启跨 Harness 发现、实时状态同步与 Agent 间定向通信：
+
+| Agent | 适配器安装命令 | 激活 / MCP 注册 |
+| :--- | :--- | :--- |
+| **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | 启动自动加载（已有会话执行 `/reload`） |
+| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` | `claude mcp add -s user claude-intercom -- claude-intercom-mcp` |
+| **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
+| **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | 在 `opencode.json` 与 `tui.json` 中配置 `plugin.mjs` 和 `tui.mjs` |
+
+### 3. 使用 Intercom 指令
+
+在不同 Agent 会话间通过共享 Broker 通信：
+
+- **会话发现与消息路由：** 使用 `intercom_list`、`intercom_send`、`intercom_ask` 以及 `intercom_reply` 进行会话查找与消息交互。
+- **Claude Code 接入说明：** 通过 MCP 注册（`claude mcp add`）提供工具集成；Slash 命令需使用插件元数据注册。
+- **OpenCode 接入说明：** 需要同时注册 `plugin.mjs`（服务端插件在 `opencode.json` 中）与 `tui.mjs`（TUI 插件在 `tui.json` 中）。
+
+详细配置说明请参阅 [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md)。
 
 ---
 
 ## 环境要求
 
-- macOS（Apple Silicon 或 Intel）
-- [tmux](https://github.com/tmux/tmux) —— `brew install tmux`
+- macOS (Apple Silicon；Intel 支持通过源码构建)
+- [tmux](https://github.com/tmux/tmux) — `brew install tmux`
 
-终端和 agent 都是可选的，应用只提供你已安装的选项。
+终端和 Agent 工具均为可选；应用仅展示你已安装的选项。
 
-## 安装
+## 安装指南
 
-从 [Releases 页面](https://github.com/ctliz/TmuxDeck/releases) 下载最新版本，将 `.dmg` 拖入「应用程序」。
+从 [Releases 页面](https://github.com/ctliz/TmuxDeck/releases) 下载最新版本的 Apple Silicon (`aarch64`) `.dmg`，将 `TmuxDeck.app` 拖入 Applications 目录即可。
 
-如果 macOS 提示无法验证开发者，右键点击应用图标选择「打开」并确认。这是未签名构建的预期行为。
+发布版本已进行 Ad-hoc 签名但未完成公证。首次启动时，请在 `TmuxDeck.app` 图标上右键选择「打开」并确认。若 macOS 提示应用已损坏或无法打开，请执行以下命令清除标志：
 
-## 使用
+```bash
+xattr -cr /Applications/TmuxDeck.app
+```
+
+## 使用说明
 
 1. 打开 TmuxDeck。
-2. 点击 **新建工作区**。
-3. 输入名称，选择目录，然后选 agent、分屏数和终端。
-4. 点击 **创建**。
+2. 点击 **新建工作区 (New Workspace)**。
+3. 输入名称、选择目录、Agent、分屏数和终端。
+4. 点击 **创建并启动 (Create & Start)**。
 
-终端会打开并连接到新会话。关闭终端窗口不会销毁工作区——会话继续运行，随时可从仪表盘重新打开。只有卡片上的删除按钮才会销毁会话。
+![新建工作区配置](docs/assets/create-workspace-zh.png)
 
-## 配置
+终端打开并自动附着至新会话。关闭终端窗口不会销毁工作区 — 会话依然在后台运行，可随时重新打开。只有点击卡片上的删除按钮才会彻底销毁会话。
 
-设置保存在 `~/.config/tmuxdeck/config.json`，由应用自动写入。
+## 配置项
+
+配置文件在 macOS 位于 `~/Library/Application Support/tmuxdeck/config.json`，在 Windows 位于 `%APPDATA%\tmuxdeck\config.json`；应用会自动写回修改。
 
 ```json
 {
@@ -148,34 +190,34 @@ TmuxDeck 在那条总线上注册成一个名为 `me` 的会话。需要决策�
 }
 ```
 
-`custom_agent` 用于向新建工作区对话框添加自定义 agent 命令。
+`custom_agent` 可在创建弹窗中加入用户自定义的 Agent 执行指令。
 
-## 常见问题
+## 常见问题 (FAQ)
 
-**必须装 Ghostty 或 Claude Code 吗？**
+**使用 TmuxDeck 是否必须安装 Ghostty 或 Claude Code？**
 
-不需要。应用检测已安装的工具并隐藏未装的。什么都没装时使用系统终端和你的 Shell。
+不需要。应用会自动检测已安装环境并隐藏未安装项。极简环境下使用系统终端和 Shell 即可运行。
 
-**关闭 TmuxDeck 会杀掉我的 agent 吗？**
+**关闭 TmuxDeck 会关闭运行中的 Agent 吗？**
 
-不会。工作区运行在 tmux 里而非应用内。关闭应用或终端窗口都不影响会话，只有删除按钮才会销毁。
+不会。工作区托管在 tmux 中而非应用进程内部。关闭应用或终端窗口后会话继续后台运行。只有明确点击卡片删除按钮才会销毁会话。
 
-**必须装 Agent Intercom 吗？**
+**必须配置 Agent Intercom 吗？**
 
-不必。没有它时，TmuxDeck 就是上面描述的那个仪表盘；有它时，agent 状态从推断变为精确，且 agent 可以直接找你。
+不需要。未配置时 TmuxDeck 作为可视化仪表盘使用；配置后能获取精确状态判定，并允许 Agent 直接发消息触达你。
 
-**为什么某个终端没出现在选项里？**
+**为什么下拉列表中找不到我安装的终端？**
 
-只显示已安装的终端。某一类只有一个候选时整行会被隐藏，而不是显示为固定选项。若你装在非标准位置且未被识别，请提 issue。
+界面仅显示检测到的已安装终端。若某种类型只有单一选项会自动折叠。若安装在非标准路径未被探测到，欢迎在 GitHub 提交 Issue。
 
-**支持 Linux 或 Windows 吗？**
+**TmuxDeck 支持 Linux 或 Windows 吗？**
 
-Linux 暂不支持。Windows 通过 WSL 可用并提供同样的安装包，但 macOS 是经过充分验证的平台——Windows 问题请在 GitHub 反馈。
+暂不支持原生 Linux。Windows 支持在 WSL 中运行并提供安装包，但 macOS 为主测试平台 — 欢迎在 GitHub 报告 Windows 相关问题。
 
-## 开发
+## 开发者指南
 
-环境搭建与代码规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，架构、协议参考与决策留痕见 [docs/](docs/README.md)。
+参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发配置与代码规范，参见 [docs/](docs/README.md) 了解架构设计、协议参考与决策记录。
 
-## License
+## 开源协议
 
 [MIT](LICENSE)

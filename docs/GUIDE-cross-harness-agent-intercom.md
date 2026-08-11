@@ -1,63 +1,63 @@
-# 跨 Harness Agent Intercom 使用指南
+# Cross-Harness Agent Intercom Usage Guide
 
-> 适用范围：同一台机器、同一 OS 用户下的 Pi、OpenCode、Codex 与 Claude Code。
+> Scope: Pi, OpenCode, Codex, and Claude Code on the same machine, under the same OS user.
 >
-> 四个适配器共享 Agent Intercom protocol v3、本地 broker 和运行时目录，可以跨 Harness 执行定向 `list` / `send` / `ask` / `reply`。它不是公网通信服务，也不是广播聊天室。
+> The four adapters share Agent Intercom protocol v3, the local broker, and the runtime directory, so they can perform targeted `list` / `send` / `ask` / `reply` across harnesses. It is not a public-internet messaging service, nor a broadcast chat room.
 
-## 1. 核心模型
+## 1. Core model
 
 ```text
 Pi ───────────┐
-OpenCode ─────┼── ~/.pi/agent/intercom/broker.sock ── 本地 broker
+OpenCode ─────┼── ~/.pi/agent/intercom/broker.sock ── local broker
 Codex ────────┤
 Claude Code ──┘
 ```
 
-- 第一个连接的适配器会自动启动 broker，因此 Pi 不一定要最先启动。
-- 最后一个客户端断开约 5 秒后，broker 自动退出。
-- macOS / Linux 使用 Unix socket；Windows 默认使用命名管道。
-- 只有已安装、已加载并成功注册的会话才会出现在列表中。
-- 会话名用于可读寻址，但允许重名；真正可信的寻址键是**稳定 session ID**。
+- The first adapter to connect starts the broker automatically, so Pi does not have to start first.
+- The broker exits on its own roughly 5 seconds after the last client disconnects.
+- macOS / Linux use a Unix socket; Windows uses a named pipe by default.
+- Only sessions that are installed, loaded, and successfully registered appear in listings.
+- Session names are for human-readable addressing, but duplicates are allowed; the trustworthy addressing key is the **stable session ID**.
 
-默认共享目录：
+Default shared directory:
 
 ```text
 ~/.pi/agent/intercom/
 ```
 
-其中包含 `broker.sock`、`broker.pid`、`broker.owner`、`broker-asks.json`、`inbox/`、`outbox/` 和 `config.json`。
+It contains `broker.sock`, `broker.pid`, `broker.owner`, `broker-asks.json`, `inbox/`, `outbox/`, and `config.json`.
 
-## 2. 版本与安装原则
+## 2. Version and installation principles
 
-四端应使用同一代的 `@dataforxyz/agent-intercom-*` 适配器，不要混用旧的 pi-only `nicobailon/pi-intercom`。新旧适配器或协议版本混用，可能形成互不可见的 broker “岛”。
+All four sides should use the same generation of the `@dataforxyz/agent-intercom-*` adapters, and must not be mixed with the older pi-only `nicobailon/pi-intercom`. Mixing adapter or protocol versions across old and new can form broker "islands" that cannot see each other.
 
-安装或升级任一适配器后，应让**所有仍打开的会话**完成一次 reload/restart。
+After installing or upgrading any adapter, have **all still-open sessions** do a reload/restart.
 
 ### 2.1 Pi
 
-安装：
+Install:
 
 ```bash
 pi install npm:@dataforxyz/agent-intercom-pi
 ```
 
-更新：
+Update:
 
 ```bash
 pi update --extension npm:@dataforxyz/agent-intercom-pi
 ```
 
-安装或更新后，在每个已打开的 Pi 会话中运行：
+After install or update, run this in every open Pi session:
 
 ```text
 /reload
 ```
 
-也可以直接退出并重新启动 Pi。
+Alternatively, quit and restart Pi.
 
 ### 2.2 OpenCode
 
-安装 server plugin：
+Install the server plugin:
 
 ```bash
 mkdir -p ~/.config/opencode
@@ -65,7 +65,7 @@ cd ~/.config/opencode
 npm install @dataforxyz/agent-intercom-opencode
 ```
 
-在 `~/.config/opencode/opencode.json` 中注册 server plugin。JSON 中不要使用 `~`，必须写绝对路径：
+Register the server plugin in `~/.config/opencode/opencode.json`. Do not use `~` in the JSON; the absolute path is required:
 
 ```json
 {
@@ -76,7 +76,7 @@ npm install @dataforxyz/agent-intercom-opencode
 }
 ```
 
-在 `~/.config/opencode/tui.json` 中注册 TUI plugin，用于提供 `/intercom`、`/intercom-name`、`/intercom-id` 以及 Alt+M / Alt+I 快捷键：
+Register the TUI plugin in `~/.config/opencode/tui.json` to provide `/intercom`, `/intercom-name`, `/intercom-id`, and the Alt+M / Alt+I shortcuts:
 
 ```json
 {
@@ -87,15 +87,15 @@ npm install @dataforxyz/agent-intercom-opencode
 }
 ```
 
-需要注意：
+Notes:
 
-- `dist/plugin.mjs` 只放在 `opencode.json`。
-- `dist/tui.mjs` 只放在 `tui.json`。
-- 配置或包更新后要完整退出并重启 OpenCode；TUI plugin 不能用 Pi 的 `/reload` 方式热重载。
-- 普通 worker 不需要 wrapper，直接运行 `opencode` 即可。
-- 本地补丁后的 `tui.mjs` 支持在 OpenCode 刚启动、尚无 active session（即 home 页）时直接使用 `/intercom`、`/intercom-name` 或 `/intercom-id`：插件会自动创建一个空 session、进入该 session，再继续原操作。已有 active session 时始终复用当前 session，不会额外创建。
+- `dist/plugin.mjs` belongs only in `opencode.json`.
+- `dist/tui.mjs` belongs only in `tui.json`.
+- After config or package changes, fully quit and restart OpenCode; the TUI plugin cannot be hot-reloaded the way Pi's `/reload` does.
+- Plain workers need no wrapper; run `opencode` directly.
+- The locally patched `tui.mjs` supports using `/intercom`, `/intercom-name`, or `/intercom-id` directly when OpenCode has just started and has no active session (i.e. the home page): the plugin automatically creates an empty session, enters it, then continues the original operation. When an active session already exists, the current session is always reused and none is created additionally.
 
-更新：
+Update:
 
 ```bash
 cd ~/.config/opencode
@@ -104,31 +104,31 @@ npm update @dataforxyz/agent-intercom-opencode
 
 ### 2.3 Codex
 
-安装全局适配器：
+Install the global adapter:
 
 ```bash
 npm install -g @dataforxyz/agent-intercom-codex
 ```
 
-为普通 Codex 会话注册 MCP server：
+Register the MCP server for ordinary Codex sessions:
 
 ```bash
 codex mcp add codex-intercom -- codex-intercom-mcp
 ```
 
-验证：
+Verify:
 
 ```bash
 codex mcp list
 ```
 
-安装包同时提供：
+The package also provides:
 
-- `codex-intercom-mcp`：普通 Codex 会话中的工具。
-- `coi`：可被消息唤醒、带 Alt+M / Alt+I 的 Codex wrapper。
-- `codex-intercom-bridge`：发布多个后台 Codex worker 的高级用法。
+- `codex-intercom-mcp`: tools inside ordinary Codex sessions.
+- `coi`: a Codex wrapper that can be woken by messages, with Alt+M / Alt+I.
+- `codex-intercom-bridge`: advanced use for publishing multiple background Codex workers.
 
-更新后重启普通 Codex 会话，并重启所有 `coi` worker：
+After updating, restart ordinary Codex sessions and all `coi` workers:
 
 ```bash
 npm update -g @dataforxyz/agent-intercom-codex
@@ -136,350 +136,350 @@ npm update -g @dataforxyz/agent-intercom-codex
 
 ### 2.4 Claude Code
 
-安装全局适配器：
+Install the global adapter:
 
 ```bash
 npm install -g @dataforxyz/agent-intercom-claude
 ```
 
-为普通 Claude Code 会话注册全局可用的 MCP server（Claude 默认 scope 是 `local`，因此这里显式使用 user scope）：
+Register the globally available MCP server for ordinary Claude Code sessions (Claude's default scope is `local`, so user scope is used explicitly here):
 
 ```bash
 claude mcp add -s user claude-intercom -- claude-intercom-mcp
 ```
 
-验证：
+Verify:
 
 ```bash
 claude mcp list
 ```
 
-安装包同时提供：
+The package also provides:
 
-- `claude-intercom-mcp`：普通 Claude Code 会话中的工具。
-- `cci`：普通 wakeable Claude worker。
-- `ccim`：最小化 wakeable worker，等价于 `cci --minimal`。
-- `claude-intercom-worker`：单进程发布多个后台 worker 的高级用法。
+- `claude-intercom-mcp`: tools inside ordinary Claude Code sessions.
+- `cci`: an ordinary wakeable Claude worker.
+- `ccim`: a minimal wakeable worker, equivalent to `cci --minimal`.
+- `claude-intercom-worker`: advanced use for publishing multiple background workers from one process.
 
-更新后重启普通 Claude Code 会话，并重启所有 `cci` / `ccim` worker：
+After updating, restart ordinary Claude Code sessions and all `cci` / `ccim` workers:
 
 ```bash
 npm update -g @dataforxyz/agent-intercom-claude
 ```
 
-## 3. 启动、命名与稳定身份
+## 3. Starting, naming, and stable identity
 
 ### 3.1 Pi
 
-启动时命名：
+Name at launch:
 
 ```bash
-pi --name <名称>
+pi --name <name>
 ```
 
-会话内改名：
+Rename inside a session:
 
 ```text
-/name <新名称>
+/name <new-name>
 ```
 
-Pi 适配器直接使用 Pi 自身的 session ID 作为 intercom session ID：
+The Pi adapter uses Pi's own session ID directly as the intercom session ID:
 
-- `/name` 只改变可读名称，不改变稳定 ID。
-- 恢复同一 Pi session 会保留 intercom ID。
-- 新建 Pi session 即使沿用同名，也会得到新的 ID。
-- 需要显式复用时，可通过 `pi --session <path-or-id>` 恢复已有 session；高级场景也可使用 `pi --session-id <uuid>` 创建或打开指定 ID。
+- `/name` changes only the human-readable name, not the stable ID.
+- Resuming the same Pi session keeps the intercom ID.
+- Creating a new Pi session, even with the same name, gets a new ID.
+- To explicitly reuse an identity, resume an existing session via `pi --session <path-or-id>`; for advanced scenarios, `pi --session-id <uuid>` creates or opens a session with a specific ID.
 
 ### 3.2 OpenCode
 
-普通启动：
+Ordinary start:
 
 ```bash
-OPENCODE_INTERCOM_NAME=<名称> \
-OPENCODE_INTERCOM_SESSION_ID=<稳定ID> \
+OPENCODE_INTERCOM_NAME=<name> \
+OPENCODE_INTERCOM_SESSION_ID=<stable-id> \
 opencode /path/to/project
 ```
 
-恢复 OpenCode 自身对话：
+Resume an OpenCode conversation:
 
 ```bash
-OPENCODE_INTERCOM_NAME=<名称> \
-OPENCODE_INTERCOM_SESSION_ID=<稳定ID> \
+OPENCODE_INTERCOM_NAME=<name> \
+OPENCODE_INTERCOM_SESSION_ID=<stable-id> \
 opencode /path/to/project --session <opencode-session-id>
 ```
 
-`OPENCODE_INTERCOM_SESSION_ID` 是 Intercom 身份；`opencode --session` 指的是 OpenCode 对话。两者不是同一个概念。
+`OPENCODE_INTERCOM_SESSION_ID` is the Intercom identity; `opencode --session` refers to the OpenCode conversation. They are not the same concept.
 
-若不设置稳定 ID，适配器会生成包含 PID 的临时 ID，进程重启后会变化。
+Without a stable ID, the adapter generates a temporary ID containing the PID, which changes after a process restart.
 
 ### 3.3 Codex
 
-需要持续接收任务的 worker 推荐用 `coi` 启动：
+For workers that must continuously receive tasks, start with `coi`:
 
 ```bash
 coi \
-  --name <名称> \
-  --id <稳定ID> \
+  --name <name> \
+  --id <stable-id> \
   --cwd /path/to/project
 ```
 
-- `--name` 是可读名称。
-- `--id` 是稳定 intercom session ID。
-- `coi` 默认将状态保存到共享 intercom 目录；使用相同 `--id` 重启时可以继续其 app-server thread。
-- 只有通过 `coi` 启动的交互终端才有 Alt+M / Alt+I；普通 Codex + MCP 有工具，但没有这些快捷键。
+- `--name` is the human-readable name.
+- `--id` is the stable intercom session ID.
+- `coi` saves state to the shared intercom directory by default; restarting with the same `--id` continues its app-server thread.
+- Only the interactive terminal started via `coi` has Alt+M / Alt+I; ordinary Codex + MCP has the tools but not these shortcuts.
 
-普通 MCP 会话也可以在注册时固定身份：
+Ordinary MCP sessions can also pin their identity at registration:
 
 ```bash
 codex mcp add <mcp-name> \
-  --env CODEX_INTERCOM_NAME=<名称> \
-  --env CODEX_INTERCOM_SESSION_ID=<稳定ID> \
+  --env CODEX_INTERCOM_NAME=<name> \
+  --env CODEX_INTERCOM_SESSION_ID=<stable-id> \
   --env CODEX_INTERCOM_MODEL=codex \
   -- codex-intercom-mcp
 ```
 
-不要让两个并发 Codex 进程使用同一个固定 ID；多 worker 场景下每个 worker 使用独立的 `coi --id`。
+Do not let two concurrent Codex processes share one pinned ID; in a multi-worker scenario, give each worker its own `coi --id`.
 
 ### 3.4 Claude Code
 
-wakeable worker 推荐用 `cci` 或 `ccim` 启动：
+Start wakeable workers with `cci` or `ccim`:
 
 ```bash
 cci \
-  --name <名称> \
-  --id <稳定ID> \
+  --name <name> \
+  --id <stable-id> \
   --cwd /path/to/project
 ```
 
-最小 worker：
+Minimal worker:
 
 ```bash
 ccim \
-  --name <名称> \
-  --id <稳定ID> \
+  --name <name> \
+  --id <stable-id> \
   --cwd /path/to/project
 ```
 
-- 复用相同 `--id` 会复用该 worker 的持久状态和 Claude conversation。
-- Claude conversation ID 可用 `claude --resume <session-id>` 单独查看；它与 intercom `--id` 不同。
-- `ccim` 的 woken turn 使用 safe mode，仍可接收工作并自动回复，但 turn 内不能主动调用 MCP intercom 工具联系其他 peer。
-- 需要真正的交互 Claude TUI 被原地唤醒时，使用 `cci --tui --name ... --id ...`。
+- Reusing the same `--id` reuses that worker's persistent state and Claude conversation.
+- The Claude conversation ID can be viewed separately with `claude --resume <session-id>`; it differs from the intercom `--id`.
+- `ccim`'s woken turns use safe mode: it can still receive work and auto-reply, but cannot actively call the MCP intercom tools to contact other peers within a turn.
+- For a truly interactive Claude TUI to be woken in place, use `cci --tui --name ... --id ...`.
 
-普通 MCP 会话可固定身份：
+Ordinary MCP sessions can pin their identity:
 
 ```bash
 claude mcp add -s user <mcp-name> \
-  --env CLAUDE_INTERCOM_NAME=<名称> \
-  --env CLAUDE_INTERCOM_SESSION_ID=<稳定ID> \
+  --env CLAUDE_INTERCOM_NAME=<name> \
+  --env CLAUDE_INTERCOM_SESSION_ID=<stable-id> \
   --env CLAUDE_INTERCOM_MODEL=opus \
   -- claude-intercom-mcp
 ```
 
-并发 Claude 进程不要共用同一个固定 ID（详见[第 9 节](#9-稳定-session-id-注意事项)）。
+Concurrent Claude processes must not share one pinned ID (see [section 9](#9-stable-session-id-notes)).
 
-## 4. 统一改名能力
+## 4. Unified rename capability
 
-运行时改名只更新其他 peer 可见的 `name`，**不会改变稳定 intercom session ID**。改名前后仍是同一个联系目标，已有 pending ask 和按 ID 寻址不受影响。
+A runtime rename only updates the `name` visible to other peers; **it does not change the stable intercom session ID**. Before and after a rename it remains the same contact target, and existing pending asks and ID-based addressing are unaffected.
 
-| Harness | 当前会话的改名入口 | 重启后保留方式 |
+| Harness | Rename entry for the current session | How it survives a restart |
 |---|---|---|
-| Pi | 原生 `/name <新名称>`；适配器自动把 Pi 会话名同步到 Intercom | 恢复同一 Pi session |
-| OpenCode | `/intercom-name` 打开改名输入框，或调用 `intercom_set_name({ name: "<新名称>" })` | 继续设置 `OPENCODE_INTERCOM_NAME` |
-| Codex 普通 MCP 会话 | `intercom_set_name({ name: "<新名称>" })` | 继续设置 `CODEX_INTERCOM_NAME`；`coi` worker 启动时使用 `--name` |
-| Claude Code 普通 MCP 会话 | `intercom_set_name({ name: "<新名称>" })` | 继续设置 `CLAUDE_INTERCOM_NAME`；`cci` / `ccim` worker 启动时使用 `--name` |
+| Pi | native `/name <new-name>`; the adapter syncs the Pi session name to Intercom automatically | resume the same Pi session |
+| OpenCode | `/intercom-name` opens a rename input, or call `intercom_set_name({ name: "<new-name>" })` | keep setting `OPENCODE_INTERCOM_NAME` |
+| Codex ordinary MCP session | `intercom_set_name({ name: "<new-name>" })` | keep setting `CODEX_INTERCOM_NAME`; use `--name` at launch for `coi` workers |
+| Claude Code ordinary MCP session | `intercom_set_name({ name: "<new-name>" })` | keep setting `CLAUDE_INTERCOM_NAME`; use `--name` at launch for `cci` / `ccim` workers |
 
-OpenCode、Codex 和 Claude Code 的运行时改名只对当前进程生效；重启后会重新读取环境变量或 wrapper 参数。后台 worker 的命名应在启动时完成：
+Runtime renames for OpenCode, Codex, and Claude Code only affect the current process; after a restart they re-read the environment variable or wrapper argument. Background workers should be named at launch:
 
 ```bash
-coi --name <名称> --id <稳定ID> --cwd /path/to/project
-cci --name <名称> --id <稳定ID> --cwd /path/to/project
-ccim --name <名称> --id <稳定ID> --cwd /path/to/project
+coi --name <name> --id <stable-id> --cwd /path/to/project
+cci --name <name> --id <stable-id> --cwd /path/to/project
+ccim --name <name> --id <stable-id> --cwd /path/to/project
 ```
 
-headless `cci` / `ccim` 没有交互控制台，无法输入 `/name` 之类的 slash command，只能通过启动参数 `--name` 命名；普通 Claude MCP 会话则用 `intercom_set_name` 改名。
+Headless `cci` / `ccim` have no interactive console and cannot type slash commands like `/name`; they can only be named via the `--name` launch argument. Ordinary Claude MCP sessions use `intercom_set_name` to rename.
 
-> 本节的统一改名入口来自本地 `0.10.0` 安装包补丁，尚未等同于 npm registry 中所有同版本安装。执行 `npm update` 或重新安装可能覆盖补丁；在上游正式发布前，升级后应重新核对 slash command 与 `intercom_set_name` 工具是否存在。
+> The unified rename entry in this section comes from a local `0.10.0` package patch and does not yet match every same-version install on the npm registry. Running `npm update` or reinstalling may overwrite the patch; until upstream releases it, re-check after an upgrade that the slash commands and the `intercom_set_name` tool still exist.
 
-## 5. 快捷键与命令入口
+## 5. Shortcuts and command entries
 
-| 操作 | Pi | OpenCode | Codex | Claude Code |
+| Action | Pi | OpenCode | Codex | Claude Code |
 |---|---|---|---|---|
-| 运行时改名 | `/name <新名称>` | `/intercom-name` 或 `intercom_set_name` | 普通 MCP：`intercom_set_name`；`coi` 推荐启动时 `--name` | 普通 MCP：`intercom_set_name`；`cci` / `ccim` 推荐启动时 `--name` |
-| 选择 peer 并发送 | `/intercom` 或 Alt+M | `/intercom` 或 Alt+M | `coi` 中 Alt+M | plugin 提供 `/claude-intercom:intercom`；`cci` / `ccim` 中 Alt+M |
-| 复制当前精确联系目标 | `/intercom-id` 或 Alt+I | `/intercom-id` 或 Alt+I | `coi` 中 Alt+I | plugin 提供 `/claude-intercom:intercom-id`；`cci` / `ccim` 中 Alt+I |
-| 列表导航 | ↑ / ↓ | ↑ / ↓ | wrapper 提示流 | wrapper 提示流 |
-| 发送 | Enter | Enter | 按提示确认 | 按提示确认 |
-| 多行换行 | Shift+Enter | Shift+Enter | 由 Codex composer 处理 | 由 Claude composer/worker 处理 |
-| 取消 | Escape | Escape | Escape | Escape |
+| Runtime rename | `/name <new-name>` | `/intercom-name` or `intercom_set_name` | ordinary MCP: `intercom_set_name`; `coi` prefers `--name` at launch | ordinary MCP: `intercom_set_name`; `cci` / `ccim` prefer `--name` at launch |
+| Pick a peer and send | `/intercom` or Alt+M | `/intercom` or Alt+M | Alt+M in `coi` | plugin provides `/claude-intercom:intercom`; Alt+M in `cci` / `ccim` |
+| Copy the exact current contact target | `/intercom-id` or Alt+I | `/intercom-id` or Alt+I | Alt+I in `coi` | plugin provides `/claude-intercom:intercom-id`; Alt+I in `cci` / `ccim` |
+| List navigation | ↑ / ↓ | ↑ / ↓ | wrapper prompt flow | wrapper prompt flow |
+| Send | Enter | Enter | confirm per prompt | confirm per prompt |
+| Multi-line newline | Shift+Enter | Shift+Enter | handled by Codex composer | handled by Claude composer/worker |
+| Cancel | Escape | Escape | Escape | Escape |
 
-如果 Alt+M / Alt+I 没反应，先检查终端是否把 Option/Alt 当作 Meta 键传给应用，再确认使用的是带快捷键的入口：Codex 必须是 `coi`，Claude 必须是 `cci` / `ccim`，OpenCode 必须加载 `tui.mjs`。
+If Alt+M / Alt+I do nothing, first check whether the terminal passes Option/Alt to the app as the Meta key, then confirm you are using a shortcut-capable entry point: Codex must be `coi`, Claude must be `cci` / `ccim`, and OpenCode must have `tui.mjs` loaded.
 
-Claude 的 `/claude-intercom:intercom` 与 `/claude-intercom:intercom-id` 需要安装或按 session 加载 Claude plugin；只执行 `claude mcp add` 的普通会话仍有 Intercom 工具，但没有这两个 plugin slash command。
+Claude's `/claude-intercom:intercom` and `/claude-intercom:intercom-id` require the Claude plugin to be installed or loaded per session; an ordinary session that only ran `claude mcp add` still has the Intercom tools but lacks these two plugin slash commands.
 
-OpenCode 在已有 session 时，`/intercom`、`/intercom-name`、`/intercom-id` 作用于当前 session；在 home/刚启动、没有 active session 时，本地补丁会先自动创建并进入一个空 session，再继续操作。若仍看到 `Open a session before using Intercom.`，说明新版 `tui.mjs` 尚未加载或本地补丁已被覆盖，应完整重启 OpenCode 并检查 `tui.json` 路径。
+In OpenCode with an existing session, `/intercom`, `/intercom-name`, and `/intercom-id` act on the current session; on home/just-started with no active session, the local patch first auto-creates and enters an empty session, then continues. If you still see `Open a session before using Intercom.`, the new `tui.mjs` is not loaded or the local patch was overwritten — fully restart OpenCode and check the `tui.json` path.
 
-`/intercom-id` 或 Alt+I 复制的内容是跨 Harness 的：名称唯一时使用名称，名称重复时自动退回稳定 ID。
+The content copied by `/intercom-id` or Alt+I is cross-harness: it uses the name when unique, and falls back to the stable ID when names are duplicated.
 
-## 6. Agent 工具：set name / list / send / ask / reply
+## 6. Agent tools: set name / list / send / ask / reply
 
-`list`、`send`、`ask` 和 `reply` 在四个适配器中含义一致。运行时改名工具目前由本地补丁后的 OpenCode、Codex 普通 MCP 和 Claude Code 普通 MCP 会话提供；Pi 使用原生 `/name`。
+`list`, `send`, `ask`, and `reply` mean the same thing across all four adapters. The runtime rename tool is currently provided by the locally patched OpenCode, Codex ordinary MCP, and Claude Code ordinary MCP sessions; Pi uses the native `/name`.
 
-### 6.1 设置当前可读名称
+### 6.1 Set the current human-readable name
 
-OpenCode、Codex 普通 MCP 或 Claude Code 普通 MCP 会话：
+OpenCode, Codex ordinary MCP, or Claude Code ordinary MCP sessions:
 
 ```typescript
 intercom_set_name({
-  name: "<新名称>"
+  name: "<new-name>"
 })
 ```
 
-它只更新可读名称，不改变 `intercom_status({})` 返回的稳定 session ID。持久化规则见[统一改名能力](#4-统一改名能力)。
+It only updates the human-readable name; it does not change the stable session ID returned by `intercom_status({})`. Persistence rules are in [Unified rename capability](#4-unified-rename-capability).
 
-Pi 使用：
+Pi uses:
 
 ```text
-/name <新名称>
+/name <new-name>
 ```
 
-### 6.2 查看连接状态
+### 6.2 View connection status
 
 ```typescript
 intercom_status({})
 ```
 
-用于确认当前 session ID、broker 连接和待处理消息。
+Confirms the current session ID, broker connection, and pending messages.
 
-### 6.3 列出所有 peer
+### 6.3 List all peers
 
 ```typescript
 intercom_list({})
 ```
 
-返回当前会话及所有已连接的 Pi、OpenCode、Codex、Claude Code 会话，包括短 ID、cwd、model 和实时状态。
+Returns the current session and all connected Pi, OpenCode, Codex, and Claude Code sessions, including short ID, cwd, model, and live status.
 
-如果当前 worker 由 orchestrator 管理，应优先查看同一 manager 的团队：
+If the current worker is managed by an orchestrator, prefer viewing the team under the same manager:
 
 ```typescript
 intercom_team({})
 ```
 
-### 6.4 非阻塞通知：send
+### 6.4 Non-blocking notification: send
 
 ```typescript
 intercom_send({
-  to: "<对端名称或ID>",
-  message: "请检查 src/api/client.ts 的重试逻辑，完成后回报。"
+  to: "<peer-name-or-id>",
+  message: "Please check the retry logic in src/api/client.ts and report back when done."
 })
 ```
 
-`send` 只等待 broker 接收和对端持久入队确认，不等待对方完成工作或回复。适合任务下发、进度和完成通知。
+`send` only waits for the broker to accept the message and the peer to confirm durable enqueue; it does not wait for the peer to finish work or reply. Suitable for task dispatch, progress, and completion notifications.
 
-### 6.5 需要答案：ask
+### 6.5 When you need an answer: ask
 
 ```typescript
 intercom_ask({
-  to: "<对端名称或ID>",
-  message: "这个变更需要兼容旧错误格式吗？"
+  to: "<peer-name-or-id>",
+  message: "Does this change need to stay compatible with the old error format?"
 })
 ```
 
-`ask` 只进行有限时长的前台等待。超时不代表取消：请求会转为异步，迟到回复仍会作为新消息到达。长任务不要一直阻塞等待，改用 `send`，之后再检查状态。
+`ask` only does a finite-duration foreground wait. A timeout is not a cancel: the request turns async, and a late reply still arrives as a new message. For long tasks, do not block-wait; use `send` instead and check status afterward.
 
-### 6.6 回复收到的 ask：reply
+### 6.6 Reply to a received ask: reply
 
-在收到 ask 触发的当前 turn 中：
+In the current turn triggered by the received ask:
 
 ```typescript
 intercom_reply({
-  message: "需要兼容旧格式，只新增字段。"
+  message: "Must stay compatible with the old format; only add new fields."
 })
 ```
 
-若之后再回复，且有多个发送者正在等待：
+To reply later, when multiple senders are waiting:
 
 ```typescript
 intercom_pending({})
 
 intercom_reply({
-  to: "<发送者名称或ID>",
-  message: "需要兼容旧格式，只新增字段。"
+  to: "<sender-name-or-id>",
+  message: "Must stay compatible with the old format; only add new fields."
 })
 ```
 
-`to` 是发送者名称或稳定 ID，不是 message/thread ID。不要手工构造 `replyTo`。
+`to` is the sender's name or stable ID, not a message/thread ID. Do not hand-construct `replyTo`.
 
 ## 7. `PI_CODING_AGENT_DIR`
 
-四个适配器都会读取 `PI_CODING_AGENT_DIR`，它会整体替换默认的 `~/.pi/agent` 基目录：
+All four adapters read `PI_CODING_AGENT_DIR`, which replaces the default `~/.pi/agent` base directory entirely:
 
 ```bash
 export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
 ```
 
-实际 intercom 目录变为：
+The actual intercom directory becomes:
 
 ```text
 $PI_CODING_AGENT_DIR/intercom/
 ```
 
-规则：
+Rules:
 
-1. 希望互相发现的所有 Harness 必须使用**同一个绝对路径**。
-2. 不同值会形成彼此不可见的独立 broker 岛；这是有意隔离时才使用的能力。
-3. 不要只给 Pi 设置而漏掉 OpenCode、`coi` 或 `cci`。
-4. 修改此变量后，需要 reload/restart 全部现有会话。
-5. shell alias、tmux/Ghostty 启动命令、LaunchAgent 和 IDE 启动环境都要保持一致。
+1. All harnesses that should discover each other must use the **same absolute path**.
+2. Different values form independent broker islands that can't see each other; this capability is only for deliberate isolation.
+3. Don't set it for Pi alone and miss OpenCode, `coi`, or `cci`.
+4. After changing this variable, reload/restart all existing sessions.
+5. Keep it consistent across shell aliases, tmux/Ghostty launch commands, LaunchAgents, and IDE launch environments.
 
-临时隔离示例：
+Temporary isolation example:
 
 ```bash
 PI_CODING_AGENT_DIR="$HOME/.pi/agent-lab" pi --name agent-a
 PI_CODING_AGENT_DIR="$HOME/.pi/agent-lab" \
   OPENCODE_INTERCOM_NAME=agent-b \
-  OPENCODE_INTERCOM_SESSION_ID=<稳定ID> \
+  OPENCODE_INTERCOM_SESSION_ID=<stable-id> \
   opencode /path/to/project
 ```
 
-这两个会话能互见，但看不到默认 `~/.pi/agent/intercom` 下的会话。
+These two sessions can see each other but not the sessions under the default `~/.pi/agent/intercom`.
 
-## 8. Reload、Restart 与升级
+## 8. Reload, restart, and upgrades
 
-| 场景 | 操作 |
+| Scenario | Action |
 |---|---|
-| Pi 安装/更新 extension | 每个已打开 Pi 会话运行 `/reload`，或重启 Pi |
-| OpenCode plugin/config 更新 | 完整退出并重启 OpenCode |
-| Codex MCP/package 更新 | 重启普通 Codex 会话；重启 `coi` worker，复用原 `--id` |
-| Claude MCP/package 更新 | 重启普通 Claude 会话；重启 `cci` / `ccim`，复用原 `--id` |
-| `PI_CODING_AGENT_DIR` 修改 | 四端全部 reload/restart |
-| broker 自动重启 | 客户端会自动重连，一般不需要人工处理 |
+| Pi extension install/update | run `/reload` in every open Pi session, or restart Pi |
+| OpenCode plugin/config update | fully quit and restart OpenCode |
+| Codex MCP/package update | restart ordinary Codex sessions; restart `coi` workers reusing their original `--id` |
+| Claude MCP/package update | restart ordinary Claude sessions; restart `cci` / `ccim` reusing their original `--id` |
+| `PI_CODING_AGENT_DIR` change | reload/restart all four sides |
+| Broker auto-restart | clients reconnect automatically; usually no manual action needed |
 
-升级跨协议版本时应一次性完成四端更新。不要删除仍被活跃会话使用的 `broker.sock`、`broker.owner`、inbox/outbox 或 ask 状态文件。
+Upgrade across protocol versions by updating all four sides at once. Do not delete `broker.sock`, `broker.owner`, inbox/outbox, or ask state files still in use by active sessions.
 
-推荐排障顺序：
+Recommended troubleshooting order:
 
-1. 当前端运行 `intercom_status({})`。
-2. 确认所有端使用相同 `PI_CODING_AGENT_DIR`。
-3. 确认适配器已加载：Pi extension、OpenCode 两个 plugin、Codex/Claude MCP 或 wrapper。
-4. OpenCode 在 home 运行 `/intercom`、`/intercom-name` 或 `/intercom-id` 时应自动创建并进入空 session；若仍提示先打开 session，完整退出并重启 OpenCode，确认 `tui.json` 指向补丁后的 `dist/tui.mjs`。
-5. Codex wrapper 先运行 `coi --version`；它应直接输出 Codex 版本并退出。若无输出或意外进入 worker，检查 npm 的 `coi` 入口是否正确执行 `node .../dist/coi.mjs "$@"`，再重装或修正 wrapper。
-6. 对 Pi 执行 `/reload`，其他 Harness 完整重启。
-7. 再运行 `intercom_list({})`。
-8. 仅当确认所有客户端已退出后，才考虑处理遗留 runtime 文件；不要在活跃会话期间删除 socket。
+1. Run `intercom_status({})` on the current side.
+2. Confirm all sides use the same `PI_CODING_AGENT_DIR`.
+3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers.
+4. On OpenCode home, `/intercom`, `/intercom-name`, or `/intercom-id` should auto-create and enter an empty session; if it still asks to open a session first, fully quit and restart OpenCode and confirm `tui.json` points at the patched `dist/tui.mjs`.
+5. For the Codex wrapper, first run `coi --version`; it should print the Codex version and exit. If there's no output or it unexpectedly enters a worker, check that npm's `coi` entry executes `node .../dist/coi.mjs "$@"`, then reinstall or fix the wrapper.
+6. Run `/reload` on Pi; fully restart the other harnesses.
+7. Run `intercom_list({})` again.
+8. Only when all clients are confirmed exited should leftover runtime files be considered for cleanup; never delete the socket during active sessions.
 
-## 9. 稳定 session ID 注意事项
+## 9. Stable session ID notes
 
-1. **名称不是身份。** 同名会话允许存在；按重名发送会失败，应改用稳定 ID。
-2. **不要并发复用 ID。** 同一个稳定 ID 同时只应由一个进程注册。
-3. **恢复同一身份。** Pi 恢复原 session；OpenCode 重用 `OPENCODE_INTERCOM_SESSION_ID`；Codex/Claude wrapper 重用 `--id`。
-4. **Harness conversation ID 与 intercom ID 不同。** OpenCode `--session`、Codex thread ID、Claude `--resume` 都是各自对话标识。
-5. **pending ask 依赖身份。** 重启后若换了 intercom ID，旧 ask 的回复授权不会自动转移到新身份。
-6. **复制精确目标。** 优先使用 Alt+I 或 `/intercom-id` 获取可粘贴的跨 Harness contact。
-7. **安全/高价值流程用 ID。** 名称适合日常协作；发布、破坏性操作审批和跨项目协调应直接用稳定 ID。
+1. **A name is not an identity.** Duplicate names are allowed; sending to a duplicated name fails, so use the stable ID.
+2. **Don't reuse an ID concurrently.** One stable ID should be registered by only one process at a time.
+3. **Restore the same identity.** Pi resumes the original session; OpenCode reuses `OPENCODE_INTERCOM_SESSION_ID`; Codex/Claude wrappers reuse `--id`.
+4. **A harness conversation ID is not the intercom ID.** OpenCode `--session`, Codex thread ID, and Claude `--resume` are each harness-specific conversation identifiers.
+5. **Pending asks depend on identity.** If the intercom ID changes after a restart, the reply authorization for old asks does not automatically transfer to the new identity.
+6. **Copy exact targets.** Prefer Alt+I or `/intercom-id` to get a pasteable cross-harness contact.
+7. **Use IDs for security/high-value flows.** Names are fine for daily collaboration; releases, destructive-operation approvals, and cross-project coordination should use the stable ID directly.
 
-## 10. 本地环境核验
+## 10. Local environment verification
 
-编写本文时，本地已安装同版本的四端适配器：
+At the time of writing, the four adapters were installed locally at the same version:
 
 ```text
 @dataforxyz/agent-intercom-pi       0.10.0
@@ -488,32 +488,32 @@ PI_CODING_AGENT_DIR="$HOME/.pi/agent-lab" \
 @dataforxyz/agent-intercom-claude   0.10.0
 ```
 
-已确认的基础配置：
+Confirmed base configuration:
 
-- Pi settings 已加载 `npm:@dataforxyz/agent-intercom-pi`。
-- OpenCode `opencode.json` 已加载 `dist/plugin.mjs`。
-- OpenCode `tui.json` 已加载 `dist/tui.mjs`。
-- Codex MCP 中 `codex-intercom` 已启用。
-- Claude MCP 中 `claude-intercom` 已连接。
+- Pi settings have loaded `npm:@dataforxyz/agent-intercom-pi`.
+- OpenCode `opencode.json` has loaded `dist/plugin.mjs`.
+- OpenCode `tui.json` has loaded `dist/tui.mjs`.
+- `codex-intercom` is enabled in the Codex MCP.
+- `claude-intercom` is connected in the Claude MCP.
 
-版本升级后以实际 `package.json`、`codex mcp list`、`claude mcp list` 和 `intercom_status({})` 为准，不要长期依赖本文的版本号。
+After a version upgrade, trust the actual `package.json`, `codex mcp list`, `claude mcp list`, and `intercom_status({})`, and do not rely on this document's version numbers long-term.
 
-OpenCode 的 home 自动建空 session 能力目前同样属于本地 `0.10.0` 补丁。`npm update @dataforxyz/agent-intercom-opencode` 或重新安装可能覆盖它；在上游正式发布前，升级后需重新核对并完整重启 OpenCode，使正确的 `tui.mjs` 生效。
+OpenCode's home auto-create-empty-session capability is likewise part of the local `0.10.0` patch for now. `npm update @dataforxyz/agent-intercom-opencode` or a reinstall may overwrite it; until upstream releases it, re-check after an upgrade and fully restart OpenCode so the correct `tui.mjs` takes effect.
 
-## 11. 推荐工作流
+## 11. Recommended workflow
 
 ```text
-1. 启动并设置唯一的可读名称
-2. intercom_list 或 intercom_team 确认目标
-3. 用 send 下发任务
-4. 只有在下一步依赖答案时才用 ask
-5. 收到 ask 的会话用 reply
-6. 高风险操作使用稳定 ID，不使用模糊名称
-7. 更新适配器后四端一起 reload/restart
+1. Launch and set a unique human-readable name
+2. intercom_list or intercom_team to confirm the target
+3. Dispatch tasks with send
+4. Only use ask when the next step depends on the answer
+5. Reply with reply from the session that received the ask
+6. Use stable IDs for high-risk operations, not ambiguous names
+7. After updating adapters, reload/restart all four sides together
 ```
 
-相关文档：
+Related docs:
 
-- [Intercom 线协议参考](./REFERENCE-intercom-protocol.md)
-- [v1.12 对话桥 PRD](./PRD-v1.12-conversation-bridge.md)
-- [v1.12 决策记录](./DECISIONS-v1.12.md)
+- [Intercom wire protocol reference](./REFERENCE-intercom-protocol.md)
+- [v1.12 conversation bridge PRD](./PRD-v1.12-conversation-bridge.md)
+- [v1.12 decision log](./DECISIONS-v1.12.md)

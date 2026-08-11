@@ -1,137 +1,134 @@
-# TmuxDeck 架构说明
+# TmuxDeck architecture
 
-> 面向开发者与 agent。用户请看 [README](../README.md)。
-> 本文描述 v1.12 拆分后的模块结构与数据流。
+> For developers and agents. Users should see the [README](../README.md).
+> This describes the module structure and data flows after the v1.12 split.
 
 ---
 
-## 模块地图
+## Module map
 
 ```
 src-tauri/src/
-├── main.rs           入口，仅调用 lib::run()
-├── lib.rs            Tauri Builder、托盘装配、command 注册
+├── main.rs           Entry point; only calls lib::run()
+├── lib.rs            Tauri Builder, tray wiring, command registration
 │
-├── tmux.rs           ← 核心层：所有 tmux CLI 调用的唯一出口
-├── registry.rs       终端 / agent 的探测与图标解析
-├── config.rs         ~/.config/tmuxdeck/config.json 读写
-├── models.rs         跨模块共享的数据结构
-├── tray.rs           菜单栏菜单构建
+├── tmux.rs           ← Core layer: the only place that shells out to the tmux CLI
+├── registry.rs       Terminal / agent detection and icon resolution
+├── config.rs         ~/.config/tmuxdeck/config.json read/write
+├── models.rs         Shared data structures across modules
+├── tray.rs           Menu bar menu construction
+├── audit.rs          Kill/rename audit trail + session/pane counters
 │
-├── intercom.rs       ← pi-intercom broker 客户端（agent 总线接入）
-├── bridge.rs         ← 对话桥：pane ⊕ intercom 会话 → 统一对话模型
+├── intercom.rs       ← Agent Intercom broker client (protocol v3, @dataforxyz/agent-intercom-* 0.10.0)
+├── bridge.rs         ← Conversation bridge: panes ⊕ intercom sessions → unified conversation model;
+│                       ConversationRegistry, pane↔session association, deliver/forward, Transport trait
+├── bridge_state.rs   Read-only registry/transport snapshot published into Tauri state for the desktop UI
+├── transcript.rs     TranscriptSource implementations: structured session-log reading (Pi / Claude Code) + capture-pane fallback
+├── connection.rs     v1.14 WebSocket connection handling: accept loop, per-connection loop, handshake,
+│                     rate limiting, heartbeat, framing, subscription state — pure transport, no dialog semantics
+├── engine.rs         v1.14 bridge engine: one background loop — intercom events + mobile commands
+│                     + periodic refresh / transcript polling; owns registry & transport (single-threaded)
+├── transport.rs      v1.14 WebSocket server (Transport impl): token auth, Host allowlist, rate limits
 │
-└── commands/         Tauri command 薄封装，不含业务逻辑
-    ├── session.rs    会话级：创建 / 打开 / 列举 / 删除 / 改名
-    ├── pane.rs       pane 级：新增 / 删除 / 抓取 / 发送输入
-    └── utils.rs      图标、WSL 路径转换
+└── commands/         Thin Tauri command wrappers — no business logic
+    ├── session.rs    Session-level: create / open / list / delete / rename
+    ├── pane.rs       Pane-level: add / delete / capture / send input
+    ├── native.rs     Native Ghostty workspace model (see "Native Ghostty workspaces" below)
+    └── utils.rs      Icons, WSL path conversion, agent-command isolation
 ```
 
-**分层约束**：`commands/` 只做参数解析与错误转译，业务逻辑放在 `tmux.rs` / `bridge.rs`。
-`intercom.rs` 与 `bridge.rs` **不依赖 tauri crate**——这样它们可以被单测直接覆盖，
-将来也能抽成独立守护进程而无需改动。
+**Layering constraint:** `commands/` only parses arguments and translates errors; business logic belongs in `tmux.rs` / `bridge.rs`. `intercom.rs` and `bridge.rs` **do not depend on the tauri crate** — that keeps them directly unit-testable and extractable into a standalone daemon later without changes.
 
-前端目前仍是 `src/App.tsx` 单文件。
+The frontend is componentized: `src/main.tsx` mounts `App.tsx`, which composes `src/components/` (`CardGrid`, `SessionCard`, `CreateWorkspaceModal`, `NewWorkspaceCard`, `SearchHeader`, `TmuxMissingScreen`); `src/i18n.ts` holds the en / zh-CN strings, `src/types.ts` the shared types, and `src/utils.ts` the shared helpers.
 
 ---
 
-## 数据流
+## Data flows
 
-### 桌面看板（既有）
+### Desktop dashboard (pre-existing)
 
 ```
-App.tsx ──invoke("get_tmux_sessions")──▶ commands/session.rs ──▶ tmux.rs ──▶ tmux CLI
+React UI (src/components/) ──invoke("get_tmux_sessions")──▶ commands/session.rs ──▶ tmux.rs ──▶ tmux CLI
 ```
 
-4 秒轮询。这条路径 v1.12 未改动。
+Polled every 4 seconds. This path was unchanged in v1.12.
 
-### 对话桥（v1.12 新增）
+### Conversation bridge (added in v1.12)
 
 ```
                      ┌─────────────────┐
 tmux list-panes -a ──▶                 │
-                     │  bridge.rs      │──▶ Conversation[]（按「等人的」置顶）
-broker 会话注册表 ────▶  Registry       │
+                     │  bridge.rs      │──▶ Conversation[] (waiting-for-human first)
+broker session registry ─▶  Registry   │
                      └─────────────────┘
 ```
 
-三条通路各自的来源与状态：
+The three paths, their sources and status:
 
-| 用途 | 来源 | 状态 |
+| Purpose | Source | Status |
 |---|---|---|
-| 有哪些对话、各自什么状态 | broker 注册表 + `tmux list-panes -a` | 已实现 |
-| 人 → agent | `intercom send`（优先）/ `send-keys`（兜底） | 已实现 |
-| agent → 人 | `TranscriptSource` | **未定，见下** |
+| Which conversations exist and their status | broker registry + `tmux list-panes -a` | implemented |
+| human → agent | `intercom send` (preferred) / `send-keys` (fallback) | implemented |
+| agent → human | `TranscriptSource` | **undecided, see below** |
 
 ---
 
-## 两处不显眼但关键的实现
+## Two easy-to-miss but critical implementations
 
-### 1. pane ↔ intercom 会话的关联
+### 1. pane ↔ intercom session association
 
-intercom 上报的 `pid` 是 **agent 进程本身**，而 tmux 的 `pane_pid` 通常是 pane 里
-那个 **shell**——agent 一般是 shell 的子进程，有时还隔着包装脚本（`cci` / `coi`）。
-两者不相等，无法直接匹配。
+The `pid` intercom reports is the **agent process itself**, whereas tmux's `pane_pid` is usually the **shell** in the pane — the agent is typically a child of the shell, sometimes behind a wrapper script (`cci` / `coi`). They are not equal, so direct matching fails.
 
-`bridge.rs::find_owning_pane` 因此沿父进程链上溯（`ps -o ppid=`），
-最多 12 层，遇到环或 pid ≤ 1 即停。
+`bridge.rs::find_owning_pane` therefore walks up the parent-process chain (`ps -o ppid=`), up to 12 levels, stopping on cycles or pid ≤ 1.
 
-> 曾考虑用 cwd 匹配，但同一目录下开多个 pane 是常态，会产生歧义。父链是确定的。
+> cwd matching was considered, but multiple panes under one directory is the norm and creates ambiguity. The parent chain is deterministic.
 
-### 2. AgentKind 的防抖
+### 2. AgentKind debouncing
 
-`pane_current_command` 拿到的是**前台进程名**。agent 执行 bash 工具时，
-这个值会临时变成 `bash`——若据此更新，agent 会被误判成普通 shell。
+`pane_current_command` returns the **foreground process name**. When an agent runs a bash tool, that value temporarily becomes `bash` — updating `kind` from it would misclassify the agent as a plain shell.
 
-`ConversationRegistry::refresh_panes` 因此只在识别出具体 agent 时更新 `kind`，
-识别为 `Shell` / `Unknown` 时保留原值。
+`ConversationRegistry::refresh_panes` therefore only updates `kind` when a concrete agent is recognized; when the detection yields `Shell` / `Unknown`, the previous value is kept.
 
 ---
 
-## 输入通道：两条，不混用
+## Input channels: two, never merged
 
-| 通道 | 用途 | 实现 |
+| Channel | Use | Implementation |
 |---|---|---|
-| 字面文本 | 用户消息 | `send_keys()` → `tmux send-keys -l` |
-| 控制键 | Escape / C-c / 方向键 | `send_key_name()` → 白名单校验后 `tmux send-keys <key>` |
+| Literal text | User messages | `send_keys()` → `tmux send-keys -l` |
+| Control keys | Escape / C-c / arrow keys | `send_key_name()` → allow-list validated, then `tmux send-keys <key>` |
 
-**必须分开。** `tmux send-keys` 不加 `-l` 时会把 `C-c`、`Escape` 这类字符串
-当键名解析——用户消息里出现这些词就会被当控制键执行。
-控制键走独立白名单，也避免 send-keys 变成通用键盘注入口。
+**They must stay separate.** Without `-l`, `tmux send-keys` parses strings like `C-c` and `Escape` as key names — a user message containing those words would be executed as control keys. The control-key channel goes through its own allow-list, which also stops send-keys from becoming a general keyboard injection point.
 
-多行文本逐行发送（行内容 + 显式 `Enter`），因为部分 TUI 对裸 `\n` 的处理不一致。
+Multi-line text is sent line by line (line content + explicit `Enter`), because some TUIs handle a bare `\n` inconsistently.
 
 ---
 
-## 未解决：对话内容从哪来
+## Unresolved: where conversation content comes from
 
-「有哪些对话」「什么状态」「怎么说话」都已打通，缺的是 **agent 说了什么**。
+"Which conversations", "what status" and "how to talk" are all wired up; what's missing is **what the agent said**.
 
-| 方案 | 状态 | 问题 |
+| Approach | Status | Problem |
 |---|---|---|
-| `capture-pane` | 已实现为兜底（`CapturePaneSource`） | 只有当前屏幕、无历史、TUI 重绘导致抖动、无轮次边界 |
-| `pipe-pane` 原始流 | 未实现 | 混着大量光标移动与重绘转义序列，还原轮次极难 |
-| **读 agent 的结构化会话记录** | **推荐主路径** | 本身即干净的分轮次数据；每个 agent 需一个读取器 |
+| `capture-pane` | implemented as fallback (`CapturePaneSource`) | current screen only, no history, flicker from TUI redraws, no turn boundaries |
+| `pipe-pane` raw stream | not implemented | full of cursor-movement and redraw escape sequences; reconstructing turns is very hard |
+| **Read the agent's structured session logs** | **recommended primary path** | clean per-turn data by nature; needs one reader per agent |
 
-`TranscriptSource` trait 已就位。关联问题已解决一半——父链上溯能拿到 agent 的
-pid 与 cwd，据此定位其会话记录文件是可做的。
-
----
-
-## 依赖姿态
-
-v1.12 **未引入任何新的 Rust 依赖**：intercom 客户端只用 `std` + 已有的
-`serde` / `serde_json` / `dirs`。Unix domain socket 走 `std::os::unix::net`，
-分帧手写。
-
-Windows 下 broker 使用命名管道，`intercom.rs` 目前 `#[cfg(unix)]` 门控，
-Windows 返回 `ERR_INTERCOM_UNSUPPORTED_PLATFORM` 并自动降级到 send-keys 通道。
+The `TranscriptSource` trait is in place. Association is half solved — walking up the parent chain yields the agent's pid and cwd, from which its session log files can be located.
 
 ---
 
-## 相关文档
+## Dependency stance
 
-- [PRD-v1.12 对话桥](./PRD-v1.12-conversation-bridge.md) — 需求与验收
-- [intercom 协议参考](./REFERENCE-intercom-protocol.md) — 线协议细节
-- [v1.12 决策记录](./DECISIONS-v1.12.md) — 被否决的方案与原因
-- [现成方案调研](./PRIOR-ART-agent-bus.md) — 为什么不自造总线
+v1.12 **introduced no new Rust dependencies**: the intercom client uses only `std` plus the existing `serde` / `serde_json` / `dirs`. The Unix domain socket goes through `std::os::unix::net`, and the framing is hand-written.
+
+On Windows the broker uses named pipes; `intercom.rs` is currently gated with `#[cfg(unix)]`, and Windows returns `ERR_INTERCOM_UNSUPPORTED_PLATFORM`, automatically degrading to the send-keys channel.
+
+---
+
+## Related docs
+
+- [PRD-v1.12 conversation bridge](./PRD-v1.12-conversation-bridge.md) — requirements and acceptance
+- [intercom protocol reference](./REFERENCE-intercom-protocol.md) — wire protocol details
+- [v1.12 decision log](./DECISIONS-v1.12.md) — rejected approaches and why
+- [Existing-solution survey](./PRIOR-ART-agent-bus.md) — why we don't build our own bus

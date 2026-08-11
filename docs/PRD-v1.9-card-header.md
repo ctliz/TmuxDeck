@@ -1,91 +1,90 @@
-# TmuxDeck v1.9 卡片头部交互精简 PRD
+# TmuxDeck v1.9 Card Header Interaction Simplification PRD
 
-> 目标：卡片头部更极简——去掉重命名/删除按钮，名称点击即改，右上角仅留 ×。
-> 纯前端改动，不动后端逻辑。
+> Goal: make the card header more minimal — remove the rename/delete buttons, make the name click-to-edit, keep only an × in the top-right.
+> Pure frontend change; no backend logic touched.
 
 ---
 
-## 1. 现状与目标
+## 1. Current state and goal
 
-**现状（卡片头部）**：
+**Current (card header)**:
 ```
-[●] project-alpha        [✏️][🗑]   ← hover 才显示的重命名/删除按钮
-X 窗口 · Y 分屏   最后活跃 X 分钟前    ← 统计文字行
-```
-
-**目标**：
-```
-[●] project-alpha              [×]   ← 名称可点击修改，右上角仅 ×
+[●] project-alpha        [✏️][🗑]   ← hover-only rename/delete buttons
+X windows · Y panes   last active X minutes ago    ← stats text line
 ```
 
----
-
-## 2. 改动清单
-
-### 2.1 删除两个按钮（Edit2 / Trash2）
-
-- 移除 hover 显示的重命名按钮（Edit2）
-- 移除 hover 显示的删除按钮（Trash2）
-- 移除 `Edit2` / `Trash2` 的 lucide import（若不再使用）
-
-### 2.2 名称点击即改
-
-- 名称 `<h2>` 添加点击事件 → 进入行内编辑（复用现有 `isRenaming` / `renamedName` / `handleRename` 逻辑）
-- 交互细节：
-  - 点击名称 → 变输入框（现有编辑 UI 保留）
-  - Enter / blur 提交（现有逻辑）
-  - hover 名称时给一个「可编辑」暗示（如 `hover:underline` 或 cursor-text）
-- 现有 `sanitizeNameFrontend`（前端名称过滤）逻辑保留
-
-### 2.3 右上角 ×（删除入口）
-
-- 位置：卡片头部右上角，替代原来两个按钮
-- 行为：点击 → `handleKill(session.name)`（现有删除确认逻辑，confirm 弹窗保留）
-- 样式：小 × 图标，hover 变红（现有 trash hover 的语义）
-- **始终可见**（不再 hover 才显示）——用户要求「右上角即可」，不需要隐藏
-- tooltip：`card.destroy`（现有 i18n key 复用）
-
-### 2.4 删除统计文字行
-
-- 移除 `<div>` 里的 `{tPlural("card.windows", ...)} · {tPlural("card.panes", ...)}` 部分
-- **注意**：最后活跃时间（`activityInfo.text`）是否保留？
-  - 用户说「下面分屏xx文字去掉」——指的是「X 窗口 · Y 分屏」这行
-  - 活跃时间（v1.4 的三态文案）是有价值的信息，**默认保留**，但可以和统计文字
-    分开处理：去掉统计，保留活跃时间
-  - 若用户想要更极简也可去掉——**PRD 默认保留活跃时间**，去掉窗口/分屏统计
-
-### 2.5 状态点保留
-
-- 绿点=活跃（attach 中/后台活跃），灰点=离线/空闲——**现状三态逻辑保留不变**
-- 位置仍在名称左侧
+**Goal**:
+```
+[●] project-alpha              [×]   ← name click-to-edit; only × in the top-right
+```
 
 ---
 
-## 3. 验收标准
+## 2. Change list
 
-1. 卡片头部无 Edit2/Trash2 按钮
-2. 点击名称 → 进入行内编辑，Enter/blur 提交，名称过滤（sanitize）仍生效
-3. 右上角 × 始终可见，点击弹确认框（现有 confirm 逻辑），确认后删除
-4. 状态点三态（绿/黄/灰）保留且逻辑不变
-5. 「X 窗口 · Y 分屏」文字移除，最后活跃时间保留
-6. macOS build + CI 双平台通过
-7. i18n 三方对齐（若无新增 key 应直接绿）
+### 2.1 Remove the two buttons (Edit2 / Trash2)
+
+- Remove the hover-shown rename button (Edit2)
+- Remove the hover-shown delete button (Trash2)
+- Remove the `Edit2` / `Trash2` lucide imports (if no longer used)
+
+### 2.2 Name click-to-edit
+
+- Add a click handler to the name `<h2>` → enters inline edit (reuse the existing `isRenaming` / `renamedName` / `handleRename` logic)
+- Interaction details:
+  - click the name → becomes an input (existing edit UI kept)
+  - Enter / blur submits (existing logic)
+  - hovering the name gives an "editable" hint (e.g. `hover:underline` or cursor-text)
+- Existing `sanitizeNameFrontend` (frontend name filtering) logic kept
+
+### 2.3 Top-right × (delete entry)
+
+- Position: top-right of the card header, replacing the old two buttons
+- Behavior: click → `handleKill(session.name)` (existing delete-confirmation logic; confirm dialog kept)
+- Style: small × icon, red on hover (the existing trash-hover semantics)
+- **Always visible** (no longer hover-only) — user asked for "just the top-right corner"; nothing to hide
+- tooltip: `card.destroy` (reuses the existing i18n key)
+
+### 2.4 Remove the stats text line
+
+- Remove the `{tPlural("card.windows", ...)} · {tPlural("card.panes", ...)}` part from the `<div>`
+- **Note:** should the last-active time (`activityInfo.text`) stay?
+  - The user said "remove the pane-stats text below" — referring to the "X windows · Y panes" line
+  - The active time (v1.4's three-state copy) is valuable information — **keep it by default**, and handle it separately from the stats text: drop the stats, keep the active time
+  - If the user wants even more minimalism it can go too — **the PRD keeps the active time by default** and drops the window/pane stats
+
+### 2.5 Status dot kept
+
+- Green dot = active (attached / active in background), gray dot = offline/idle — **existing three-state logic kept unchanged**
+- Position still to the left of the name
 
 ---
 
-## 4. 明确不做
+## 3. Acceptance criteria
 
-- ❌ 改删除确认逻辑（confirm 保留，不加二次确认/撤销）
-- ❌ 改状态点三态逻辑（v1.4 已定）
-- ❌ 名称过长截断的交互调整（truncate 保留）
-- ❌ 拖拽排序 / 卡片重排
+1. No Edit2/Trash2 buttons in the card header
+2. Clicking the name → enters inline edit; Enter/blur submits; name filtering (sanitize) still works
+3. Top-right × always visible; clicking pops the confirmation dialog (existing confirm logic); deletes after confirmation
+4. Three-state dot (green/yellow/gray) kept with unchanged logic
+5. "X windows · Y panes" text removed; last-active time kept
+6. macOS build + CI dual-platform pass
+7. i18n three-way alignment (should pass directly if no new keys)
 
 ---
 
-## 5. 工作量预估
+## 4. Explicitly out of scope
 
-| 项 | 估算 |
+- ❌ changing the delete-confirmation logic (confirm kept; no double-confirm/undo)
+- ❌ changing the three-state dot logic (fixed in v1.4)
+- ❌ name-overlong truncation interaction changes (truncate kept)
+- ❌ drag ordering / card reordering
+
+---
+
+## 5. Effort estimate
+
+| Item | Estimate |
 |---|---|
-| 删按钮 + 名称点击编辑 + × + 去统计行 | 0.5 天 |
-| 验证 | 0.5 天 |
-| **合计** | **约 0.5-1 人日** |
+| remove buttons + name click-to-edit + × + drop stats line | 0.5 day |
+| verification | 0.5 day |
+| **Total** | **about 0.5-1 person-day** |

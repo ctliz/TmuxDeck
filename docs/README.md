@@ -1,60 +1,60 @@
-# docs 索引
+# Docs index
 
-## 从哪开始
+## Where to start
 
-| 你是 | 先看 |
+| You are | Read first |
 |---|---|
-| 用户 | [README](../README.md) · [中文](../README.zh-CN.md) |
-| 想改代码 | [CONTRIBUTING](../CONTRIBUTING.md) → [ARCHITECTURE](./ARCHITECTURE.md) |
-| 想知道现在在做什么 | [ROADMAP](./ROADMAP.md) |
-| 接手 v1.12 对话桥 | [PRD-v1.12](./PRD-v1.12-conversation-bridge.md) → [DECISIONS-v1.12](./DECISIONS-v1.12.md) → [DESIGN-v1.13](./DESIGN-v1.13-transcript-source.md) → [DESIGN-v1.14](./DESIGN-v1.14-transport-security.md)
+| A user | [README](../README.md) · [Simplified Chinese](../README.zh-CN.md) |
+| Looking to change code | [CONTRIBUTING](../CONTRIBUTING.md) → [ARCHITECTURE](./ARCHITECTURE.md) |
+| Curious what's in flight | [ROADMAP](./ROADMAP.md) |
+| Picking up the v1.12 conversation bridge | [PRD-v1.12](./PRD-v1.12-conversation-bridge.md) → [DECISIONS-v1.12](./DECISIONS-v1.12.md) → [DESIGN-v1.13](./DESIGN-v1.13-transcript-source.md) → [DESIGN-v1.14](./DESIGN-v1.14-transport-security.md) |
 
-## 工程文档
+## Engineering docs
 
-| 文档 | 内容 |
+| Doc | Contents |
 |---|---|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | 模块地图、数据流、两处不显眼的关键实现 |
-| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Pi / OpenCode / Codex / Claude Code 跨 Harness Intercom 安装、命名与协作指南 |
-| [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom 线协议（从上游源码反推整理，避免重复推导） |
-| [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | 对话内容源设计（Claude Code JSONL 优先 + 兑底） |
-| [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | 手机端传输与安全方案 |
-| [ROADMAP.md](./ROADMAP.md) | 排期与进度，产品维护 |
-| [SIGNING-DECISION.md](./SIGNING-DECISION.md) | 为何暂不签名 |
-| [WINDOWS-VERIFICATION-v1.7.0.md](./WINDOWS-VERIFICATION-v1.7.0.md) | Windows 实机验收清单 |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Module map, data flows, two easy-to-miss key implementations |
+| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide for Pi / OpenCode / Codex / Claude Code |
+| [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom wire protocol (reconstructed from upstream source, to avoid re-deriving it) |
+| [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | Conversation content source design (Claude Code JSONL preferred + fallback) |
+| [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | Mobile transport and security design |
+| [ROADMAP.md](./ROADMAP.md) | Schedule and progress, maintained by product |
+| [SIGNING-DECISION.md](./SIGNING-DECISION.md) | Why we are not code-signing yet |
+| [WINDOWS-VERIFICATION-v1.7.0.md](./WINDOWS-VERIFICATION-v1.7.0.md) | Windows on-device acceptance checklist |
 
-## 决策留痕
+## Decision log
 
-| 文档 | 内容 |
+| Doc | Contents |
 |---|---|
-| [DECISIONS-v1.12.md](./DECISIONS-v1.12.md) | 手机端接入被否决的五个方案及原因——**提新方案前先读** |
-| [PRIOR-ART-agent-bus.md](./PRIOR-ART-agent-bus.md) | 现成方案调研：为什么不自造 agent 总线 |
+| [DECISIONS-v1.12.md](./DECISIONS-v1.12.md) | The five rejected approaches for mobile access and why — **read before proposing a new one** |
+| [PRIOR-ART-agent-bus.md](./PRIOR-ART-agent-bus.md) | Survey of existing solutions: why not build our own agent bus |
 
-## 功能 PRD
+## Feature PRDs
 
-按版本号排列。功能立项先写 PRD 是本项目的文档纪律。
+Ordered by version number. Writing a PRD before starting a feature is this project's documentation discipline.
 
-| PRD | 主题 |
+| PRD | Topic |
 |---|---|
-| [v1.1](./PRD-v1.1.md) | 初始产品定义 |
-| [v1.2](./PRD-v1.2-i18n.md) | 国际化（en / zh-CN） |
-| [v1.3](./PRD-v1.3-windows.md) | Windows 支持（WSL） |
-| [v1.4](./PRD-v1.4-activity.md) | 活跃时间显示 |
-| [v1.5](./PRD-v1.5-preview.md) | 窗格内容预览 |
-| [v1.6](./PRD-v1.6-liquid-glass.md) | 液态玻璃视觉 |
-| [v1.7](./PRD-v1.7-tray.md) | 菜单栏常驻 |
-| [v1.8](./PRD-v1.8-terminal-icons.md) | 终端图标 |
-| [v1.9](./PRD-v1.9-card-header.md) | 卡片头部精简 |
-| [v1.10](./PRD-v1.10-pane-mgmt.md) | pane 级管理 |
-| [v1.11](./PRD-v1.11-focus-existing.md) | 防重复开窗 |
-| [v1.12](./PRD-v1.12-conversation-bridge.md) | **对话桥：intercom 接入 + 手机端多路对话** |
+| [v1.1](./PRD-v1.1.md) | Initial product definition |
+| [v1.2](./PRD-v1.2-i18n.md) | Internationalization (en / zh-CN) |
+| [v1.3](./PRD-v1.3-windows.md) | Windows support (WSL) |
+| [v1.4](./PRD-v1.4-activity.md) | Activity timestamps |
+| [v1.5](./PRD-v1.5-preview.md) | Pane content preview |
+| [v1.6](./PRD-v1.6-liquid-glass.md) | Liquid glass visual design |
+| [v1.7](./PRD-v1.7-tray.md) | Menu bar persistence |
+| [v1.8](./PRD-v1.8-terminal-icons.md) | Terminal icons |
+| [v1.9](./PRD-v1.9-card-header.md) | Card header simplification |
+| [v1.10](./PRD-v1.10-pane-mgmt.md) | Pane-level management |
+| [v1.11](./PRD-v1.11-focus-existing.md) | Duplicate-open prevention |
+| [v1.12](./PRD-v1.12-conversation-bridge.md) | **Conversation bridge: intercom integration + multi-conversation mobile access** |
 
-## macOS E2E 安全规则
+## macOS E2E safety rules
 
-真实 App E2E **禁止**通过 AppleScript 或 LaunchServices 按 bundle ID 退出 TmuxDeck，例如 `tell application id "com.ctliz.tmuxdeck" to quit`。该路径可能触发 Dock 的 coalition sweep，连带终止 App coalition 内的 tmux 与 Agent 进程。
+Real-app E2E tests **must not** quit TmuxDeck via AppleScript or LaunchServices by bundle ID, e.g. `tell application id "com.ctliz.tmuxdeck" to quit`. That path can trigger a Dock coalition sweep, which kills the tmux and Agent processes inside the app's coalition along with it.
 
-测试实例只能按启动时记录的**精确 PID**退出：先向该 PID 发送 `SIGTERM` 并等待退出；超时后再次核对仍是同一测试 PID，才可向该精确 PID 发送 `SIGKILL`。不得使用 bundle ID、应用名、`pkill`、`killall` 或进程名匹配。测试结束也不得自动恢复或启动用户 App，除非当次验收明确授权。
+Test instances may only be terminated by the **exact PID recorded at launch**: send `SIGTERM` to that PID and wait for it to exit; only after a timeout and a re-check confirming it is still the same test PID may you send `SIGKILL` to that exact PID. Do not use bundle ID, app name, `pkill`, `killall`, or process-name matching. Tests must also not auto-restore or launch user apps on completion, unless that run's acceptance explicitly authorizes it.
 
-## 发布说明
+## Release notes
 
 [v1.5.0](./RELEASE-NOTES-v1.5.0.md) · [v1.6.0](./RELEASE-NOTES-v1.6.0.md) ·
 [v1.7.0](./RELEASE-NOTES-v1.7.0.md) · [v1.7.1](./RELEASE-NOTES-v1.7.1.md) ·

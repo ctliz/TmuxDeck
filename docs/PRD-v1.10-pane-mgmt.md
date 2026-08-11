@@ -1,115 +1,115 @@
-# TmuxDeck v1.10 Pane 级管理（新增/删除分屏）PRD
+# TmuxDeck v1.10 Pane-Level Management (Add/Delete Panes) PRD
 
-> 目标：卡片内直接管理 pane——新增分屏格、删除指定分屏格。
-> 背景：v1.9 精简卡片头部后内容区变大，有操作空间；v1.7 的 add_pane 已在 tray 可用，搬到卡片并补删除。
-> 后端：复用 add_pane，新增 kill_pane。
+> Goal: manage panes directly inside a card — add a pane, delete a specific pane.
+> Background: after v1.9 slimmed the card header, the content area has room to operate; v1.7's add_pane already works in the tray, now it moves to cards plus delete support.
+> Backend: reuse add_pane, add kill_pane.
 
 ---
 
-## 1. 交互形态（已确认）
+## 1. Interaction shape (confirmed)
 
 ```
 ┌─────────────────────────────┐
-│ [●] project-alpha      [✕]  │  ← ✕ = 删除整个 session（现有，不变）
+│ [●] project-alpha      [✕]  │  ← ✕ = delete the whole session (existing, unchanged)
 │ ┌──────┬──────┐             │
-│ │ cmd  │ cmd  │×←hover 出现  │  ← 每个 pane 格 hover 出小 ×
+│ │ cmd  │ cmd  │×←appears on hover  │  ← each pane cell shows a small × on hover
 │ ├──────┼──────┤             │
 │ │ cmd  │ cmd  │             │
 │ └──────┴──────┘             │
-│ [+ 新增分屏]                │  ← 底部小按钮，tiled 重排
+│ [+ Add pane]                │  ← small footer button, tiled re-layout
 └─────────────────────────────┘
 ```
 
-- **删除**：pane 预览格 hover 出现小 × → 点击 → confirm 弹窗 → 删除该 pane
-- **新增**：卡片底部小按钮 → 新 pane（默认 Shell，目录继承）→ tiled 重排
-- 右上角 ✕（删除 session）**不变**，两者是不同层级
+- **Delete**: hovering a pane preview cell reveals a small × → click → confirm dialog → delete that pane
+- **Add**: small footer button on the card → new pane (default Shell, inherits directory) → tiled re-layout
+- The top-right ✕ (delete session) **stays unchanged**; the two operate at different levels
 
 ---
 
-## 2. 后端
+## 2. Backend
 
-### 2.1 复用 `add_pane`（v1.7 已有）
+### 2.1 Reuse `add_pane` (already exists from v1.7)
 
-无需改动。逻辑已正确：sanitize → 取第一个 pane 目录 → split-window → tiled。
+No changes needed. The logic is already correct: sanitize → take first pane's directory → split-window → tiled.
 
-### 2.2 新增 `kill_pane(pane_id)`
+### 2.2 New `kill_pane(pane_id)`
 
 ```rust
 #[tauri::command]
 fn kill_pane(pane_id: String) -> Result<(), String> {
-    // 1. 校验 pane_id 格式（tmux pane id 形如 %1，只允许 %\d+）
+    // 1. validate pane_id format (tmux pane ids look like %1; only %\d+ allowed)
     // 2. run_tmux(&["kill-pane", "-t", &pane_id])
-    // 3. 失败返回 ERR_KILL_PANE_FAILED
+    // 3. return ERR_KILL_PANE_FAILED on failure
 }
 ```
 
-**pane_id 校验**：tmux pane id 是 `%数字`，注入风险低但必须校验格式
-（`^%\d+$`），不能用 session 名的 sanitize（那是另一个格式）。
+**pane_id validation**: tmux pane ids are `%number`; injection risk is low but the format must be validated
+(`^%\d+$`) — you cannot reuse session-name sanitization (that's a different format).
 
-**注意**：`kill_pane` 只接收 pane_id，不接收 session——删除后如果该 pane
-是最后一个（session 会随之销毁？），tmux 行为：kill-pane 最后一个 pane
-会销毁整个 window/session。**前端需保证「只剩 1 个 pane 时禁用删除按钮」**（见 3.3）。
-
----
-
-## 3. 前端
-
-### 3.1 Pane 格 hover 删除
-
-- 每个 pane 预览格右上角，`group-hover` 显示小 ×（`opacity-0 group-hover:opacity-100`）
-- 点击 → `confirm`（现有确认模式）→ `invoke("kill_pane", { paneId })`
-- 删除成功后 4s 轮询自然刷新（无需手动）
-- i18n：复用现有 `card.destroy`？——不，语义不同（那是删 session）。
-  新增 `card.killPane`：en "Kill this pane" / zh "删除此分屏"
-
-### 3.2 底部新增按钮
-
-- 卡片底部（现「打开图标行」下方或旁边）加一个小按钮 `[+ 分屏]`
-- 点击 → `invoke("add_pane", { sessionName })`（复用）
-- i18n：新增 `card.addPane`：en "Add pane" / zh "新增分屏"
-
-### 3.3 边界：单 pane 禁用
-
-- `session.panes_count <= 1` 时：
-  - 该 pane 格不显示删除 ×（或禁用）
-  - 底部新增仍可用（1 → 2 是合法操作）
-- 逻辑：`pane 删除按钮仅当 panes_count > 1 时渲染`
-
-### 3.4 布局
-
-- 预览格 hover ×：绝对定位右上角（`absolute top-1 right-1`），格子需 `relative`
-- 底部新增按钮：`text-xs` 小按钮，不喧宾夺主
+**Note**: `kill_pane` only takes a pane_id, not a session — if the deleted pane is the last one
+(the session would be destroyed along with it?), tmux behavior: killing the last pane
+destroys the whole window/session. **The frontend must disable the delete button when only 1 pane remains** (see 3.3).
 
 ---
 
-## 4. 验收标准
+## 3. Frontend
 
-1. 多 pane 会话：每个 pane 格 hover 出现 ×，点击 confirm 后该 pane 删除，网格 tiled 重排
-2. 单 pane 会话：无删除 ×（禁用），新增仍可用（1→2）
-3. 底部新增按钮：点击后多一个 pane（Shell），目录继承，tiled 重排
-4. 删除 confirm 文案与 session 删除的区分（killPane vs destroy）
-5. pane 删除后 4s 内列表自动刷新（无需手动）
-6. kill_pane 的 pane_id 格式校验生效（非法 id 报错不 panic）
-7. macOS build + CI 双平台通过
-8. i18n 三方对齐（新增 key 双语）
+### 3.1 Pane-cell hover delete
+
+- Top-right of each pane preview cell, `group-hover` shows a small × (`opacity-0 group-hover:opacity-100`)
+- Click → `confirm` (existing confirm pattern) → `invoke("kill_pane", { paneId })`
+- After a successful delete, the 4s polling refreshes naturally (no manual refresh needed)
+- i18n: reuse existing `card.destroy`? No — the semantics differ (that deletes a session).
+  Add `card.killPane`: en "Kill this pane" / zh "删除此分屏"
+
+### 3.2 Footer add button
+
+- At the card footer (below or beside the open-icon row), a small button `[+ Pane]`
+- Click → `invoke("add_pane", { sessionName })` (reuse)
+- i18n: add `card.addPane`: en "Add pane" / zh "新增分屏"
+
+### 3.3 Edge case: single-pane disabled
+
+- When `session.panes_count <= 1`:
+  - That pane's delete × is hidden (or disabled)
+  - The footer add button still works (1 → 2 is a valid operation)
+- Logic: `render the pane delete button only when panes_count > 1`
+
+### 3.4 Layout
+
+- Preview-cell hover ×: absolutely positioned top-right (`absolute top-1 right-1`); the cell needs `relative`
+- Footer add button: `text-xs` small button, doesn't steal the show
 
 ---
 
-## 5. 明确不做
+## 4. Acceptance criteria
 
-- ❌ pane 拖拽排序/调整大小
-- ❌ pane 重命名（tmux 不支持 pane 命名，跳过）
-- ❌ 撤销删除（confirm 已够，不搞二次确认/undo）
-- ❌ pane 内容迁移（把 pane 移到别的 session）
-- ❌ 删除时区分「确认运行中进程」（confirm 统一处理）
+1. Multi-pane session: each pane cell shows × on hover; after confirm that pane is deleted and the grid re-lays out tiled
+2. Single-pane session: no delete × (disabled); add still works (1→2)
+3. Footer add button: clicking adds a pane (Shell), directory inherited, tiled re-layout
+4. Delete-confirm copy distinguishes killPane from session destroy
+5. After a pane delete, the list auto-refreshes within 4s (no manual refresh)
+6. kill_pane's pane_id format validation works (invalid id errors, no panic)
+7. macOS build + CI on both platforms pass
+8. i18n three-way alignment (new keys in both languages)
 
 ---
 
-## 6. 工作量预估
+## 5. Explicitly out of scope
 
-| 项 | 估算 |
+- ❌ Pane drag reordering / resizing
+- ❌ Pane renaming (tmux doesn't support pane names; skip)
+- ❌ Undo delete (confirm is enough; no double-confirm/undo)
+- ❌ Pane content migration (moving a pane to another session)
+- ❌ Distinguishing "confirm running processes" on delete (confirm handles it uniformly)
+
+---
+
+## 6. Effort estimate
+
+| Item | Estimate |
 |---|---|
-| 后端 kill_pane + 校验 | 0.25 天 |
-| 前端 hover × + confirm + 单 pane 禁用 | 0.5 天 |
-| 底部新增按钮 + i18n | 0.25 天 |
-| **合计** | **约 1 人日** |
+| Backend kill_pane + validation | 0.25 day |
+| Frontend hover × + confirm + single-pane disable | 0.5 day |
+| Footer add button + i18n | 0.25 day |
+| **Total** | **about 1 person-day** |

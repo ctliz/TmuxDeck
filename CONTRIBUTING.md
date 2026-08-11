@@ -80,7 +80,7 @@ Detection uses `which` plus the `~/.nvm/versions/node/*/bin/` glob. On Windows, 
 
 - **Sanitize session names.** Every Tauri command that accepts a session name must call `sanitize_session_name()` first. The name is embedded in shell commands and file paths; skipping this is a command-injection vulnerability.
 - **Never send free text without `-l`.** `tmux send-keys` interprets strings like `C-c` and `Escape` as key names. User text goes through `send_keys()` (which passes `-l`); control keys go through `send_key_name()`, which validates against an allow-list. Do not merge the two channels.
-- **Do not guess agent state.** The intercom broker reports `idle` / `thinking` / `tool:<name>` as fact. Sessions not on the bus are `unknown` — leave them unknown rather than inferring from pane silence. See [`docs/DECISIONS-v1.12.md`](docs/DECISIONS-v1.12.md#5-靠-capture-pane-轮询做四态判定) for why the heuristic approach was removed.
+- **Do not guess agent state.** The intercom broker reports `idle` / `thinking` / `tool:<name>` as fact. Sessions not on the bus are `unknown` — leave them unknown rather than inferring from pane silence. See [`docs/DECISIONS-v1.12.md`](docs/DECISIONS-v1.12.md#5-polling-capture-pane-for-four-state-detection) for why the heuristic approach was removed.
 - **Keep it minimal.** The "explicitly out of scope" list in the PRD (see `docs/`) includes per-pane agent mixing, workspace templates, a multi-entry custom agent manager, and remote SSH. Open an issue to discuss these before submitting a PR.
 - **Ask only necessary questions.** This is the core design principle: hide a row when there is only one candidate, and never show tools that are not installed.
 

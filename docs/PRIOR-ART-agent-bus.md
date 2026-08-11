@@ -1,145 +1,129 @@
-# 调研：agent 总线 / 手机端接入的现成方案
+# Survey: existing solutions for an agent bus / mobile access
 
-> 结论先行：**我们想造的东西已经存在，而且比设计稿完整。**
-> `Agent Intercom` 覆盖了 pi + Codex + Claude Code + OpenCode 四种 harness，
-> 共用一个本地 broker 和一套协议。TmuxDeck 不应该造总线，
-> 应该成为这个家族里唯一缺失的那块拼图——**人类/手机适配器**。
+> Bottom line up front: **the thing we wanted to build already exists, and it's more complete than our design.**
+> `Agent Intercom` covers four harnesses — pi + Codex + Claude Code + OpenCode — sharing one local broker and one protocol. TmuxDeck should not build a bus; it should become the one piece missing from that family — **the human / phone adapter**.
 
-调研日期：2026-08-10
+Survey date: 2026-08-10
 
 ---
 
-## 1. Agent Intercom（决定性发现）
+## 1. Agent Intercom (the decisive discovery)
 
-跨 harness、同机的 agent 消息系统。起源于 `nicobailon/pi-intercom`，
-`dataforxyz` 把它扩成了跨工具家族：
+A cross-harness, same-machine agent messaging system. It originated in `nicobailon/pi-intercom`; `dataforxyz` expanded it into a cross-tool family:
 
-| Harness | 仓库 |
+| Harness | Repository |
 |---|---|
 | Pi | `dataforxyz/agent-intercom-pi` |
 | Codex | `dataforxyz/agent-intercom-codex` |
 | Claude Code | `dataforxyz/agent-intercom-claude` |
 | OpenCode | `dataforxyz/agent-intercom-opencode` |
-| 生命周期管理 | `dataforxyz/agent-intercom-orchestrator` |
+| Lifecycle management | `dataforxyz/agent-intercom-orchestrator` |
 
-**四个适配器共用同一个 broker 和同一套协议，跨 host 边界互发消息。**
-这正是我们说的"跨家族通信"，而且它已经上线了。
+**All four adapters share one broker and one protocol, messaging each other across host boundaries.** This is exactly what we meant by "cross-family communication" — and it's already live.
 
-### 它已经解决的，恰好是我们 PRD 里最难的部分
+### It already solves precisely the hardest parts of our PRD
 
-| PRD 里的难题 | Agent Intercom 的现成答案 |
+| Problem in the PRD | Agent Intercom's ready-made answer |
 |---|---|
-| 四态判定（干活/等 agent/等人/退出） | broker 自动发布会话状态：`idle` / `thinking` / `tool:<name>` |
-| 通信组、全局静默启发式 | 不存在了——一个 broker 一份全局注册表 |
-| 「谁在等谁」 | `broker-asks.json` 存 ask/reply 边；`intercom_pending` 直接列出未决询问、发起者、已等时长 |
-| 投递时机（往正在思考的 pane 塞字符会被吞） | 持久化 inbox + **idle-gated 投递**：忙时排队，空闲才注入；300ms 合批 |
-| 投递可靠性 | 收方原子写入 inbox 后才 ACK，至少一次语义，断线重放 |
-| 消息风暴 | 每会话最多 256 条未完成出站；按字节的连接级限流 |
-| 寻址 | 会话名 + 稳定 session ID，重名时拒绝模糊投递 |
+| Four-state detection (working / waiting on agent / waiting on human / exited) | broker auto-publishes session status: `idle` / `thinking` / `tool:<name>` |
+| Communication groups, global-silence heuristics | gone — one broker, one global registry |
+| "Who's waiting on whom" | `broker-asks.json` stores ask/reply edges; `intercom_pending` directly lists unresolved asks, initiators, and how long they've waited |
+| Delivery timing (stuffing characters into a thinking pane gets swallowed) | durable inbox + **idle-gated delivery**: queue while busy, inject only when idle; 300ms batching |
+| Delivery reliability | receiver ACKs only after atomically writing to inbox; at-least-once semantics, offline replay |
+| Message storms | max 256 outstanding outbound messages per session; byte-based connection-level rate limiting |
+| Addressing | session name + stable session ID; ambiguous delivery rejected on duplicate names |
 
-`intercom_list` 返回：会话名、短 ID、工作目录、模型、**实时状态**。
-这一条就把 PRD 第 2 节（capture-pane 轮询 + hash 比对 + 静默启发式）整节作废。
+`intercom_list` returns: session name, short ID, working directory, model, **live status**. This single item invalidates PRD section 2 (capture-pane polling + hash comparison + silence heuristics) in its entirety.
 
-### 技术细节（写适配器要用）
+### Technical details (for writing an adapter)
 
-- 传输：macOS/Linux 用 Unix domain socket，Windows 用命名管道
-- 协议：`pi-intercom` v3，**4 字节长度前缀 + JSON**
-- 运行时目录：`~/.pi/agent/intercom/`（或 `$PI_CODING_AGENT_DIR/intercom/`）
+- Transport: Unix domain socket on macOS/Linux, named pipe on Windows
+- Protocol: `pi-intercom` v3, **4-byte length prefix + JSON**
+- Runtime directory: `~/.pi/agent/intercom/` (or `$PI_CODING_AGENT_DIR/intercom/`)
   - `broker.sock` / `broker.pid` / `broker.owner` / `config.json`
-  - `inbox/<hash>.json`、`outbox/<hash>.json`、`broker-asks.json`
-- broker 首次连接时自动拉起，最后一个会话断开后 5 秒退出。无守护进程要管
-- 工具面：`intercom_send`（发完就走）、`intercom_ask`（阻塞等 30s，超时转异步）、
-  `intercom_reply`、`intercom_list`、`intercom_pending`、`intercom_status`、`intercom_team`
+  - `inbox/<hash>.json`, `outbox/<hash>.json`, `broker-asks.json`
+- The broker starts itself on first connection and exits 5 seconds after the last session disconnects. No daemon to manage
+- Tool surface: `intercom_send` (fire and forget), `intercom_ask` (blocking wait 30s, turns async on timeout), `intercom_reply`, `intercom_list`, `intercom_pending`, `intercom_status`, `intercom_team`
 
-> README 里有一句很关键：broker 的 runtime instance ID 机制是为了
-> "防止桌面 Pi 与**移动 RPC host** 同时打开同一 transcript 时的重连冲突"。
-> **他们已经预期会有移动端 host 接入，但家族里还没有这个适配器。**
+> The README has a crucial line: the broker's runtime instance ID mechanism exists to "prevent reconnection conflicts when the desktop Pi and a **mobile RPC host** open the same transcript simultaneously". **They already anticipated a mobile host joining the family, but no such adapter exists in it.**
 
-### 许可证注意
+### License note
 
-`agent-intercom-pi` 是 **AGPL-3.0-or-later**（早期 MIT 版本仍可按原条款使用）。
-自己按线协议实现一个客户端不构成衍生作品，但**不要直接复制其源码**。
-写 Rust 适配器对着协议实现即可。
+`agent-intercom-pi` is **AGPL-3.0-or-later** (earlier MIT versions remain usable under their original terms). Implementing a client yourself against the wire protocol is not a derivative work, but **don't copy its source**. Write the Rust adapter against the protocol.
 
 ---
 
-## 2. AWS Labs CAO（形态不同，可借鉴）
+## 2. AWS Labs CAO (different shape, borrowable ideas)
 
-`awslabs/cli-agent-orchestrator`，Apache-2.0。支持 Claude Code、Codex、Gemini、
-Kiro、Kimi、Copilot、OpenCode、Q CLI——**唯独没有 pi**。
+`awslabs/cli-agent-orchestrator`, Apache-2.0. Supports Claude Code, Codex, Gemini, Kiro, Kimi, Copilot, OpenCode, Q CLI — **everything except pi**.
 
-- 每个 agent 一个独立 tmux session，通过 MCP 暴露 `handoff` / `assign` / `send_message`
-- 服务端按 `CAO_TERMINAL_ID` 路由，跟踪 `IDLE / PROCESSING / COMPLETED / ERROR`
-- `cao session send <name> "msg"` 是纯 shell 命令 —— 印证了「shell 是所有 agent 的最大公约数」
-- 自带 Web UI（`localhost:9889`）
-- **插件可把 agent 间消息转发到 Discord / Slack / Telegram** —— 我们设想的通知链路
-- 安全姿态与我们的结论一致：仅 localhost + Host 头校验防 DNS rebinding
+- Each agent runs in its own tmux session, exposing `handoff` / `assign` / `send_message` via MCP
+- The server routes by `CAO_TERMINAL_ID`, tracking `IDLE / PROCESSING / COMPLETED / ERROR`
+- `cao session send <name> "msg"` is a plain shell command — confirming that "the shell is the least common denominator of all agents"
+- Ships a Web UI (`localhost:9889`)
+- **Plugins can forward inter-agent messages to Discord / Slack / Telegram** — the notification path we envisioned
+- Security posture matches our conclusion: localhost only + Host-header validation against DNS rebinding
 
-**与我们工作方式的差异**：CAO 是 supervisor 主动 spawn worker 的层级模型；
-我们是「手动开一堆 agent，然后互相说话」的对等模型。**Agent Intercom 才是对的形状。**
-但 CAO 的 IM 转发插件、状态机命名值得抄。
+**Difference from how we work:** CAO is a hierarchical model where a supervisor spawns workers; we're a peer model of "manually open a bunch of agents, then have them talk to each other". **Agent Intercom is the right shape.** But CAO's IM-forwarding plugin and state-machine naming are worth stealing.
 
 ---
 
-## 3. 手机端已有方案
+## 3. Existing mobile solutions
 
-| 项目 | 覆盖 | 说明 |
+| Project | Coverage | Notes |
 |---|---|---|
-| **Happy**（`slopus/happy`） | Claude Code、Codex | **开源**，移动 + Web 客户端，端到端加密，**权限请求与任务完成的推送通知**，终端离线时仍可看历史。最值得参考的一个 |
-| Omnara | Claude Code、Codex | 闭源商用，App Store / Play 均有。已知短板：agent 需要输入时**不发系统通知**，要自己开 App 看 |
-| VibeTunnel | 通用终端 | 浏览器访问 Mac 终端。复刻终端体验，但**无推送通知**，也没有回答问题/看 diff 的界面 |
+| **Happy** (`slopus/happy`) | Claude Code, Codex | **Open source**, mobile + Web client, end-to-end encrypted, **push notifications for permission requests and task completion**, history still viewable while the terminal is offline. The most worth studying |
+| Omnara | Claude Code, Codex | Closed-source commercial, on App Store / Play. Known shortcoming: **no system notification** when an agent needs input — you have to open the app yourself |
+| VibeTunnel | generic terminal | Browser access to a Mac terminal. Replicates the terminal experience, but **no push notifications**, and no UI for answering questions / viewing diffs |
 
-三者都不支持 pi，也都不提供跨 agent 家族的总线视图。
-
----
-
-## 4. 结论与建议
-
-### 不要自造的
-
-- ❌ **跨工具消息总线** —— Agent Intercom 已完成，且四个适配器正好覆盖我们全部工具
-- ❌ **四态判定 / 静默启发式 / 通信组** —— broker 的会话状态与 ask 边是事实，不需要猜
-- ❌ **send-keys 投递队列** —— intercom 的 durable inbox + idle-gated 投递严格更优
-- ❌ **完整手机终端** —— Happy / VibeTunnel 已有
-
-### 值得做的（家族里的真空）
-
-> **TmuxDeck = Agent Intercom 的人类/手机适配器。**
-
-具体形态：TmuxDeck 作为第五个适配器连上 `broker.sock`，注册成一个名为 `me` 的会话。
-
-- agent 需要人时：`intercom_ask({ to: "me", message: "..." })` → TmuxDeck 收到 → 推送到手机
-- 手机回复 → TmuxDeck 走 `intercom_reply` → broker 负责 idle-gated 投递与 ACK
-- 桌面看板：读 `intercom_list`，直接拿到真实状态，不再轮询 capture-pane
-- `intercom_pending` 天然就是「等你回话的收件箱」——**PRD 里设想的收件箱 UI，数据源现成**
-
-**通知不再是检测出来的，是寻址到 `me` 的一条消息。** 与之前的判断一致，
-只是总线不用我们造。
-
-### 保留的兜底
-
-没装 intercom 适配器的 agent（Aider、Gemini CLI、纯 shell）仍需 `send_keys` +
-静默启发式覆盖。但它从主线降级为长尾兜底，可以做得很糙。
-
-### 动手前必须验证的三件事
-
-1. `~/.pi/agent/intercom/broker.sock` 在你机器上是否存在、协议版本是否为 v3
-2. 非 pi 的适配器（Claude Code 的 `cci` / Codex 的 `coi` 包装器）是否需要改变现有启动方式
-3. 用一个最小 Rust/Node 客户端连上 broker，跑通 `list` 与收一条 `send`——
-   **跑通了再动 TmuxDeck 一行代码**
+None of the three supports pi, and none offers a bus view across agent families.
 
 ---
 
-## 5. 对既有 PRD 的处置
+## 4. Conclusion and recommendations
 
-| 文档 | 处置 |
+### Don't build
+
+- ❌ **Cross-tool message bus** — Agent Intercom already exists, and its four adapters cover exactly our toolset
+- ❌ **Four-state detection / silence heuristics / communication groups** — the broker's session status and ask edges are facts; nothing to guess
+- ❌ **send-keys delivery queue** — intercom's durable inbox + idle-gated delivery is strictly better
+- ❌ **Full mobile terminal** — Happy / VibeTunnel already exist
+
+### Worth doing (the vacuum in the family)
+
+> **TmuxDeck = the human / phone adapter for Agent Intercom.**
+
+Concretely: TmuxDeck joins as the fifth adapter, connecting to `broker.sock` and registering as a session named `me`.
+
+- Agent needs a human: `intercom_ask({ to: "me", message: "..." })` → TmuxDeck receives it → push to the phone
+- Phone replies → TmuxDeck goes through `intercom_reply` → the broker handles idle-gated delivery and ACK
+- Desktop dashboard: read `intercom_list` and get the real status directly, no more capture-pane polling
+- `intercom_pending` is naturally "the inbox of people waiting on you" — **the inbox UI envisioned in the PRD has a ready-made data source**
+
+**Notifications are no longer detected; they're a message addressed to `me`.** Same conclusion as before — we just don't have to build the bus.
+
+### Kept fallback
+
+Agents without an intercom adapter (Aider, Gemini CLI, plain shell) still need `send_keys` + silence heuristics. But it's demoted from the main path to a long-tail fallback and can be rough.
+
+### Three things to verify before writing any code
+
+1. Does `~/.pi/agent/intercom/broker.sock` exist on your machine, and is the protocol version v3?
+2. Do the non-pi adapters (Claude Code's `cci` / Codex's `coi` wrappers) require changing how agents are launched today?
+3. Connect with a minimal Rust/Node client to the broker and get a `list` through plus one `send` — **only after that works, touch a single line of TmuxDeck code**
+
+---
+
+## 5. Disposition of the existing PRD
+
+| Doc | Disposition |
 |---|---|
-| `PRD-v1.12-mobile-server.md` | 大幅作废。第 2 节（状态判定）整节删除；第 3 节保留消息与回复的 UI 设计；传输层改为 intercom broker |
-| 「自造总线」构想 | 撤销，改为实现 intercom 适配器 |
+| `PRD-v1.12-mobile-server.md` | largely obsolete. Section 2 (state detection) deleted in its entirety; section 3 keeps the message and reply UI design; transport layer becomes the intercom broker |
+| "build-our-own-bus" idea | reverted, replaced by implementing an intercom adapter |
 
 ---
 
-## 来源
+## Sources
 
 - [dataforxyz/agent-intercom-pi](https://github.com/dataforxyz/agent-intercom-pi)
 - [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom)

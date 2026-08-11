@@ -1,70 +1,65 @@
-# TmuxDeck v1.4 活跃状态与最后活跃时间 PRD
+# TmuxDeck v1.4 Activity Status and Last-Active Time PRD
 
-> 目标：让用户一眼看出「我的工作区还在不在跑、什么时候活跃过」，
-> 消除「关了窗口 = 工作丢了」的焦虑。**极简：零新依赖，两个字段。**
-
----
-
-## 1. 背景
-
-用户打开工作区工作一段时间后关闭终端窗口，因为不知道 tmux 会话是持久化的，
-会担心「没保存、工作丢了」。事实上工作从未丢失，只是**用户看不见**。
-
-解法不是加「保存」按钮（那是假的——tmux 本来就在保存），而是让卡片
-**展示工作区的活跃状态**，用户看到「3 分钟前活跃」就知道一切还在。
+> Goal: let users see at a glance "is my workspace still running, and when was it last active", removing the anxiety that "closing the window = losing the work". **Minimal: zero new dependencies, two fields.**
 
 ---
 
-## 2. 技术基础（已验证）
+## 1. Background
 
-tmux 原生暴露两个字段，`get_tmux_sessions` 已在使用同样的 `-F` 格式机制：
+A user works in a workspace for a while, then closes the terminal window. Not knowing that tmux sessions are persistent, they worry "unsaved, work lost". In fact the work never gets lost — the user just **can't see it**.
+
+The fix is not adding a "save" button (that would be fake — tmux is already saving), but having the card **show the workspace's activity status**: seeing "active 3 minutes ago" tells the user everything is still there.
+
+---
+
+## 2. Technical foundation (verified)
+
+tmux natively exposes two fields, and `get_tmux_sessions` already uses the same `-F` format mechanism:
 
 ```
-#{session_attached}   → 1/0（是否有客户端连接）
-#{session_activity}   → 最后活跃的 Unix 时间戳（含 pane 输出活动）
+#{session_attached}   → 1/0 (whether a client is connected)
+#{session_activity}   → last-active Unix timestamp (includes pane output activity)
 ```
 
-实测：attach 中的会话 activity 时间戳与当前时间仅差几秒。✅
+Tested: an attached session's activity timestamp differs from the current time by only a few seconds. ✅
 
 ---
 
-## 3. 数据模型变更（Rust）
+## 3. Data-model change (Rust)
 
-`TmuxSession` 增加两个字段：
+`TmuxSession` gains two fields:
 
 ```rust
 pub struct TmuxSession {
-    // ...现有字段...
-    pub attached: bool,          // 已有：是否有客户端连接
-    pub last_active_ts: i64,     // 新增：最后活跃 Unix 时间戳（session_activity）
+    // ...existing fields...
+    pub attached: bool,          // existing: whether a client is connected
+    pub last_active_ts: i64,     // new: last-active Unix timestamp (session_activity)
 }
 ```
 
-`get_tmux_sessions` 的 `-F` 格式追加 `#{session_activity}`，
-解析时从 `parts[5]` 读时间戳。**解析失败回退 0**（显示「未知」），不阻塞整个列表。
+`get_tmux_sessions`'s `-F` format appends `#{session_activity}`; the parser reads the timestamp from `parts[5]`. **On parse failure, fall back to 0** (shown as "unknown"); don't block the whole list.
 
-> ⚠️ 注意：现有 `-F` 格式是 `#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}`，
-> 追加后是 `...|#{session_attached}|#{session_created}|#{session_activity}`，**parts 索引要跟着调整**。
+> ⚠️ Note: the current `-F` format is `#{session_id}|#{session_name}|#{session_windows}|#{session_attached}|#{session_created}`,
+> after appending it becomes `...|#{session_attached}|#{session_created}|#{session_activity}`, so **the parts indexes must be adjusted accordingly**.
 
 ---
 
-## 4. 前端展示（卡片）
+## 4. Frontend display (cards)
 
-### 4.1 活跃状态三态（替换现有两点式）
+### 4.1 Three-state activity (replaces the current two-dot scheme)
 
-| 状态 | 判定 | 显示 |
+| State | Determination | Display |
 |---|---|---|
-| 🟢 **使用中** | `attached == true` | 绿点 + 呼吸动画（现有） |
-| 🟡 **后台活跃** | `attached == false` 且最后活跃 < 10 分钟 | 黄点，「最后活跃 X 分钟前」 |
-| ⚪ **空闲** | `attached == false` 且最后活跃 ≥ 10 分钟 或未知 | 灰点，「空闲」 |
+| 🟢 **In use** | `attached == true` | green dot + breathing animation (existing) |
+| 🟡 **Active in background** | `attached == false` and last-active < 10 minutes | yellow dot, "active X minutes ago" |
+| ⚪ **Idle** | `attached == false` and last-active ≥ 10 minutes, or unknown | gray dot, "Idle" |
 
-> 判定逻辑放前端（`last_active_ts` + 当前时间），后端只传原始时间戳，不做换算。
-> 10 分钟阈值是 v1.4 默认值，可调。
+> The determination lives in the frontend (`last_active_ts` + current time); the backend only passes the raw timestamp and does no conversion.
+> The 10-minute threshold is v1.4's default and adjustable.
 
-### 4.2 最后活跃时间文案
+### 4.2 Last-active copy
 
-复用 v1.0 已有的「X 秒/分钟/小时/天前」换算逻辑（`created_at` 已这么做过），
-新增 i18n key：
+Reuse the existing "X seconds/minutes/hours/days ago" conversion from v1.0 (`created_at` already did this); new i18n keys:
 
 ```
 card.lastActive      → en: "Active {time} ago"    zh: "最后活跃 {time} 前"
@@ -72,46 +67,45 @@ card.lastActive_now  → en: "Active just now"      zh: "刚刚活跃"
 card.idle            → en: "Idle"                 zh: "空闲"
 ```
 
-time 部分（X 分钟前等）作为变量传入，复用现有换算。
+The time portion (X minutes ago, etc.) is passed as a variable, reusing the existing conversion.
 
-### 4.3 卡片布局
+### 4.3 Card layout
 
-卡片头部状态区，从现在的「单点 + 创建时间」改为：
+The card header status area changes from the current "single dot + creation time" to:
 
 ```
-[点] 项目名                     [重命名] [删除]
-2 窗口 · 4 分屏   ·   最后活跃 3 分钟前
+[dot] project name                  [Rename] [Delete]
+2 windows · 4 panes   ·   active 3 minutes ago
 ```
 
-- 已 attach 的会话（使用中）：显示「使用中」，不显示最后活跃（毫无意义，正在用）
-- 后台活跃 / 空闲：显示最后活跃时间
+- Attached sessions (in use): show "In use", don't show last-active (meaningless while actively using)
+- Active-in-background / idle: show last-active time
 
 ---
 
-## 5. 顺带：顶部统计栏
+## 5. Incidental: top stats bar
 
-「运行中」计数现在按 `attached` 统计。v1.4 保持现状不改——
-「运行中」就是正在被使用的，后台活跃的不算「运行中」，语义不混淆。
-
----
-
-## 6. 验收标准
-
-1. attach 中的会话：绿点 + 呼吸动画，不显示最后活跃时间
-2. 刚 detach 的会话（<10 分钟）：黄点，显示「最后活跃 X 分钟前」
-3. 长时间 detach 的会话（≥10 分钟）：灰点，显示「最后活跃 X 小时前」或「空闲」
-4. 时间换算正确：秒/分钟/小时/天梯度正确
-5. 英文环境下文案正确（i18n 双语齐全）
-6. 无最后活跃数据时显示「空闲」/「未知」，不崩溃
-7. macOS `npm run tauri build` + CI 双平台通过
-8. 中文残留为零（沿用 v1.2 标准）
+The "running" count is currently counted by `attached`. v1.4 keeps that as-is — "running" means currently in use; active-in-background isn't "running", so the semantics stay unambiguous.
 
 ---
 
-## 7. 明确不做
+## 6. Acceptance criteria
 
-- ❌ 主动向用户推送「工作区活跃」通知
-- ❌ 后端定时任务/心跳机制（tmux 的 activity 已足够，不加额外轮询）
-- ❌ 「保存」按钮或手动快照功能（误解产品本质）
-- ❌ 重启机器后的 tmux 会话恢复（tmux-resurrect 类插件是大工程，另立项）
-- ❌ 阈值可配置化（10 分钟硬编码 v1.4，需要再议）
+1. Attached session: green dot + breathing animation, no last-active time shown
+2. Just-detached session (<10 min): yellow dot, shows "active X minutes ago"
+3. Long-detached session (≥10 min): gray dot, shows "active X hours ago" or "Idle"
+4. Time conversion correct: seconds/minutes/hours/days gradients right
+5. English copy correct (i18n bilingual complete)
+6. No last-active data → shows "Idle" / "unknown", no crash
+7. macOS `npm run tauri build` + CI dual-platform pass
+8. Zero Chinese residue (per v1.2 standard)
+
+---
+
+## 7. Explicitly out of scope
+
+- ❌ proactively pushing "workspace active" notifications to the user
+- ❌ backend scheduled tasks / heartbeat mechanisms (tmux's activity is sufficient; no extra polling)
+- ❌ "save" button or manual snapshot features (misunderstands the product)
+- ❌ tmux session recovery after machine reboot (tmux-resurrect-style plugins are a large effort; separate initiative)
+- ❌ configurable threshold (10 minutes hardcoded in v1.4; revisit when needed)

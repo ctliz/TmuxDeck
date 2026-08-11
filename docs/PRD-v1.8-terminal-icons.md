@@ -1,28 +1,27 @@
-# TmuxDeck v1.8 终端图标快捷打开 PRD
+# TmuxDeck v1.8 Terminal Icons Quick-Open PRD
 
-> 目标：卡片底部从「打开 (Ghostty) 按钮 + 下拉选择」改为**一排终端品牌图标**，
-> 每个已安装的终端一个真实图标，点击即用该终端打开会话。
-> 原则：图标必须真实（品牌 logo），不用 lucide 通用图标。
-
----
-
-## 1. 背景与问题
-
-现在卡片底部是单个「打开 (Ghostty)」按钮，多终端时 hover 出下拉菜单。
-问题：
-- 用户要换终端，需要两次点击（展开下拉 + 选）
-- 按钮占一行，视觉重
-- 每次要猜「当前选中的是哪个」
-
-目标：一排终端图标，**图标即识别、点击即打开**。
+> Goal: change the card bottom from an "Open (Ghostty) button + dropdown" to **a row of terminal brand icons** — one real icon per installed terminal; click to open the session with that terminal.
+> Principle: icons must be real (brand logos), not generic lucide icons.
 
 ---
 
-## 2. 图标来源（真实品牌图标）
+## 1. Background and problem
 
-### 2.1 方案 A（主）：从已安装 App 提取 icns（运行时）
+Today the card bottom has a single "Open (Ghostty)" button; with multiple terminals, a dropdown appears on hover.
+Problems:
+- Switching terminals takes two clicks (open dropdown + select)
+- The button occupies a whole row; visually heavy
+- You always have to guess "which one is currently selected"
 
-macOS 每个 App bundle 都有真实图标：
+Goal: a row of terminal icons — **icon as recognition, click to open**.
+
+---
+
+## 2. Icon source (real brand icons)
+
+### 2.1 Option A (primary): extract icns from installed apps (runtime)
+
+Every macOS app bundle has a real icon:
 ```
 /Applications/Ghostty.app/Contents/Resources/icon.icns
 /Applications/iTerm.app/Contents/Resources/AppIcon.icns
@@ -30,11 +29,9 @@ macOS 每个 App bundle 都有真实图标：
 ...
 ```
 
-**后端改造**：
-- `detect_environment()` 的 `ToolInfo` 增加 `icon_path: Option<String>` 字段
-- 探测到已安装终端时，同时定位其 icns 路径。**注意：文件名各终端不同且不固定**
-  （Ghostty 实测是 `Ghostty.icns` 而非 `icon.icns`），因此**不能硬编码**，应扫描
-  `Resources/` 目录下所有 `.icns` 文件取第一个（或匹配 `AppIcon`/`icon` 关键字的）：
+**Backend changes:**
+- `detect_environment()`'s `ToolInfo` gains an `icon_path: Option<String>` field
+- When an installed terminal is detected, also locate its icns path. **Note: filenames differ per terminal and aren't fixed** (Ghostty is actually `Ghostty.icns`, not `icon.icns`), so **don't hardcode** — scan all `.icns` files in the `Resources/` directory and take the first (or one matching `AppIcon`/`icon` keywords):
   ```rust
   fn find_app_icon(app_path: &Path) -> Option<String> {
       let res = app_path.join("Contents/Resources");
@@ -43,94 +40,93 @@ macOS 每个 App bundle 都有真实图标：
           .map(|e| e.path().to_string_lossy().to_string())
   }
   ```
-- 找不到 icns 时 `icon_path = None`（前端回退到内置资源）
+- When no icns is found, `icon_path = None` (frontend falls back to bundled resources)
 
-**前端渲染 icns**：Tauri 前端无法直接 <img> 加载 .icns（浏览器不支持该格式）。
-**必须后端转换**：新增命令 `get_terminal_icon(terminal_id) -> Vec<u8>`
-内部用 `iconutil` 或 `sips` 把 icns 转成 PNG：
+**Frontend rendering of icns:** the Tauri frontend can't load `.icns` via a plain `<img>` (browsers don't support that format).
+**Conversion must happen in the backend:** new command `get_terminal_icon(terminal_id) -> Vec<u8>`, internally using `iconutil` or `sips` to convert icns → PNG:
 ```sh
-sips -s format png icon.icns --out /tmp/tmuxdeck-icon.png   # macOS 自带
+sips -s format png icon.icns --out /tmp/tmuxdeck-icon.png   # built into macOS
 ```
-返回 PNG bytes，前端转 base64 显示。
+Returns PNG bytes; the frontend converts to base64 for display.
 
-### 2.2 方案 B（备）：内置品牌图标资源
+### 2.2 Option B (fallback): bundled brand icon resources
 
-把各终端官方 logo（SVG/PNG）打包进项目 `public/terminal-icons/`，不依赖本机安装。
-来源：各项目 GitHub 仓库（Ghostty 的 logo.svg、kitty 的 logo 等）。
-**用于**：终端已探测到但 icns 路径找不到 / 方案 A 转换失败时的回退。
+Pack each terminal's official logo (SVG/PNG) into the project's `public/terminal-icons/`, independent of the local machine.
+Source: the projects' GitHub repos (Ghostty's logo.svg, kitty's logo, etc.).
+**Used when:** a terminal is detected but its icns path isn't found / Option A's conversion fails.
 
-> 主用 A、备用 B。A 保证「本机真实图标」，B 兜底。
+> A primary, B fallback. A guarantees "the real local icon"; B is the safety net.
 
 ---
 
-## 3. 前端改造
+## 3. Frontend changes
 
-### 3.1 卡片底部：图标行
+### 3.1 Card bottom: icon row
 
 ```
 ┌──────────────────────────────────┐
-│  🖥  ▶   ⬛   ⬛      ← 已装终端图标行  │
-│  （默认终端高亮边框，hover 放大）      │
+│  🖥  ▶   ⬛   ⬛      ← installed terminal icon row │
+│  (default terminal highlighted border, hover scales) │
 └──────────────────────────────────┘
 ```
 
-- 每个已安装终端一个小图标（20-24px 圆角）
-- **默认终端**（config 的 default_terminal）：高亮（边框 or 背景），其余透明
-- 点击图标 → `open_session(session.name, term.id)`
-- 一行放不下（>6 个）→ 滚动或收进「更多」按钮（图标行极简优先，v1.8 按最多 6 个处理）
+- One small icon per installed terminal (20-24px rounded)
+- **Default terminal** (config's default_terminal): highlighted (border or background); the rest transparent
+- Click icon → `open_session(session.name, term.id)`
+- When a row can't fit everything (>6), scroll or collapse into a "more" button (minimal icon row first; v1.8 treats 6 as the max)
 
-### 3.2 删除旧 UI
+### 3.2 Remove old UI
 
-- 移除「打开 (Ghostty)」大按钮
-- 移除下拉菜单（`activeTerminalDropdown` + `ChevronDown` + 菜单 div）
-- 移除 `Play` 图标依赖（若不再使用）
+- Remove the "Open (Ghostty)" big button
+- Remove the dropdown (`activeTerminalDropdown` + `ChevronDown` + menu div)
+- Remove the `Play` icon dependency (if no longer used)
 
-### 3.3 交互
+### 3.3 Interaction
 
-- hover：图标轻微放大（`scale-110 transition`）
-- 点击：立即打开 + tooltip 显示终端名
-- 默认终端图标加「●」小点或边框以示区分
+- hover: icon scales up slightly (`scale-110 transition`)
+- click: opens immediately + tooltip shows the terminal name
+- the default terminal icon gets a "●" dot or border to mark it
 
 ---
 
-## 4. 新增/变更接口
+## 4. New / changed interfaces
 
-| 命令 | 变更 |
+| Command | Change |
 |---|---|
-| `detect_environment` | `ToolInfo` 加 `icon_path: Option<String>` |
-| `get_terminal_icon(terminal_id) -> Vec<u8>` | 新增：icns → PNG bytes |
+| `detect_environment` | `ToolInfo` gains `icon_path: Option<String>` |
+| `get_terminal_icon(terminal_id) -> Vec<u8>` | new: icns → PNG bytes |
 
 ---
 
-## 5. 验收标准
+## 5. Acceptance criteria
 
-1. 本机已装 Ghostty：卡片底部显示 Ghostty 真实图标（从 .app 提取，非通用图标）
-2. 多终端时：一排图标各显示对应品牌 logo，互不混淆
-3. 点击任一图标：用该终端打开会话
-4. 默认终端图标有高亮标识
-5. icns 找不到时回退到内置资源，不显示空白/破裂图标
-6. Terminal.app 的图标也能正确提取显示
-7. 无「打开」大按钮和下拉菜单残留
-8. macOS build + CI 双平台通过
-9. i18n 三方对齐（新增文案双语）
-
----
-
-## 6. 明确不做
-
-- ❌ 图标 hover 展开大图 / 动画
-- ❌ Windows 终端图标（本期只做 macOS；Windows 形态不同，且用户已暂停 Windows 侧）
-- ❌ 自定义图标（用户上传/换图标）
-- ❌ 图标排序设置（按注册表顺序即可）
-- ❌ 未安装终端的图标仍显示（只显示已安装的，与产品「不显示无效选项」原则一致）
+1. With Ghostty installed locally: the card bottom shows Ghostty's real icon (extracted from the .app, not a generic icon)
+2. With multiple terminals: the icon row shows each one's matching brand logo, never mixed up
+3. Clicking any icon opens the session with that terminal
+4. The default terminal icon has a highlight marker
+5. When icns isn't found, fall back to bundled resources; no blank/broken icon
+6. Terminal.app's icon also extracts and displays correctly
+7. No residue of the "Open" big button or dropdown
+8. macOS build + CI dual-platform pass
+9. i18n three-way alignment (new copy bilingual)
 
 ---
 
-## 7. 工作量预估
+## 6. Explicitly out of scope
 
-| 项 | 估算 |
+- ❌ icon hover expansion to a large image / animation
+- ❌ Windows terminal icons (macOS only this release; Windows is a different shape, and the user has paused the Windows side)
+- ❌ custom icons (user upload/swapping)
+- ❌ icon ordering settings (registry order is fine)
+- ❌ showing icons for uninstalled terminals (only installed ones show, consistent with the product's "don't show invalid options" principle)
+
+---
+
+## 7. Effort estimate
+
+| Item | Estimate |
 |---|---|
-| 后端：icon_path + icns→PNG 命令 | 0.5 天 |
-| 前端：图标行 + 删旧 UI | 0.5 天 |
-| 内置兜底图标 + 验证 | 0.5 天 |
-| **合计** | **约 1.5 人日** |
+| backend: icon_path + icns→PNG command | 0.5 day |
+| frontend: icon row + delete old UI | 0.5 day |
+| bundled fallback icons + verification | 0.5 day |
+| **Total** | **about 1.5 person-days** |
