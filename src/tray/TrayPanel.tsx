@@ -97,9 +97,9 @@ export function TrayPanel() {
       await invoke("panel_hide");
     });
 
-  const handleAddPane = (name: string, agentId: string) =>
+  const handleAddPane = (name: string, agentId: string, count: number) =>
     runAction(name, async () => {
-      await invoke("add_pane", { sessionName: name, agentId });
+      await invoke("add_panes", { sessionName: name, agentId, count });
       await refresh();
     });
 

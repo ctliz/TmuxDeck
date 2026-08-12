@@ -1,5 +1,5 @@
-use std::process::Command;
 use crate::registry::detect_environment;
+use std::process::Command;
 
 pub(crate) const AGENT_IDENTITY_ENV_VARS: &[&str] = &[
     "PI_SESSION_ID",
@@ -66,7 +66,10 @@ pub(crate) fn build_augmented_path() -> String {
         candidates.push(format!("{}/.local/bin", home));
         candidates.push(format!("{}/.bun/bin", home));
 
-        let nvm_dir = std::path::Path::new(&home).join(".nvm").join("versions").join("node");
+        let nvm_dir = std::path::Path::new(&home)
+            .join(".nvm")
+            .join("versions")
+            .join("node");
         if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
             for entry in entries.flatten() {
                 let bin_path = entry.path().join("bin");
@@ -160,6 +163,18 @@ pub(crate) fn isolated_agent_command(command: &str, return_to_shell: bool) -> St
     )
 }
 
+#[tauri::command]
+pub fn use_standard_claude() -> Result<(), String> {
+    if crate::registry::find_agent_binary("claude").is_none() {
+        return Err("ERR_STANDARD_CLAUDE_UNAVAILABLE".to_string());
+    }
+    let mut config = crate::config::load_config();
+    config.use_standard_claude = true;
+    crate::config::save_config(config)?;
+    crate::claude_adapter::invalidate_managed_claude_health_cache();
+    Ok(())
+}
+
 pub(crate) fn append_identity_env_clears(args: &mut Vec<String>, target: &str) {
     for name in AGENT_IDENTITY_ENV_VARS {
         args.extend([
@@ -206,7 +221,10 @@ pub fn get_terminal_icon(terminal_id: String) -> Result<Vec<u8>, String> {
 pub fn to_wsl_path(path: String) -> String {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(out) = Command::new("wsl.exe").args(["wslpath", "-u", &path]).output() {
+        if let Ok(out) = Command::new("wsl.exe")
+            .args(["wslpath", "-u", &path])
+            .output()
+        {
             if out.status.success() {
                 let converted = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !converted.is_empty() {
@@ -254,15 +272,15 @@ mod tests {
         let nvm_cmd = "/home/dev/.nvm/versions/node/v24.14.0/bin/pi --name test-session";
         let command = isolated_agent_command(nvm_cmd, false);
         assert!(command.contains("PATH='/home/dev/.nvm/versions/node/v24.14.0/bin:"));
-        assert!(command.contains("/bin/sh -c '/home/dev/.nvm/versions/node/v24.14.0/bin/pi --name test-session'"));
+        assert!(command.contains(
+            "/bin/sh -c '/home/dev/.nvm/versions/node/v24.14.0/bin/pi --name test-session'"
+        ));
     }
 
     #[test]
     fn isolated_command_preserves_custom_shell_command() {
         let command = isolated_agent_command("custom-agent --name 'A B' && echo done", false);
-        assert!(command.ends_with(
-            "/bin/sh -c 'custom-agent --name '\\''A B'\\'' && echo done'"
-        ));
+        assert!(command.ends_with("/bin/sh -c 'custom-agent --name '\\''A B'\\'' && echo done'"));
     }
 
     #[test]

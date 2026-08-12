@@ -136,44 +136,17 @@ npm update -g @dataforxyz/agent-intercom-codex
 
 ### 2.4 Claude Code
 
-Install the global adapter:
+On macOS, select Claude Code in TmuxDeck's **Create Workspace** modal and choose **Install Managed Adapter**. TmuxDeck installs its pinned adapter from the app bundle without contacting npm or changing any global npm package. The same control becomes **Repair Managed Adapter** if health verification fails.
 
-```bash
-npm install -g @dataforxyz/agent-intercom-claude
-```
+The managed resource is `@dataforxyz/agent-intercom-claude` `0.10.1-tmuxdeck.1`, built from fork commit `afcb3fe3f889c2baab784a15d2aecf7c5676c827` and published with source at <https://github.com/ctliz/agent-intercom-claude/releases/tag/v0.10.1-tmuxdeck.1>. It is based on upstream `v0.10.0` with only the Monitor packaging fix. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
 
-Register the globally available MCP server for ordinary Claude Code sessions (Claude's default scope is `local`, so user scope is used explicitly here):
+Installation verifies the pinned SHA-256, rejects links, devices, absolute paths and `..`, stages the replacement, validates the Claude plugin → Monitor → MCP/runtime chain, and rolls back if validation or config persistence fails. A healthy existing version remains in place after a failed repair.
 
-```bash
-claude mcp add -s user claude-intercom -- claude-intercom-mcp
-```
+Each newly created managed tmux pane or Ghostty native slot explicitly passes `--safe` to Claude and receives a cryptographically random ID such as `tmuxdeck-<random-uuid-shape>` and a readable name such as `<workspace> · Claude 01`. The ID is persisted in the existing pane/slot's tmux metadata for that worker incarnation. Recreating a worker produces a new ID. It is routing metadata and consistency evidence, not an authentication credential.
 
-Verify:
+**Use Standard Claude** persists the preference and launches the independently detected `claude` binary. **Use Managed Claude** switches back without reinstalling when the managed adapter is healthy. Installing or repairing also switches back to Managed. Windows/WSL continues to use Standard Claude and does not show managed actions.
 
-```bash
-claude mcp list
-```
-
-The package also provides:
-
-- `claude-intercom-mcp`: tools inside ordinary Claude Code sessions.
-- `cci`: an ordinary wakeable Claude worker; `cci --tui` starts the interactive Claude TUI with Intercom identity.
-- `ccim`: a minimal wakeable worker, equivalent to `cci --minimal`.
-- `claude-intercom-worker`: advanced use for publishing multiple background workers from one process.
-
-When Claude Code is selected from the TmuxDeck panel, TmuxDeck first runs the discovered `cci --help` and selects `cci --tui` only when the executable succeeds and advertises `--tui`, `--id`, and `--name`. Each legacy tmux pane receives an identity such as `tmuxdeck-<workspace>-pane-01`; each Ghostty native slot receives `tmuxdeck-<workspace>-slot-01`. The displayed name is `<workspace> · Claude 01`. These values are stable when the same workspace/pane or slot is recreated. If `cci` is missing, non-executable, or incompatible, TmuxDeck silently uses the independently detected ordinary `claude` binary instead. The panel entry reads `Claude Code · Intercom (cci)` or `Claude Code · Standard`, so the selected mode is visible before creation. Custom commands are passed through unchanged.
-
-To inspect an active `cci` identity, use `/claude-intercom:intercom-id` or Alt+I. When starting outside TmuxDeck, specify it yourself:
-
-```bash
-cci --tui --id my-stable-claude-id --name "Readable Claude name"
-```
-
-After updating, restart ordinary Claude Code sessions and all `cci` / `ccim` workers:
-
-```bash
-npm update -g @dataforxyz/agent-intercom-claude
-```
+TmuxDeck does not select, modify, migrate, or delete a global `cci`. Advanced users may still launch one through a custom Agent command; custom commands are passed through unchanged.
 
 ## 3. Starting, naming, and stable identity
 

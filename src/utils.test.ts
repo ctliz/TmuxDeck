@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import QRCode from "qrcode";
-import { dictionaries, t, tPlural, translateError } from "./i18n.ts";
+import { agentDisplayName, dictionaries, t, tPlural, translateError } from "./i18n.ts";
 import {
   applyPaneContents,
   dominantAgentId,
@@ -15,7 +15,8 @@ import {
   sanitizeNameFrontend,
   summarizePaneAgents,
 } from "./utils.ts";
-import type { CreateOpts, ToolInfo, TmuxSession, TmuxPane } from "./types.ts";
+import { claudeHint, claudeSwitchTarget } from "./types.ts";
+import type { CreateOpts, ManagedClaudeStatus, ToolInfo, TmuxSession, TmuxPane } from "./types.ts";
 
 test("sanitizeNameFrontend - valid alphanumeric names", () => {
   assert.strictEqual(sanitizeNameFrontend("my-project"), "my-project");
@@ -364,6 +365,150 @@ test("pane agent count mismatch error reports expected and actual counts", () =>
   );
 });
 
+const claudeStatus = (
+  state: ManagedClaudeStatus["state"],
+  overrides: Partial<ManagedClaudeStatus> = {}
+): ManagedClaudeStatus => ({
+  state,
+  version: "0.10.1-tmuxdeck.1",
+  standardClaudeAvailable: true,
+  usingStandard: false,
+  ...overrides,
+});
+
+test("Claude only interrupts the create flow when it needs a decision", () => {
+  assert.strictEqual(claudeHint(claudeStatus("not-installed")), "install");
+  assert.strictEqual(claudeHint(claudeStatus("needs-repair")), "repair");
+  // A working setup and an unsupported platform both stay completely silent.
+  assert.strictEqual(claudeHint(claudeStatus("healthy")), null);
+  assert.strictEqual(claudeHint(claudeStatus("unavailable")), null);
+  assert.strictEqual(claudeHint(null), null);
+});
+
+test("choosing standard Claude stops the nudge from coming back", () => {
+  for (const state of ["not-installed", "needs-repair", "healthy"] as const) {
+    assert.strictEqual(
+      claudeHint(claudeStatus(state, { usingStandard: true })),
+      null,
+      `${state} must not nag after the user opted into standard Claude`
+    );
+  }
+});
+
+test("the chip menu always keeps a way back to enhanced messaging", () => {
+  // Opting out is reversible from every state the adapter can be in.
+  for (const state of ["not-installed", "needs-repair", "healthy"] as const) {
+    assert.strictEqual(
+      claudeSwitchTarget(claudeStatus(state, { usingStandard: true })),
+      "managed",
+      `${state} must still offer a route back to enhanced messaging`
+    );
+  }
+  assert.strictEqual(claudeSwitchTarget(claudeStatus("healthy")), "standard");
+});
+
+test("the chip menu stays hidden when there is nothing to switch to", () => {
+  // Nothing to fall back on, and no managed story at all off macOS.
+  assert.strictEqual(
+    claudeSwitchTarget(claudeStatus("healthy", { standardClaudeAvailable: false })),
+    null
+  );
+  assert.strictEqual(claudeSwitchTarget(claudeStatus("unavailable")), null);
+  assert.strictEqual(
+    claudeSwitchTarget(claudeStatus("unavailable", { usingStandard: true })),
+    null
+  );
+  assert.strictEqual(claudeSwitchTarget(null), null);
+  // An unhealthy adapter is handled by the hint line, not by the quiet menu.
+  assert.strictEqual(claudeSwitchTarget(claudeStatus("not-installed")), null);
+  assert.strictEqual(claudeSwitchTarget(claudeStatus("needs-repair")), null);
+});
+
+test("the hint line and the chip menu never appear at the same time", () => {
+  for (const state of [
+    "not-installed",
+    "needs-repair",
+    "healthy",
+    "unavailable",
+  ] as const) {
+    for (const usingStandard of [false, true]) {
+      for (const standardClaudeAvailable of [false, true]) {
+        const status = claudeStatus(state, { usingStandard, standardClaudeAvailable });
+        assert.ok(
+          claudeHint(status) === null || claudeSwitchTarget(status) === null,
+          `${state} (usingStandard=${usingStandard}, standard=${standardClaudeAvailable}) shows two Claude affordances at once`
+        );
+      }
+    }
+  }
+});
+
+test("batch add-pane errors show only their localized sentence", () => {
+  // The rollback payload nests another error code and the count payload carries a
+  // value the UI cannot produce. Both are diagnostics, so neither reaches the user.
+  const rollback = translateError(
+    "ERR_ADD_PANES_ROLLBACK|ERR_ADD_PANE_FAILED|kill-session refused"
+  );
+  assert.strictEqual(rollback, t("ERR_ADD_PANES_ROLLBACK"));
+  assert.ok(!rollback.includes("ERR_"), `raw code leaked: ${rollback}`);
+  assert.ok(!rollback.includes("kill-session"), `diagnostics leaked: ${rollback}`);
+
+  const count = translateError("ERR_ADD_PANES_COUNT|7");
+  assert.strictEqual(count, t("ERR_ADD_PANES_COUNT"));
+  assert.ok(!count.includes("7"), `internal count leaked: ${count}`);
+});
+
+test("add-pane label switches between one and several panes", () => {
+  // The single-pane wording stays free of a redundant "1".
+  const one = tPlural("card.addPaneWith", 1, { agent: "Pi" });
+  assert.ok(!one.includes("1"), `single-pane label should not count: ${one}`);
+  assert.ok(one.includes("Pi"));
+  for (const n of [2, 4]) {
+    const many = tPlural("card.addPaneWith", n, { agent: "Pi" });
+    assert.ok(many.includes(String(n)), `expected ${n} in: ${many}`);
+    assert.ok(many.includes("Pi"));
+  }
+});
+
+test("add-pane plural copy keeps both placeholders in each locale", () => {
+  const { en, zh } = dictionaries;
+  for (const dict of [en, zh]) {
+    assert.match(dict["card.addPaneWith_one"], /\{agent\}/);
+    assert.match(dict["card.addPaneWith_other"], /\{agent\}/);
+    assert.match(dict["card.addPaneWith_other"], /\{n\}/);
+  }
+});
+
+test("either Claude backend renders as one plain agent label", () => {
+  // Keyed off the agent id, so a backend rename cannot resurface the mode.
+  assert.strictEqual(
+    agentDisplayName({ id: "claude", name: "Claude Code · Intercom (Managed)" }),
+    "Claude"
+  );
+  assert.strictEqual(
+    agentDisplayName({ id: "claude", name: "Claude Code · Standard" }),
+    "Claude"
+  );
+  assert.strictEqual(
+    agentDisplayName({ id: "claude", name: "whatever the backend calls it next" }),
+    "Claude"
+  );
+});
+
+test("other agents keep their own names and translations", () => {
+  assert.strictEqual(agentDisplayName({ id: "codex", name: "Codex" }), "Codex");
+  // A user's custom agent name must win over the generic "agent.custom" label.
+  assert.strictEqual(
+    agentDisplayName({ id: "custom", name: "My Runner" }),
+    "My Runner"
+  );
+  // Dictionary-keyed names still resolve through translateName.
+  assert.strictEqual(
+    agentDisplayName({ id: "shell", name: "agent.shell" }),
+    t("agent.shell")
+  );
+});
+
 test("every Tauri command error code has an en and zh translation", () => {
   const { en, zh } = dictionaries;
   const commandsDir = path.resolve(process.cwd(), "src-tauri/src/commands");
@@ -396,9 +541,23 @@ test("English and Chinese dictionaries expose the same keys", () => {
     "modal.summaryMixed",
     "modal.agentMixItem",
     "modal.agentMixSeparator",
-    "card.addPaneWith",
+    "card.addPaneWith_one",
+    "card.addPaneWith_other",
     "card.addPaneChoose",
     "card.addPaneRecommended",
+    "card.addPaneCount",
+    "card.addPaneBusy",
+    "claude.hintInstall",
+    "claude.hintRepair",
+    "claude.enable",
+    "claude.repair",
+    "claude.useManaged",
+    "claude.useStandard",
+    "claude.modeManaged",
+    "claude.modeStandard",
+    "claude.modeCurrent",
+    "claude.working",
+    "agent.claude",
     "ERR_AGENT_NOT_FOUND",
     "ERR_PANE_AGENT_COUNT",
     "val.paneAgentCountDetail",
@@ -410,6 +569,7 @@ test("English and Chinese dictionaries expose the same keys", () => {
   assert.match(zh["modal.summaryMixed"], /\{mix\}/);
   assert.match(zh["modal.applyToAllTitle"], /\{agent\}/);
   assert.match(zh["modal.paneIndexLabel"], /\{n\}/);
+  assert.match(zh["claude.modeCurrent"], /\{mode\}/);
   assert.match(zh["val.paneAgentCountDetail"], /\{expected\}[\s\S]*\{actual\}/);
 });
 
@@ -465,4 +625,159 @@ test("Static mobile HTML contains bugfixes for sendSay, WS resubscribe, ALLOWED_
   assert.match(html, /\.key-btn[\s\S]*?min-height:\s*44px/);
   assert.doesNotMatch(html, /(^|[^-])shrink:\s*0/m);
   assert.match(html, /enterkeyhint="send"/);
+});
+
+test("mobile vendors marked and DOMPurify inline, with provenance and no duplicate copy", () => {
+  const mobileDir = path.resolve(process.cwd(), "src-tauri/mobile");
+  const html = fs.readFileSync(path.join(mobileDir, "index.html"), "utf-8");
+
+  // Pinned versions are visible in the markers, so an upgrade cannot be silent.
+  assert.match(html, /BEGIN VENDOR: marked 18\.0\.9 -- SPDX-License-Identifier: MIT/);
+  assert.match(html, /END VENDOR: marked 18\.0\.9/);
+  assert.match(
+    html,
+    /BEGIN VENDOR: DOMPurify 3\.4\.13 -- SPDX-License-Identifier: Apache-2\.0/
+  );
+  assert.match(html, /END VENDOR: DOMPurify 3\.4\.13/);
+  // Both libraries must actually be present, not just announced.
+  assert.match(html, /marked v18\.0\.9/);
+  assert.match(html, /DOMPurify 3\.4\.13/);
+
+  // No external fetch: the server only answers /v1/.
+  assert.doesNotMatch(html, /<script[^>]+src=/i);
+
+  // Provenance lives in vendor/, but the code must exist in exactly one place.
+  const vendorDir = path.join(mobileDir, "vendor");
+  assert.ok(fs.existsSync(path.join(vendorDir, "README.md")));
+  assert.ok(fs.existsSync(path.join(vendorDir, "marked.LICENSE")));
+  assert.ok(fs.existsSync(path.join(vendorDir, "dompurify.LICENSE-APACHE")));
+  const strayJs = fs.readdirSync(vendorDir).filter((f) => f.endsWith(".js"));
+  assert.deepStrictEqual(
+    strayJs,
+    [],
+    `vendor/ must not duplicate the inlined code: ${strayJs.join(", ")}`
+  );
+
+  // Full license texts stay out of the shipped HTML.
+  assert.doesNotMatch(html, /Apache License\s*\n\s*Version 2\.0/);
+});
+
+test("mobile message rendering keeps its sanitizing pipeline", () => {
+  const html = fs.readFileSync(
+    path.resolve(process.cwd(), "src-tauri/mobile/index.html"),
+    "utf-8"
+  );
+
+  // Raw HTML is escaped by Marked's renderer before sanitizing, so even an
+  // otherwise allowed tag such as <strong> is displayed literally.
+  assert.match(html, /markdownRenderer\.html\s*=\s*function/);
+  assert.match(html, /return escapeRawHtml\(token && token\.text\)/);
+  // Every rendered message then goes through DOMPurify with an explicit
+  // allowlist as a second, independent defense.
+  assert.match(html, /DOMPurify\.sanitize\(rawHtml, \{[\s\S]*?ALLOWED_TAGS/);
+  for (const tag of ["img", "style", "svg", "form", "iframe", "script"]) {
+    assert.match(
+      html,
+      new RegExp(`FORBID_TAGS:[^\\]]*'${tag}'`),
+      `${tag} must be forbidden outright`
+    );
+  }
+  // Only safe protocols keep their href, and links never hand over the opener.
+  assert.match(html, /\^\(https\?:\|mailto:\)/);
+  assert.match(html, /removeAttribute\('href'\)/);
+  assert.match(html, /'noopener noreferrer'/);
+
+  // Copy buttons are built as elements; message text is never concatenated in.
+  assert.match(html, /createElement\('button'\)/);
+  assert.doesNotMatch(html, /innerHTML\s*\+?=\s*[`'"][^`'"]*\$\{\s*(?:turn|text)\b/);
+});
+
+test("mobile list groups by backend workspace metadata only", () => {
+  const html = fs.readFileSync(
+    path.resolve(process.cwd(), "src-tauri/mobile/index.html"),
+    "utf-8"
+  );
+
+  // Grouping and the aggregate status are real functions, not inline guesswork.
+  assert.match(html, /function groupConversations\(/);
+  assert.match(html, /const statusRank = /);
+
+  // Only the backend's camelCase metadata may decide a group.
+  assert.match(html, /conv\.workspaceId/);
+  assert.match(html, /conv\.workspaceName/);
+  // Native slot naming must never be parsed client-side.
+  assert.doesNotMatch(html, /__td_slot_/);
+  // Missing metadata falls into one localized bucket instead of the session name.
+  assert.match(html, /__ungrouped__/);
+  assert.match(html, /ungrouped:/);
+
+  // thinking and running-tool share the "working" rank.
+  assert.match(html, /'thinking':\s*1/);
+  assert.match(html, /'running-tool':\s*1/);
+  assert.match(html, /'awaiting-human':\s*0/);
+
+  // Only awaiting workspaces are promoted. Other aggregate states must not
+  // cause the workspace list to jump around.
+  assert.match(html, /Number\(b\.awaitingCount > 0\) - Number\(a\.awaitingCount > 0\)/);
+  assert.doesNotMatch(html, /groups\.sort\(function\(a, b\) \{ return a\.rank - b\.rank/);
+
+  // Headers are operable and expose their state to assistive tech.
+  assert.match(html, /aria-expanded="\$\{expanded\}"/);
+  assert.match(html, /onkeydown="if\(event\.key==='Enter'\|\|event\.key===' '\)/);
+
+  // Expansion state is in-memory only; nothing is persisted.
+  assert.match(html, /this\.groupOverrides = new Map\(\)/);
+  assert.doesNotMatch(html, /localStorage\.setItem\(\s*['"]tmuxdeck-groups/);
+});
+
+test("mobile labels capture output only from the authoritative transcript kind", () => {
+  const html = fs.readFileSync(
+    path.resolve(process.cwd(), "src-tauri/mobile/index.html"),
+    "utf-8"
+  );
+
+  // Exact equality means missing and unknown values both return false.
+  assert.match(
+    html,
+    /function isCaptureFallback\(conv\)\s*\{\s*return conv\?\.transcriptKind === 'capture';\s*\}/
+  );
+  // Transport availability is independent of transcript reliability and must
+  // never be used as a capture heuristic again.
+  const helper = html.match(
+    /function isCaptureFallback\(conv\)\s*\{[\s\S]*?\n\s*\}/
+  )?.[0] ?? "";
+  assert.ok(helper, "expected isCaptureFallback helper");
+  assert.doesNotMatch(helper, /intercomSessionId/);
+});
+
+test("mobile conversation view keeps a minimal persistent action set", () => {
+  const html = fs.readFileSync(
+    path.resolve(process.cwd(), "src-tauri/mobile/index.html"),
+    "utf-8"
+  );
+
+  // The conversation owns one action bar; the list-level brand/status header is
+  // hidden while a conversation is active.
+  assert.match(html, /body\.in-conversation > header\s*\{\s*display:\s*none/);
+  assert.match(html, /classList\.toggle\('in-conversation'/);
+  // Workspace context remains visible and accessible inside that bar.
+  assert.match(html, /class="stream-workspace"/);
+  assert.match(html, /aria-label="\$\{this\.escapeAttr\(workspaceName \+ ' · ' \+ title\)\}"/);
+
+  // The control keys live in the More sheet only; no always-on key bar.
+  assert.doesNotMatch(html, /class="controls-bar"/);
+  assert.match(html, /id="more-sheet"/);
+  assert.match(html, /id="message-sheet"/);
+
+  // Awaiting is a notice, not another button: Send already replies.
+  assert.match(html, /notice-bar awaiting/);
+  assert.doesNotMatch(html, />\s*Reply\s*</);
+
+  // Offline exposes exactly one recovery action, and no standing Refresh.
+  assert.match(html, /notice-bar offline/);
+  assert.doesNotMatch(html, />\s*(Refresh|刷新)\s*</);
+
+  // Pane ids and transport wording stay out of the conversation chrome.
+  assert.doesNotMatch(html, /Kind:\s*\$\{/);
+  assert.doesNotMatch(html, /<span class="conv-id">/);
 });

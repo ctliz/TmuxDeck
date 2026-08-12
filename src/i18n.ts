@@ -55,9 +55,12 @@ const en: Record<string, string> = {
   "card.confirmKillSlot": "Terminate this Agent slot? Its tmux session and process will end.",
   "card.confirmKillLastSlot": "Terminate the final Agent and delete this workspace? Its tmux session and process will end.",
   "card.addPane": "Add pane",
-  "card.addPaneWith": "Add pane running {agent}",
+  "card.addPaneWith_one": "Add pane running {agent}",
+  "card.addPaneWith_other": "Add {n} panes running {agent}",
   "card.addPaneChoose": "Pick an Agent for the new pane",
   "card.addPaneRecommended": "Recommended",
+  "card.addPaneCount": "Count",
+  "card.addPaneBusy": "Adding…",
   "card.agentReady": "Agent Ready",
   "card.selectTerminal": "Launch terminal:",
 
@@ -88,6 +91,17 @@ const en: Record<string, string> = {
   "modal.applyToAllTitle": "Run {agent} in every pane",
   "modal.agentMixItem": "{agent} ×{n}",
   "modal.agentMixSeparator": " · ",
+  "claude.hintInstall": "Claude works better with enhanced messaging.",
+  "claude.hintRepair": "Claude's enhanced messaging needs repair.",
+  "claude.enable": "Enable",
+  "claude.repair": "Repair",
+  "claude.useManaged": "Switch to enhanced messaging",
+  "claude.useStandard": "Use standard",
+  "claude.modeManaged": "Enhanced messaging",
+  "claude.modeStandard": "Standard",
+  "claude.modeCurrent": "Now: {mode}",
+  "claude.menuLabel": "Claude messaging options",
+  "claude.working": "Working…",
 
   // Missing Tmux Warning
   "tmux.missing.title": "tmux is required",
@@ -99,6 +113,7 @@ const en: Record<string, string> = {
   "terminal.system": "Terminal (System)",
   "agent.shell": "Plain Shell",
   "agent.custom": "Custom Agent",
+  "agent.claude": "Claude",
 
   // Tray Menu
   "tray.activeHeader": "● Active: {name}",
@@ -142,6 +157,8 @@ const en: Record<string, string> = {
 
   // Error Code Mappings (from Rust)
   "ERR_ADD_PANE_FAILED": "Failed to add pane",
+  "ERR_ADD_PANES_COUNT": "Invalid pane count",
+  "ERR_ADD_PANES_ROLLBACK": "Adding panes failed and could not be fully rolled back — please check the workspace",
   "ERR_ADD_PANE_OUTPUT_ERR": "Error adding pane",
   "ERR_CONFIG_SAVE": "Failed to save configuration",
   "ERR_ICON_CONVERT_FAILED": "Icon conversion failed",
@@ -182,6 +199,12 @@ const en: Record<string, string> = {
   "ERR_TERMINAL_LAUNCH_FAILED": "Failed to launch terminal",
   "ERR_TERMINAL_NOT_FOUND": "Terminal not found",
   "ERR_TERMINAL_RETURN_ERR": "Terminal exited with error status",
+  "ERR_MANAGED_CLAUDE_UNAVAILABLE": "Managed Claude Intercom is unavailable on this platform",
+  "ERR_MANAGED_CLAUDE_RESOURCE": "Managed Claude Intercom resource was not found",
+  "ERR_MANAGED_CLAUDE_VERIFY": "Managed Claude Intercom verification failed",
+  "ERR_MANAGED_CLAUDE_INSTALL": "Managed Claude Intercom installation failed",
+  "ERR_RANDOM_ID": "Could not create a private random Intercom ID",
+  "ERR_STANDARD_CLAUDE_UNAVAILABLE": "Standard Claude Code is not installed",
 
   // Fallbacks & Validation
   "val.enterName": "Please enter a valid workspace name",
@@ -266,9 +289,12 @@ const zh: Record<string, string> = {
   "card.confirmKillSlot": "确定终止此 Agent 槽位？对应 tmux 会话和进程将结束。",
   "card.confirmKillLastSlot": "确定终止最后一个 Agent 并删除此工作区？对应 tmux 会话和进程将结束。",
   "card.addPane": "新增分屏",
-  "card.addPaneWith": "新增运行 {agent} 的分屏",
+  "card.addPaneWith_one": "新增运行 {agent} 的分屏",
+  "card.addPaneWith_other": "新增 {n} 个运行 {agent} 的分屏",
   "card.addPaneChoose": "为新分屏选择 Agent",
   "card.addPaneRecommended": "推荐",
+  "card.addPaneCount": "数量",
+  "card.addPaneBusy": "新增中…",
   "card.agentReady": "Agent Ready",
   "card.selectTerminal": "选择启动终端:",
 
@@ -299,6 +325,17 @@ const zh: Record<string, string> = {
   "modal.applyToAllTitle": "所有分屏均运行 {agent}",
   "modal.agentMixItem": "{agent} ×{n}",
   "modal.agentMixSeparator": " · ",
+  "claude.hintInstall": "Claude 搭配通信增强更好用。",
+  "claude.hintRepair": "Claude 的通信增强需要修复。",
+  "claude.enable": "启用",
+  "claude.repair": "修复",
+  "claude.useManaged": "切换到通信增强",
+  "claude.useStandard": "使用标准版",
+  "claude.modeManaged": "通信增强",
+  "claude.modeStandard": "标准版",
+  "claude.modeCurrent": "当前：{mode}",
+  "claude.menuLabel": "Claude 通信方式选项",
+  "claude.working": "处理中…",
 
   // Missing Tmux Warning
   "tmux.missing.title": "未检测到 Tmux 安装",
@@ -310,6 +347,7 @@ const zh: Record<string, string> = {
   "terminal.system": "终端 (系统)",
   "agent.shell": "纯 Shell",
   "agent.custom": "自定义 Agent",
+  "agent.claude": "Claude",
 
   // Tray Menu
   "tray.activeHeader": "● 当前活跃：{name}",
@@ -353,6 +391,8 @@ const zh: Record<string, string> = {
 
   // Error Code Mappings (from Rust)
   "ERR_ADD_PANE_FAILED": "新增分屏失败",
+  "ERR_ADD_PANES_COUNT": "新增分屏数量无效",
+  "ERR_ADD_PANES_ROLLBACK": "批量新增失败且未能完全回滚，请检查工作区",
   "ERR_ADD_PANE_OUTPUT_ERR": "新增分屏报错",
   "ERR_CONFIG_SAVE": "保存配置失败",
   "ERR_ICON_CONVERT_FAILED": "图标转换失败",
@@ -393,6 +433,12 @@ const zh: Record<string, string> = {
   "ERR_TERMINAL_LAUNCH_FAILED": "打开终端失败",
   "ERR_TERMINAL_NOT_FOUND": "未找到指定终端",
   "ERR_TERMINAL_RETURN_ERR": "终端打开返回错误状态",
+  "ERR_MANAGED_CLAUDE_UNAVAILABLE": "当前平台不支持托管 Claude Intercom",
+  "ERR_MANAGED_CLAUDE_RESOURCE": "未找到托管 Claude Intercom 资源",
+  "ERR_MANAGED_CLAUDE_VERIFY": "托管 Claude Intercom 校验失败",
+  "ERR_MANAGED_CLAUDE_INSTALL": "托管 Claude Intercom 安装失败",
+  "ERR_RANDOM_ID": "无法生成随机 Intercom ID",
+  "ERR_STANDARD_CLAUDE_UNAVAILABLE": "未安装标准 Claude Code",
 
   // Fallbacks & Validation
   "val.enterName": "请输入有效的项目名称 (支持字母、数字、下划线和连字符)",
@@ -448,6 +494,18 @@ export function translateName(name: string): string {
   return name;
 }
 
+/**
+ * Label for an Agent the caller has already identified by id. Claude ships under
+ * two backend names (enhanced link vs standard) but is one agent to the user, so
+ * which link it uses stays in the chip's own menu instead of leaking into every
+ * chip, pane dropdown and summary. Callers holding only a name keep using
+ * `translateName`.
+ */
+export function agentDisplayName(agent: { id: string; name: string }): string {
+  if (agent.id === "claude") return t("agent.claude");
+  return translateName(agent.name);
+}
+
 export function translateError(raw: unknown): string {
   if (typeof raw !== "string") return t("ERR_TMUX_GENERIC");
   const [code, ...details] = raw.split("|");
@@ -462,6 +520,12 @@ export function translateError(raw: unknown): string {
   if (code === "ERR_PANE_AGENT_COUNT" && details.length >= 2) {
     const [expected, actual] = details;
     return `${translated}: ${t("val.paneAgentCountDetail", { expected, actual })}`;
+  }
+  // Both batch add-pane payloads carry diagnostics only: a nested error code and
+  // a count the UI cannot even produce. Neither helps the user, so the localized
+  // sentence is returned on its own and the payload stays in the backend logs.
+  if (code === "ERR_ADD_PANES_ROLLBACK" || code === "ERR_ADD_PANES_COUNT") {
+    return translated;
   }
   if (details[0]) {
     return `${translated}: ${details[0]}`;

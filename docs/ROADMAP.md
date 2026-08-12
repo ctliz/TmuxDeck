@@ -6,8 +6,9 @@
 ## Current status
 
 - **Latest release:** v1.11.1 — fixes Claude Code and OpenCode detection for native installer paths
-- **Trunk:** direct pushes to main, CI (macOS + Windows build + frontend/backend tests) all green
-- **Test suite:** 108 backend tests (106 passing + 2 environment/on-device ignored) + 25 frontend tests; mobile LAN real-device acceptance pending
+- **Release candidate:** v1.12.0 — Managed Claude fallback, atomic batch panes, and workspace-aware mobile conversations; not released yet
+- **Trunk:** direct pushes to main; the v1.12.0 release-candidate tree passes local macOS frontend/backend verification, while Windows target verification remains pending
+- **Test suite:** 124 backend tests passing + 2 environment/on-device ignored, and 40 frontend tests passing; physical-phone LAN acceptance remains pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 
 ## Planning queue
@@ -32,12 +33,16 @@ Progress:
 - [x] WebSocket transport: token auth, subscription filtering, heartbeat and connection-level targeted replies
 - [x] Trusted-LAN single-port HTTP+WS code: dynamic LAN pairing URLs, token/Host/source validation, embedded mobile SPA entry, client-count events, command audit
 - [x] Mobile SPA code (single embedded HTML entry)
+- [x] Workspace grouping from backend-authoritative `workspaceId` / `workspaceName` metadata, including native workspaces without session-name parsing (v1.12.0 RC)
+- [x] Mobile conversation UI: compact actions, awaiting/offline states, context controls, Markdown rendering with raw-HTML escaping and DOMPurify sanitization, and authoritative `transcriptKind` labeling (v1.12.0 RC)
+- [x] macOS pinned Managed Claude Adapter: offline SHA-verified install/repair, safe extraction, persistent Standard fallback, random pane/slot incarnation IDs, and fail-closed bridge association (v1.12.0 RC)
+- [x] Atomic batch pane creation: one frontend invocation, backend count 1–6, rollback on failure, and one native layout rebuild (v1.12.0 RC)
 - [ ] Physical-phone LAN acceptance: pairing, reconnect, multi-conversation, ask/reply, forward, firewall behavior (automated coverage complete; final real-device sign-off pending)
 - [ ] External push entry point (works while the browser is suspended/closed)
 
 **Security boundary:** LAN mode is plaintext and intended only for a trusted local network. Token authentication remains mandatory; VPN/TLS is a reserved extension.
 
-**External dependency:** cross-harness operation uses the `@dataforxyz/agent-intercom-*` adapter family. Claude `cci --tui` automatic inbox injection currently depends on the upstream packaging fix tracked in [agent-intercom-claude#6](https://github.com/dataforxyz/agent-intercom-claude/issues/6); TmuxDeck falls back to ordinary Claude when a compatible `cci` is unavailable.
+**External dependency:** cross-harness operation uses the `@dataforxyz/agent-intercom-*` adapter family. The v1.12.0 release candidate bundles a pinned macOS maintenance artifact containing the Monitor packaging fix previously tracked in [agent-intercom-claude#6](https://github.com/dataforxyz/agent-intercom-claude/issues/6), so that upstream packaging issue is no longer a blocker for Managed Claude. TmuxDeck still falls back persistently to Standard Claude, and upstream Monitor warnings remain a follow-up. Protocol-v4 workspace-scoped discovery is also follow-up scope rather than part of v1.12.0.
 
 ### P1 · Windows on-device verification (deferred, schedule TBD)
 

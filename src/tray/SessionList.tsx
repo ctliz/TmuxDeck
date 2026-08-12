@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { t, tPlural, translateName } from "../i18n";
+import { agentDisplayName, t, tPlural } from "../i18n";
 import { ToolInfo, TmuxSession } from "../types";
 import { dominantAgentId, resolvePaneAgentId } from "../utils";
 
@@ -8,7 +8,8 @@ interface Props {
   agents: ToolInfo[];
   busy: string | null;
   onOpen: (name: string) => void;
-  onAddPane: (name: string, agentId: string) => void;
+  /** The tray stays a one-pane quick action; count is fixed at 1. */
+  onAddPane: (name: string, agentId: string, count: number) => void;
 }
 
 function agentLabel(session: TmuxSession, agents: ToolInfo[]): string | null {
@@ -19,7 +20,7 @@ function agentLabel(session: TmuxSession, agents: ToolInfo[]): string | null {
   const dominant = dominantAgentId(ids);
   if (!dominant) return null;
   const matched = agents.find((a) => a.id === dominant);
-  return matched ? translateName(matched.name) : dominant;
+  return matched ? agentDisplayName(matched) : dominant;
 }
 
 export function SessionList({ sessions, agents, busy, onOpen, onAddPane }: Props) {
@@ -98,14 +99,14 @@ export function SessionList({ sessions, agents, busy, onOpen, onAddPane }: Props
                         disabled={isBusy}
                         onClick={() => {
                           setAgentPicker(null);
-                          onAddPane(session.name, candidate.id);
+                          onAddPane(session.name, candidate.id, 1);
                         }}
-                        title={t("card.addPaneWith", {
-                          agent: translateName(candidate.name),
+                        title={t("card.addPaneWith_one", {
+                          agent: agentDisplayName(candidate),
                         })}
                         className="flex min-w-0 items-center justify-between gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-left text-[10px] text-white/70 transition hover:bg-white/[0.12] hover:text-white disabled:opacity-40"
                       >
-                        <span className="truncate">{translateName(candidate.name)}</span>
+                        <span className="truncate">{agentDisplayName(candidate)}</span>
                         {candidate.id === recommendedAgentId && (
                           <span className="shrink-0 text-[8px] text-cyan-300">
                             {t("card.addPaneRecommended")}

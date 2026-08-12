@@ -74,15 +74,35 @@ pub struct Conversation {
     /// 对话 ID 即 pane ID（`%3`），全局唯一且稳定
     pub id: String,
     pub session: String,
+    /// Authoritative workspace grouping supplied by tmux metadata.
+    pub workspace_id: String,
+    pub workspace_name: String,
     pub cwd: String,
     pub kind: AgentKind,
+    /// Backend-authoritative transcript reliability for the source selected now.
+    pub transcript_kind: TranscriptKind,
     /// 展示名：优先用 intercom 会话名，否则回退到 tmux session 名
     pub title: String,
     /// 对应的 intercom 会话 ID；None 表示这个 pane 没接入总线，只能走 send-keys
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intercom_session_id: Option<String>,
+    /// TmuxDeck-managed panes persist the expected routing ID in tmux metadata.
+    /// It is a consistency check after process-tree matching, never authorization.
+    #[serde(skip)]
+    pub expected_intercom_id: Option<String>,
+    /// True only for panes launched through TmuxDeck's pinned Claude adapter.
+    /// Legacy panes intentionally do not acquire stricter matching rules.
+    #[serde(skip)]
+    pub managed_claude_adapter: bool,
     /// 实时状态。有 intercom 时是事实；没有时为 Unknown（不猜）
     pub status: ConversationStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TranscriptKind {
+    Structured,
+    Capture,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +212,30 @@ pub fn pane_pid_map() -> HashMap<i64, String> {
     map
 }
 
+fn compatible_cwd(left: &str, right: &str) -> bool {
+    let canonical = |value: &str| std::fs::canonicalize(value).ok();
+    match (canonical(left), canonical(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => left.trim_end_matches('/') == right.trim_end_matches('/'),
+    }
+}
+
+fn session_matches_pane(session: &SessionInfo, conversation: &Conversation) -> bool {
+    if !conversation.managed_claude_adapter {
+        // Backward compatibility: the process tree is the primary evidence for
+        // existing Pi/Codex/OpenCode/Claude panes. Do not add model substring
+        // guesses here; they can misclassify valid sessions.
+        return true;
+    }
+    conversation.kind == AgentKind::ClaudeCode
+        && conversation
+            .expected_intercom_id
+            .as_deref()
+            .is_some_and(|expected| session.id == expected)
+        && compatible_cwd(&session.cwd, &conversation.cwd)
+        && session.model.eq_ignore_ascii_case("claude")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 对话注册表
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,17 +263,29 @@ impl ConversationRegistry {
                 .as_deref()
                 .map(AgentKind::from_command)
                 .unwrap_or_else(|| AgentKind::from_command(&p.command));
-            let entry = self.conversations.entry(p.id.clone()).or_insert_with(|| Conversation {
-                id: p.id.clone(),
-                session: p.session.clone(),
-                cwd: p.cwd.clone(),
-                kind,
-                title: p.session.clone(),
-                intercom_session_id: None,
-                status: ConversationStatus::Unknown,
-            });
+            let entry = self
+                .conversations
+                .entry(p.id.clone())
+                .or_insert_with(|| Conversation {
+                    id: p.id.clone(),
+                    session: p.session.clone(),
+                    workspace_id: p.workspace_id.clone(),
+                    workspace_name: p.workspace_name.clone(),
+                    cwd: p.cwd.clone(),
+                    kind,
+                    transcript_kind: TranscriptKind::Capture,
+                    title: p.session.clone(),
+                    intercom_session_id: None,
+                    expected_intercom_id: p.expected_intercom_id.clone(),
+                    managed_claude_adapter: p.managed_claude_adapter,
+                    status: ConversationStatus::Unknown,
+                });
             entry.session = p.session;
+            entry.workspace_id = p.workspace_id;
+            entry.workspace_name = p.workspace_name;
             entry.cwd = p.cwd;
+            entry.expected_intercom_id = p.expected_intercom_id;
+            entry.managed_claude_adapter = p.managed_claude_adapter;
             // 只在推断出具体 agent 时更新 kind：agent 执行工具时
             // pane_current_command 会临时变成 bash 之类，不能据此把 kind 打回 Shell
             if kind != AgentKind::Unknown && kind != AgentKind::Shell {
@@ -238,32 +294,64 @@ impl ConversationRegistry {
         }
         // 清掉已消失的 pane（先算存活集合，避免两个字段的借用在闭包里交叠）
         self.conversations.retain(|id, _| seen.contains(id));
-        let alive: std::collections::HashSet<String> =
-            self.conversations.keys().cloned().collect();
+        let alive: std::collections::HashSet<String> = self.conversations.keys().cloned().collect();
         self.intercom_to_pane.retain(|_, pane| alive.contains(pane));
     }
 
     /// 把 intercom 会话并入对话表：补上真实状态与可靠投递路径。
     pub fn apply_intercom_sessions(&mut self, sessions: &[SessionInfo], self_id: Option<&str>) {
         let pane_pids = pane_pid_map();
-        if pane_pids.is_empty() {
-            return;
-        }
         let parents = process_parent_map();
-        for s in sessions {
-            if Some(s.id.as_str()) == self_id {
-                continue; // 跳过我们自己注册的人类会话
+        self.apply_intercom_snapshot(sessions, self_id, &pane_pids, &parents);
+    }
+
+    fn apply_intercom_snapshot(
+        &mut self,
+        sessions: &[SessionInfo],
+        self_id: Option<&str>,
+        pane_pids: &HashMap<i64, String>,
+        parents: &HashMap<i64, i64>,
+    ) {
+        // A full broker snapshot is authoritative. Rebuild mappings so a newly
+        // conflicting/rejected session can never leave a stale delivery route.
+        self.intercom_to_pane.clear();
+        for conv in self.conversations.values_mut() {
+            conv.intercom_session_id = None;
+            conv.status = ConversationStatus::Unknown;
+            conv.title = conv.session.clone();
+        }
+
+        let mut candidates: HashMap<String, Vec<&SessionInfo>> = HashMap::new();
+        for session in sessions {
+            if Some(session.id.as_str()) == self_id {
+                continue;
             }
-            if let Some(pane_id) = find_owning_pane(s.pid, &pane_pids, &parents) {
-                if let Some(conv) = self.conversations.get_mut(&pane_id) {
-                    conv.intercom_session_id = Some(s.id.clone());
-                    if let Some(name) = &s.name {
-                        conv.title = name.clone();
-                    }
-                    conv.status = s.agent_status().into();
-                    self.intercom_to_pane.insert(s.id.clone(), pane_id);
-                }
+            let Some(pane_id) = find_owning_pane(session.pid, pane_pids, parents) else {
+                continue;
+            };
+            let Some(conversation) = self.conversations.get(&pane_id) else {
+                continue;
+            };
+            if session_matches_pane(session, conversation) {
+                candidates.entry(pane_id).or_default().push(session);
             }
+        }
+
+        for (pane_id, matches) in candidates {
+            // A duplicate claim is ambiguous. The entire pane fails closed and
+            // remains on the send-keys fallback; iteration order never wins.
+            let [session] = matches.as_slice() else {
+                continue;
+            };
+            let Some(conversation) = self.conversations.get_mut(&pane_id) else {
+                continue;
+            };
+            conversation.intercom_session_id = Some(session.id.clone());
+            if let Some(name) = &session.name {
+                conversation.title = name.clone();
+            }
+            conversation.status = session.agent_status().into();
+            self.intercom_to_pane.insert(session.id.clone(), pane_id);
         }
     }
 
@@ -290,6 +378,12 @@ impl ConversationRegistry {
 
     pub fn get(&self, pane_id: &str) -> Option<&Conversation> {
         self.conversations.get(pane_id)
+    }
+
+    pub fn set_transcript_kind(&mut self, pane_id: &str, kind: TranscriptKind) {
+        if let Some(conv) = self.conversations.get_mut(pane_id) {
+            conv.transcript_kind = kind;
+        }
     }
 
     pub fn mark_pane_awaiting_human(&mut self, pane_id: &str) {
@@ -451,11 +545,18 @@ impl TranscriptSource for CapturePaneSource {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientEvent {
     /// 全量对话列表，连接建立时下发一次
-    Conversations { items: Vec<Conversation> },
+    Conversations {
+        items: Vec<Conversation>,
+    },
     /// 单个对话状态变化
-    StatusChanged { id: String, status: ConversationStatus },
+    StatusChanged {
+        id: String,
+        status: ConversationStatus,
+    },
     /// 对话里新增一轮内容
-    Turn { turn: Turn },
+    Turn {
+        turn: Turn,
+    },
     /// 某个 agent 在等人回话——手机端应据此发通知
     AwaitingHuman {
         id: String,
@@ -465,7 +566,9 @@ pub enum ClientEvent {
         #[serde(rename = "replyTo")]
         reply_to: Option<String>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 /// 手机端发来的指令。
@@ -477,7 +580,11 @@ pub enum ClientCommand {
     /// 发一个控制键（Escape / C-c 等）
     Key { id: String, key: String },
     /// 把 A 的内容转发给 B
-    Forward { from: String, to: String, text: String },
+    Forward {
+        from: String,
+        to: String,
+        text: String,
+    },
     /// 请求刷新对话列表
     Refresh,
     /// 进入某个对话：只推它的 turn（单活跃订阅，新 subscribe 替换旧）
@@ -528,7 +635,11 @@ mod tests {
         PaneDetail {
             id: id.to_string(),
             session: session.to_string(),
+            workspace_id: session.to_string(),
+            workspace_name: session.to_string(),
             agent_id: None,
+            expected_intercom_id: None,
+            managed_claude_adapter: false,
             command: cmd.to_string(),
             cwd: "/tmp/proj".to_string(),
             active: true,
@@ -569,7 +680,10 @@ mod tests {
     fn test_agent_kind_from_command() {
         assert_eq!(AgentKind::from_command("pi"), AgentKind::Pi);
         assert_eq!(AgentKind::from_command("claude"), AgentKind::ClaudeCode);
-        assert_eq!(AgentKind::from_command("/usr/local/bin/codex"), AgentKind::Codex);
+        assert_eq!(
+            AgentKind::from_command("/usr/local/bin/codex"),
+            AgentKind::Codex
+        );
         assert_eq!(AgentKind::from_command("zsh"), AgentKind::Shell);
         assert_eq!(AgentKind::from_command("vim"), AgentKind::Unknown);
     }
@@ -581,6 +695,27 @@ mod tests {
         assert_eq!(reg.list().len(), 2);
         assert_eq!(reg.get("%1").unwrap().kind, AgentKind::Pi);
         assert_eq!(reg.get("%2").unwrap().kind, AgentKind::Shell);
+        assert_eq!(reg.get("%1").unwrap().workspace_id, "proj");
+        assert_eq!(reg.get("%1").unwrap().workspace_name, "proj");
+    }
+
+    #[test]
+    fn native_workspace_metadata_is_authoritative_and_updates_without_changing_id() {
+        let mut native = pane("%1", "proj__td_slot_01", "pi");
+        native.workspace_id = "proj".into();
+        native.workspace_name = "proj".into();
+        let mut reg = ConversationRegistry::new();
+        reg.refresh_panes(vec![native.clone()]);
+        assert_eq!(reg.get("%1").unwrap().workspace_id, "proj");
+        assert_eq!(reg.get("%1").unwrap().id, "%1");
+
+        native.workspace_id = "renamed".into();
+        native.workspace_name = "renamed".into();
+        reg.refresh_panes(vec![native]);
+        let conversation = reg.get("%1").unwrap();
+        assert_eq!(conversation.workspace_id, "renamed");
+        assert_eq!(conversation.workspace_name, "renamed");
+        assert_eq!(conversation.id, "%1");
     }
 
     #[test]
@@ -618,6 +753,97 @@ mod tests {
         assert_eq!(listed[1].id, "%2");
     }
 
+    fn intercom_session(id: &str, pid: i64, cwd: &str, model: &str) -> SessionInfo {
+        SessionInfo {
+            id: id.into(),
+            name: Some(id.into()),
+            pid,
+            cwd: cwd.into(),
+            model: model.into(),
+            status: Some("idle".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn legacy_panes_use_process_tree_without_model_substring_gates() {
+        let mut reg = ConversationRegistry::new();
+        reg.refresh_panes(vec![pane("%1", "proj", "pi")]);
+        let pane_pids = HashMap::from([(100, "%1".to_string())]);
+        let parents = HashMap::from([(200, 100)]);
+        let session = intercom_session("legacy", 200, "/different", "not-pi");
+        reg.apply_intercom_snapshot(&[session], None, &pane_pids, &parents);
+        assert_eq!(
+            reg.get("%1").unwrap().intercom_session_id.as_deref(),
+            Some("legacy")
+        );
+    }
+
+    #[test]
+    fn managed_claude_requires_id_cwd_and_exact_adapter_model() {
+        let mut managed = pane("%1", "proj", "claude");
+        managed.expected_intercom_id = Some("expected".into());
+        managed.managed_claude_adapter = true;
+        let mut reg = ConversationRegistry::new();
+        reg.refresh_panes(vec![managed]);
+        let pane_pids = HashMap::from([(100, "%1".to_string())]);
+        let parents = HashMap::from([(200, 100)]);
+
+        for session in [
+            intercom_session("wrong", 200, "/tmp/proj", "claude"),
+            intercom_session("expected", 200, "/tmp/other", "claude"),
+            intercom_session("expected", 200, "/tmp/proj", "pi"),
+        ] {
+            reg.apply_intercom_snapshot(&[session], None, &pane_pids, &parents);
+            assert!(reg.get("%1").unwrap().intercom_session_id.is_none());
+        }
+        reg.apply_intercom_snapshot(
+            &[intercom_session("expected", 200, "/tmp/proj", "claude")],
+            None,
+            &pane_pids,
+            &parents,
+        );
+        assert_eq!(
+            reg.get("%1").unwrap().intercom_session_id.as_deref(),
+            Some("expected")
+        );
+    }
+
+    #[test]
+    fn duplicate_candidates_fail_closed_and_full_snapshot_clears_stale_route() {
+        let mut reg = ConversationRegistry::new();
+        reg.refresh_panes(vec![pane("%1", "proj", "pi")]);
+        let pane_pids = HashMap::from([(100, "%1".to_string())]);
+        let parents = HashMap::from([(200, 100), (201, 100)]);
+        reg.apply_intercom_snapshot(
+            &[intercom_session("one", 200, "/tmp/proj", "pi")],
+            None,
+            &pane_pids,
+            &parents,
+        );
+        assert_eq!(
+            reg.get("%1").unwrap().intercom_session_id.as_deref(),
+            Some("one")
+        );
+        reg.set_transcript_kind("%1", TranscriptKind::Structured);
+        reg.apply_intercom_snapshot(
+            &[
+                intercom_session("one", 200, "/tmp/proj", "pi"),
+                intercom_session("two", 201, "/tmp/proj", "pi"),
+            ],
+            None,
+            &pane_pids,
+            &parents,
+        );
+        assert!(reg.get("%1").unwrap().intercom_session_id.is_none());
+        assert_eq!(
+            reg.get("%1").unwrap().transcript_kind,
+            TranscriptKind::Structured
+        );
+        assert!(reg.by_intercom_id("one").is_none());
+        assert!(reg.by_intercom_id("two").is_none());
+    }
+
     #[test]
     fn test_status_mapping() {
         assert_eq!(
@@ -639,6 +865,15 @@ mod tests {
         let s = serde_json::to_string(&ev).unwrap();
         assert!(s.contains("\"type\":\"status-changed\""));
         assert!(s.contains("\"awaiting-human\""));
+
+        let mut reg = ConversationRegistry::new();
+        reg.refresh_panes(vec![pane("%1", "workspace", "pi")]);
+        let s = serde_json::to_string(&ClientEvent::Conversations { items: reg.list() }).unwrap();
+        assert!(s.contains("\"workspaceId\":\"workspace\""));
+        assert!(s.contains("\"workspaceName\":\"workspace\""));
+        assert!(s.contains("\"transcriptKind\":\"capture\""));
+        assert!(!s.contains("workspace_id"));
+        assert!(!s.contains("transcript_kind"));
     }
 
     #[test]
@@ -656,7 +891,10 @@ mod tests {
     #[test]
     fn test_log_transport_records() {
         let mut t = LogTransport::default();
-        t.emit(&ClientEvent::Error { message: "x".into() }).unwrap();
+        t.emit(&ClientEvent::Error {
+            message: "x".into(),
+        })
+        .unwrap();
         assert_eq!(t.events.len(), 1);
     }
 }

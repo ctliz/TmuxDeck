@@ -103,7 +103,8 @@ TmuxDeck 在该 Broker 上注册为名为 `me` 的会话。Agent 需要决策时
 - **一键新建工作区。** 指定名称、工作目录、Agent 引擎、分屏数与终端，自动创建分屏并拉起终端。
 - **适配现有环境。** 运行时自动检测已安装的终端与 Agent，未安装的自动隐藏。终端支持：Ghostty、iTerm2、WezTerm、kitty、Alacritty、系统 Terminal。Agent 支持：Claude Code、Codex、OpenCode、Gemini CLI、Aider、Pi 或纯 Shell。
 - **常驻系统菜单栏。** 关闭窗口后 TmuxDeck 仍在后台运行 — 无需重新打开主窗口即可快捷管理会话或创建工作区。
-- **分屏格精细控制。** 支持独立终止单个分屏/槽位，或动态新增分屏扩展网格。
+- **分屏格精细控制。** 支持独立终止单个分屏/槽位，或一次原子新增 1、2、4 个分屏；Native 工作区只重建一次布局。
+- **按工作区组织移动端对话。** 可信局域网移动端使用后端权威工作区元数据分组 Agent，并提供紧凑的 Markdown 对话、待人工回复置顶、上下文操作与可靠的内容来源标识。
 - **防止重复开窗。** 点击已附着的会话会自动聚焦现有终端窗口，不会重复创建冗余终端。
 - **自动记忆设置。** 常用终端、Agent 与分屏数量自动保存到对应平台的配置目录。
 - **零额外配置。** 在极简环境下，可无缝回退至系统终端与默认 Shell。
@@ -132,7 +133,7 @@ npm install -g opencode-ai
 | Agent | 适配器安装命令 | 激活 / MCP 注册 |
 | :--- | :--- | :--- |
 | **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | 启动自动加载（已有会话执行 `/reload`） |
-| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude`（提供 `cci`） | 普通 `claude`：`claude mcp add -s user claude-intercom -- claude-intercom-mcp`；TmuxDeck 优先使用交互式 `cci --tui` |
+| **Claude Code** | macOS 可在“创建工作区”弹窗安装 TmuxDeck 固定版本的托管适配器；不会修改全局 npm。 | 可选“使用托管 Claude”或持久切换为“标准 Claude”。已有全局 `cci` 保持不变，仍可作为自定义命令使用。 |
 | **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | 在 `opencode.json` 与 `tui.json` 中配置 `plugin.mjs` 和 `tui.mjs`；`tui.mjs` 提供 `/intercom`、`/intercom-name` 和 `/intercom-id` |
 
@@ -141,7 +142,7 @@ npm install -g opencode-ai
 在不同 Agent 会话间通过共享 Broker 通信：
 
 - **会话发现与消息路由：** 使用 `intercom_list`、`intercom_send`、`intercom_ask` 以及 `intercom_reply` 进行会话查找与消息交互。
-- **Claude Code 接入说明：** 适配器包提供支持 Intercom 的 Claude 包装器 `cci`。普通 `claude` 通过已注册的 MCP 工具接入；`cci --tui` 还提供可唤醒的交互身份与快捷操作。TmuxDeck 仅在运行时确认 `cci` 可执行且支持 `--tui`、`--id`、`--name` 后才选择它，并为每个 legacy pane 或 Ghostty native slot 注入稳定唯一身份；若 `cci` 缺失、不可执行或版本不兼容，会无报错回退到独立检测到的普通 `claude`。选择器会显示当前模式：**Claude Code · Intercom (cci)** 或 **Claude Code · Standard**。自定义 Agent 命令不会被改写。可用 `/claude-intercom:intercom-id` 或 Alt+I 查看当前身份；自行启动 `cci` 的高级用户可显式指定 `--id <稳定-id> --name <名称>`。
+- **Claude Code 接入说明：** macOS 可直接在“创建工作区”弹窗离线安装或修复固定版本的 **托管 Claude Intercom**。安装器会校验内置资源 SHA-256、拒绝不安全归档项、验证 Claude plugin → Monitor → runtime 完整链路，且不修改全局 npm。每个新建的托管 pane 或 Ghostty native slot 都会显式使用安全权限模式启动 Claude，并生成密码学随机的 Intercom ID，该 ID 随现有 pane/slot 生命周期保留，并附带可读的工作区/分屏名称；它只是路由元数据，不是认证凭据。“使用标准 Claude”会持久保存；安装/修复或选择“使用托管 Claude”会切回托管模式。Windows/WSL 保持原标准 Claude 行为。已有全局 `cci` 不会被自动视为 Managed，也不会被修改或删除；确有需要可用自定义 Agent 命令启动。自定义命令不会被改写。
 - **OpenCode 接入说明：** 需要同时注册 `plugin.mjs`（服务端插件在 `opencode.json` 中）与 `tui.mjs`（TUI 插件在 `tui.json` 中）。
 - **重命名 OpenCode Intercom 会话：** 执行 `/intercom-name`，或在命令面板选择 **Rename intercom session**；弹窗标题为 **Rename this Intercom session**。模型也可以调用 `intercom_set_name({ name: "<新名称>" })`。该操作只修改其他 Agent 可见的名称，不改变稳定的 Intercom Session ID。
 

@@ -10,7 +10,7 @@ import {
   resizePaneAgents,
   sanitizeNameFrontend,
 } from "./utils";
-import { Config, CreateOpts, CustomAgent, Environment, TmuxSession } from "./types";
+import { ClaudeMode, Config, CreateOpts, CustomAgent, Environment, ManagedClaudeStatus, TmuxSession } from "./types";
 import { TmuxMissingScreen } from "./components/TmuxMissingScreen";
 import { SearchHeader } from "./components/SearchHeader";
 import { CardGrid } from "./components/CardGrid";
@@ -31,6 +31,8 @@ export default function App() {
 
   const [env, setEnv] = useState<Environment | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
+  const [managedClaude, setManagedClaude] = useState<ManagedClaudeStatus | null>(null);
+  const [managedClaudeBusy, setManagedClaudeBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -95,12 +97,14 @@ export default function App() {
    */
   const loadStaticData = async () => {
     try {
-      const [envData, cfgData] = await Promise.all([
+      const [envData, cfgData, managedClaudeData] = await Promise.all([
         invoke<Environment>("detect_environment"),
         invoke<Config>("load_config"),
+        invoke<ManagedClaudeStatus>("get_managed_claude_status"),
       ]);
       setEnv(envData);
       setConfig(cfgData);
+      setManagedClaude(managedClaudeData);
 
       if (cfgData.custom_agent) {
         setCustomAgentName(cfgData.custom_agent.name || "");
@@ -236,11 +240,35 @@ export default function App() {
     }
   };
 
+  /**
+   * One entry point for every Claude messaging choice. Picking "managed" when
+   * the adapter is missing or broken installs/repairs it first, so the UI only
+   * ever has to offer a single button.
+   */
+  const handleClaudeAction = async (mode: ClaudeMode) => {
+    setManagedClaudeBusy(true);
+    try {
+      if (mode === "standard") {
+        await invoke("use_standard_claude");
+      } else if (managedClaude?.state === "healthy") {
+        await invoke("use_managed_claude");
+      } else {
+        await invoke<ManagedClaudeStatus>("install_managed_claude");
+      }
+      await loadStaticData();
+      setSelectedAgent("claude");
+    } catch (err: any) {
+      alert(translateError(err));
+    } finally {
+      setManagedClaudeBusy(false);
+    }
+  };
+
   const handleSaveCustomAgent = async () => {
     if (!customAgentCmd.trim()) return alert(t("val.enterCustomCmd"));
     const newCustom: CustomAgent = { name: customAgentName.trim() || t("agent.custom"), command: customAgentCmd.trim() };
     try {
-      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [] };
+      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [], use_standard_claude: false };
       const updatedConfig: Config = { ...currentConfig, custom_agent: newCustom };
       await invoke("save_config", { config: updatedConfig });
       const envData = await invoke<Environment>("detect_environment");
@@ -308,9 +336,14 @@ export default function App() {
     }
   };
 
-  const handleAddPane = async (sessionName: string, agentId?: string) => {
+  /** One batched call: the backend adds every pane and re-lays out natives once. */
+  const handleAddPane = async (
+    sessionName: string,
+    agentId: string,
+    count: number
+  ) => {
     try {
-      await invoke("add_pane", { sessionName, agentId: agentId ?? null });
+      await invoke("add_panes", { sessionName, agentId, count });
       await refreshSessions();
     } catch (err: any) {
       alert(t("val.createFailed") + ": " + translateError(err));
@@ -475,9 +508,12 @@ export default function App() {
         setCustomAgentCmd={setCustomAgentCmd}
         env={env}
         config={config}
+        managedClaude={managedClaude}
+        managedClaudeBusy={managedClaudeBusy}
         loading={loading}
         onPickDirectory={handlePickDirectory}
         onSaveCustomAgent={handleSaveCustomAgent}
+        onClaudeAction={handleClaudeAction}
         onCreate={handleCreate}
       />
 

@@ -13,6 +13,8 @@ pub struct Config {
     pub default_panes: u8,
     pub custom_agent: Option<CustomAgent>,
     pub recent_dirs: Vec<String>,
+    #[serde(default)]
+    pub use_standard_claude: bool,
 }
 
 impl Default for Config {
@@ -23,6 +25,7 @@ impl Default for Config {
             default_panes: 4,
             custom_agent: None,
             recent_dirs: Vec::new(),
+            use_standard_claude: false,
         }
     }
 }

@@ -131,21 +131,27 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn native_agent_command(agent_id: &str, command: &str, workspace: &str, slot: usize) -> String {
-    let is_cci = std::path::Path::new(command.split_whitespace().next().unwrap_or(""))
-        .file_name()
-        .is_some_and(|name| name == "cci");
-    if agent_id != "claude" || !is_cci {
-        return command.to_string();
+fn native_agent_command(
+    agent_id: &str,
+    command: &str,
+    workspace: &str,
+    slot: usize,
+) -> Result<(String, Option<String>), String> {
+    let is_managed_cci = std::path::Path::new(command) == crate::claude_adapter::managed_cci_path();
+    if agent_id != "claude" || !is_managed_cci {
+        return Ok((command.to_string(), None));
     }
-    let id = format!("tmuxdeck-{}-slot-{:02}", workspace, slot);
+    let id = crate::claude_adapter::random_intercom_id()?;
     let name = format!("{} · Claude {:02}", workspace, slot);
-    format!(
-        "{} --tui --id {} --name {}",
-        command,
-        shell_quote(&id),
-        shell_quote(&name)
-    )
+    Ok((
+        format!(
+            "{} --tui --safe --id {} --name {}",
+            shell_quote(command),
+            shell_quote(&id),
+            shell_quote(&name)
+        ),
+        Some(id),
+    ))
 }
 
 fn native_slot_command_args(
@@ -154,10 +160,10 @@ fn native_slot_command_args(
     work_dir: &str,
     agent_cmd: &str,
     agent_id: &str,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let target = slot_target(workspace, slot);
     let slot_value = slot.to_string();
-    let agent_cmd = native_agent_command(agent_id, agent_cmd, workspace, slot);
+    let (agent_cmd, intercom_id) = native_agent_command(agent_id, agent_cmd, workspace, slot)?;
     let augmented_path = crate::commands::utils::build_augmented_path_for_command(&agent_cmd);
     let mut args = vec![
         "new-session".to_string(),
@@ -202,7 +208,26 @@ fn native_slot_command_args(
             value.to_string(),
         ]);
     }
-    args
+    if let Some(intercom_id) = intercom_id {
+        for (option, value) in [
+            ("@tmuxdeck-intercom-id", intercom_id.as_str()),
+            (
+                "@tmuxdeck-claude-adapter",
+                crate::claude_adapter::MANAGED_ADAPTER_MARKER,
+            ),
+        ] {
+            args.extend([
+                ";".to_string(),
+                "set-option".to_string(),
+                "-p".to_string(),
+                "-t".to_string(),
+                target.clone(),
+                option.to_string(),
+                value.to_string(),
+            ]);
+        }
+    }
+    Ok(args)
 }
 
 fn native_slot_setup_error(target: &str, stderr: &str) -> String {
@@ -246,7 +271,7 @@ pub(crate) fn create_native_slot(
     let workspace = sanitize_session_name(workspace)?;
     let target = slot_target(&workspace, slot);
     let slot_value = slot.to_string();
-    let args = native_slot_command_args(&workspace, slot, work_dir, agent_cmd, agent_id);
+    let args = native_slot_command_args(&workspace, slot, work_dir, agent_cmd, agent_id)?;
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let output = run_tmux(&refs).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
     if !output.status.success() {
@@ -495,12 +520,7 @@ pub(crate) fn rename_native_workspace(old_name: &str, new_name: &str) -> Result<
         if !output.status.success() {
             for previous in &renamed {
                 if let Some(original) = slots.iter().find(|item| item.slot == previous.slot) {
-                    let _ = run_tmux(&[
-                        "rename-session",
-                        "-t",
-                        &previous.target,
-                        &original.target,
-                    ]);
+                    let _ = run_tmux(&["rename-session", "-t", &previous.target, &original.target]);
                 }
             }
             return Err(format!(
@@ -940,19 +960,27 @@ mod tests {
     }
 
     #[test]
-    fn test_native_claude_uses_stable_cci_slot_identity() {
-        let command = native_agent_command("claude", "/opt/bin/cci", "alpha", 2);
+    fn test_native_claude_uses_random_cci_slot_identity() {
+        let managed = crate::claude_adapter::managed_cci_path()
+            .to_string_lossy()
+            .to_string();
+        let (command, id) = native_agent_command("claude", &managed, "alpha", 2).unwrap();
+        let id = id.unwrap();
+        assert!(id.starts_with("tmuxdeck-"));
         assert_eq!(
             command,
-            "/opt/bin/cci --tui --id 'tmuxdeck-alpha-slot-02' --name 'alpha · Claude 02'"
+            format!(
+                "'{}' --tui --safe --id '{}' --name 'alpha · Claude 02'",
+                managed, id
+            )
         );
         assert_eq!(
-            native_agent_command("claude", "/opt/bin/claude", "alpha", 2),
-            "/opt/bin/claude"
+            native_agent_command("claude", "/opt/bin/claude", "alpha", 2).unwrap(),
+            ("/opt/bin/claude".into(), None)
         );
         assert_eq!(
-            native_agent_command("custom", "cci --custom", "alpha", 2),
-            "cci --custom"
+            native_agent_command("custom", "cci --custom", "alpha", 2).unwrap(),
+            ("cci --custom".into(), None)
         );
     }
 
@@ -964,7 +992,8 @@ mod tests {
             "/tmp/project",
             "custom-agent --model 'A B'",
             "custom",
-        );
+        )
+        .unwrap();
         assert_eq!(args.iter().filter(|arg| *arg == "new-session").count(), 1);
         assert_eq!(args.iter().filter(|arg| *arg == "set-option").count(), 7);
         assert_eq!(

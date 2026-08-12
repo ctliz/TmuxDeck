@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 use crate::audit::{observe_session_count, record_kill, tmux_counts};
 use crate::commands::native::{
     create_native_workspace, destroy_native_workspace, ghostty_native_available, list_native_slots,
@@ -186,7 +183,6 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
         let script_path = write_attach_script(&sanitized_name)
             .map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
 
@@ -283,10 +279,8 @@ fn resolve_pane_agents(
     Ok((ids, commands))
 }
 
-fn is_cci_command(command: &str) -> bool {
-    std::path::Path::new(command.split_whitespace().next().unwrap_or(""))
-        .file_name()
-        .is_some_and(|name| name == "cci")
+fn is_managed_cci_command(command: &str) -> bool {
+    std::path::Path::new(command) == crate::claude_adapter::managed_cci_path()
 }
 
 pub(crate) fn panel_agent_command(
@@ -294,18 +288,21 @@ pub(crate) fn panel_agent_command(
     command: &str,
     workspace: &str,
     pane: usize,
-) -> String {
-    if agent_id != "claude" || !is_cci_command(command) {
-        return command.to_string();
+) -> Result<(String, Option<String>), String> {
+    if agent_id != "claude" || !is_managed_cci_command(command) {
+        return Ok((command.to_string(), None));
     }
-    let id = format!("tmuxdeck-{}-pane-{:02}", workspace, pane);
+    let id = crate::claude_adapter::random_intercom_id()?;
     let name = format!("{} · Claude {:02}", workspace, pane);
-    format!(
-        "{} --tui --id {} --name {}",
-        command,
-        shell_single_quote(&id),
-        shell_single_quote(&name)
-    )
+    Ok((
+        format!(
+            "{} --tui --safe --id {} --name {}",
+            shell_single_quote(command),
+            shell_single_quote(&id),
+            shell_single_quote(&name)
+        ),
+        Some(id),
+    ))
 }
 
 #[tauri::command]
@@ -358,12 +355,12 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         }
     }
 
-    let first_agent_cmd = panel_agent_command(
+    let (first_agent_cmd, first_intercom_id) = panel_agent_command(
         &pane_agent_ids[0],
         &pane_agent_commands[0],
         &sanitized_name,
         1,
-    );
+    )?;
     let augmented_path = crate::commands::utils::build_augmented_path_for_command(&first_agent_cmd);
     let mut new_args = vec![
         "new-session".to_string(),
@@ -400,17 +397,11 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         return Err(format!("ERR_CREATE_OUTPUT_ERR|{}", err_msg));
     }
 
-    let first_pane = run_tmux(&[
-        "list-panes",
-        "-t",
-        &sanitized_name,
-        "-F",
-        "#{pane_id}",
-    ])
-    .ok()
-    .filter(|result| result.status.success())
-    .and_then(|result| String::from_utf8(result.stdout).ok())
-    .and_then(|stdout| stdout.lines().next().map(String::from));
+    let first_pane = run_tmux(&["list-panes", "-t", &sanitized_name, "-F", "#{pane_id}"])
+        .ok()
+        .filter(|result| result.status.success())
+        .and_then(|result| String::from_utf8(result.stdout).ok())
+        .and_then(|stdout| stdout.lines().next().map(String::from));
     if let Some(first_pane) = first_pane {
         let _ = run_tmux(&[
             "set-option",
@@ -420,6 +411,23 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             "@tmuxdeck-agent",
             &pane_agent_ids[0],
         ]);
+        if let Some(intercom_id) = first_intercom_id.as_deref() {
+            let _ = run_tmux(&[
+                "set-option",
+                "-p",
+                "-t",
+                &first_pane,
+                "@tmuxdeck-intercom-id",
+                intercom_id,
+                ";",
+                "set-option",
+                "-p",
+                "-t",
+                &first_pane,
+                "@tmuxdeck-claude-adapter",
+                crate::claude_adapter::MANAGED_ADAPTER_MARKER,
+            ]);
+        }
     }
 
     for pane in 2..=count {
@@ -435,13 +443,12 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             split_args.push("-c");
             split_args.push(&work_dir_clean);
         }
-        let pane_agent_cmd =
-            panel_agent_command(
-                &pane_agent_ids[pane - 1],
-                &pane_agent_commands[pane - 1],
-                &sanitized_name,
-                pane,
-            );
+        let (pane_agent_cmd, intercom_id) = panel_agent_command(
+            &pane_agent_ids[pane - 1],
+            &pane_agent_commands[pane - 1],
+            &sanitized_name,
+            pane,
+        )?;
         let isolated_agent =
             isolated_agent_command(&pane_agent_cmd, pane_agent_ids[pane - 1] != "shell");
         split_args.push(&isolated_agent);
@@ -461,6 +468,23 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
                         "@tmuxdeck-agent",
                         &pane_agent_ids[pane - 1],
                     ]);
+                    if let Some(intercom_id) = intercom_id.as_deref() {
+                        let _ = run_tmux(&[
+                            "set-option",
+                            "-p",
+                            "-t",
+                            pane_id,
+                            "@tmuxdeck-intercom-id",
+                            intercom_id,
+                            ";",
+                            "set-option",
+                            "-p",
+                            "-t",
+                            pane_id,
+                            "@tmuxdeck-claude-adapter",
+                            crate::claude_adapter::MANAGED_ADAPTER_MARKER,
+                        ]);
+                    }
                 }
             }
         }
@@ -715,11 +739,20 @@ mod tests {
     #[test]
     fn pane_agent_resolution_preserves_legacy_and_validates_mixed_lists() {
         let agents = vec![
-            ToolInfo { id: "pi".into(), name: "Pi".into(), path: "/bin/pi".into(), icon_path: None },
-            ToolInfo { id: "shell".into(), name: "Shell".into(), path: "/bin/zsh".into(), icon_path: None },
+            ToolInfo {
+                id: "pi".into(),
+                name: "Pi".into(),
+                path: "/bin/pi".into(),
+                icon_path: None,
+            },
+            ToolInfo {
+                id: "shell".into(),
+                name: "Shell".into(),
+                path: "/bin/zsh".into(),
+                icon_path: None,
+            },
         ];
-        let (legacy_ids, legacy_commands) =
-            resolve_pane_agents("pi", &[], 2, &agents).unwrap();
+        let (legacy_ids, legacy_commands) = resolve_pane_agents("pi", &[], 2, &agents).unwrap();
         assert_eq!(legacy_ids, ["pi", "pi"]);
         assert_eq!(legacy_commands, ["/bin/pi", "/bin/pi"]);
 
@@ -739,18 +772,27 @@ mod tests {
     }
 
     #[test]
-    fn claude_panel_uses_stable_cci_identity_with_plain_claude_fallback() {
+    fn claude_panel_uses_random_cci_identity_with_plain_claude_fallback() {
+        let managed = crate::claude_adapter::managed_cci_path()
+            .to_string_lossy()
+            .to_string();
+        let (command, id) = panel_agent_command("claude", &managed, "alpha", 1).unwrap();
+        let id = id.unwrap();
+        assert!(id.starts_with("tmuxdeck-"));
         assert_eq!(
-            panel_agent_command("claude", "/opt/bin/cci", "alpha", 1),
-            "/opt/bin/cci --tui --id 'tmuxdeck-alpha-pane-01' --name 'alpha · Claude 01'"
+            command,
+            format!(
+                "'{}' --tui --safe --id '{}' --name 'alpha · Claude 01'",
+                managed, id
+            )
         );
         assert_eq!(
-            panel_agent_command("claude", "/opt/bin/claude", "alpha", 1),
-            "/opt/bin/claude"
+            panel_agent_command("claude", "/opt/bin/claude", "alpha", 1).unwrap(),
+            ("/opt/bin/claude".into(), None)
         );
         assert_eq!(
-            panel_agent_command("custom", "cci --custom", "alpha", 1),
-            "cci --custom"
+            panel_agent_command("custom", "cci --custom", "alpha", 1).unwrap(),
+            ("cci --custom".into(), None)
         );
     }
 

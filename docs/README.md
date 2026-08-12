@@ -62,4 +62,5 @@ Test instances may only be terminated by the **exact PID recorded at launch**: s
 [v1.9.0](./RELEASE-NOTES-v1.9.0.md) · [v1.9.1](./RELEASE-NOTES-v1.9.1.md) ·
 [v1.9.2](./RELEASE-NOTES-v1.9.2.md) · [v1.9.3](./RELEASE-NOTES-v1.9.3.md) ·
 [v1.9.4](./RELEASE-NOTES-v1.9.4.md) · [v1.10.0](./RELEASE-NOTES-v1.10.0.md) ·
-[v1.11.0](./RELEASE-NOTES-v1.11.0.md) · [v1.11.1](./RELEASE-NOTES-v1.11.1.md)
+[v1.11.0](./RELEASE-NOTES-v1.11.0.md) · [v1.11.1](./RELEASE-NOTES-v1.11.1.md) ·
+[v1.12.0](./RELEASE-NOTES-v1.12.0.md)

@@ -19,7 +19,9 @@
 //! 增量读取按「文件追加日志」实现：每个文件维护字节游标，只读新字节；
 //! 文件被压缩/轮转（长度 < 游标）时游标归零，靠 `since` 时间戳去重。
 
-use crate::bridge::{AgentKind, CapturePaneSource, Conversation, TranscriptSource, Turn, TurnRole};
+use crate::bridge::{
+    AgentKind, CapturePaneSource, Conversation, TranscriptKind, TranscriptSource, Turn, TurnRole,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
@@ -113,7 +115,9 @@ fn scan_cwd(path: &Path) -> Option<String> {
 
 /// 从一条 pi jsonl 行提取轮次（`type == "message"`）。
 fn parse_pi_line(line: &str, conv_id: &str, out: &mut Vec<Turn>) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     if v.get("type").and_then(|t| t.as_str()) != Some("message") {
         return;
     }
@@ -147,7 +151,9 @@ fn parse_pi_line(line: &str, conv_id: &str, out: &mut Vec<Turn>) {
 
 /// 从一条 Claude Code jsonl 行提取轮次（`type == "user" | "assistant"`）。
 fn parse_claude_line(line: &str, conv_id: &str, out: &mut Vec<Turn>) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     let t = match v.get("type").and_then(|t| t.as_str()) {
         Some("user") => TurnRole::Human,
         Some("assistant") => TurnRole::Agent,
@@ -157,7 +163,10 @@ fn parse_claude_line(line: &str, conv_id: &str, out: &mut Vec<Turn>) {
     if v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false) {
         return;
     }
-    if v.get("isCompactSummary").and_then(|b| b.as_bool()).unwrap_or(false) {
+    if v.get("isCompactSummary")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false)
+    {
         return;
     }
     let ts = v
@@ -252,6 +261,11 @@ impl PiTranscriptSource {
     /// 无 intercom 时回退到 cwd 对应目录里 mtime 最新的文件。
     pub fn resolve(&mut self, conv: &Conversation) -> Option<PathBuf> {
         self.scan_cwd_dirs();
+        if !self.cwd_dir.contains_key(&conv.cwd) {
+            // A record may appear after the pane was first discovered.
+            self.cwd_dir.clear();
+            self.scan_cwd_dirs();
+        }
         let dir = self.cwd_dir.get(&conv.cwd)?;
 
         if let Some(sid) = conv.intercom_session_id.as_deref() {
@@ -360,6 +374,11 @@ impl ClaudeTranscriptSource {
     /// 都以记录内的 `cwd` 字段验证。取 mtime 最新的文件。
     pub fn resolve(&mut self, conv: &Conversation) -> Option<PathBuf> {
         self.scan_cwd_dirs();
+        if !self.cwd_dir.contains_key(&conv.cwd) {
+            // A record may appear after the pane was first discovered.
+            self.cwd_dir.clear();
+            self.scan_cwd_dirs();
+        }
         if let Some(dir) = self.cwd_dir.get(&conv.cwd) {
             return newest_jsonl(dir);
         }
@@ -477,27 +496,25 @@ impl CompositeTranscriptSource {
             capture: CapturePaneSource::default(),
         }
     }
+
+    /// Reports the source the next poll will use without advancing transcript cursors.
+    pub fn kind_for(&mut self, conv: &Conversation) -> TranscriptKind {
+        match conv.kind {
+            AgentKind::Pi if self.pi.resolve(conv).is_some() => TranscriptKind::Structured,
+            AgentKind::ClaudeCode if self.claude.resolve(conv).is_some() => {
+                TranscriptKind::Structured
+            }
+            _ => TranscriptKind::Capture,
+        }
+    }
 }
 
 impl TranscriptSource for CompositeTranscriptSource {
     fn poll(&mut self, conv: &Conversation, since: i64) -> Result<Vec<Turn>, String> {
-        match conv.kind {
-            AgentKind::Pi => {
-                if self.pi.resolve(conv).is_some() {
-                    self.pi.poll(conv, since)
-                } else {
-                    self.capture.poll(conv, since)
-                }
-            }
-            AgentKind::ClaudeCode => {
-                if self.claude.resolve(conv).is_some() {
-                    self.claude.poll(conv, since)
-                } else {
-                    self.capture.poll(conv, since)
-                }
-            }
-            // Codex / 其余 harness 的结构化提取尚未实现（v1.13），先兜底
-            _ => self.capture.poll(conv, since),
+        match self.kind_for(conv) {
+            TranscriptKind::Structured if conv.kind == AgentKind::Pi => self.pi.poll(conv, since),
+            TranscriptKind::Structured => self.claude.poll(conv, since),
+            TranscriptKind::Capture => self.capture.poll(conv, since),
         }
     }
 }
@@ -529,10 +546,15 @@ mod tests {
         Conversation {
             id: "%1".into(),
             session: "proj".into(),
+            workspace_id: "proj".into(),
+            workspace_name: "proj".into(),
             cwd: cwd.into(),
             kind,
+            transcript_kind: TranscriptKind::Capture,
             title: "proj".into(),
             intercom_session_id: intercom.map(String::from),
+            expected_intercom_id: None,
+            managed_claude_adapter: false,
             status: crate::bridge::ConversationStatus::Unknown,
         }
     }
@@ -737,18 +759,46 @@ mod tests {
     // ── 组合源 ───────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_composite_falls_back_when_no_record() {
-        // 无匹配 cwd 时 pi 源返回空，不应 panic
-        let root = temp_dir("composite");
+    fn test_composite_kind_for_tracks_structured_record_availability() {
+        let root = temp_dir("composite-kind");
+        let pi_root = root.join("pi");
+        let claude_root = root.join("claude");
+        fs::create_dir_all(&pi_root).unwrap();
+        fs::create_dir_all(&claude_root).unwrap();
         let mut src = CompositeTranscriptSource::new();
-        // 注入空根目录的 pi 源，避免访问真实 ~/.pi
-        src.pi = PiTranscriptSource::with_root(root.join("empty-sessions"));
-        src.claude = ClaudeTranscriptSource::with_root(root.join("empty-projects"));
+        src.pi = PiTranscriptSource::with_root(pi_root.clone());
+        src.claude = ClaudeTranscriptSource::with_root(claude_root.clone());
 
-        let c = conv("/nonexistent/path", AgentKind::Pi, Some("abc"));
-        // capture-pane 兜底在无 tmux 环境下可能报错，这里只验证 pi 分支不 panic
-        let _ = src.pi.poll(&c, 0);
-        assert!(true);
+        let pi_cwd = "/tmp/composite-pi";
+        let pi = conv(pi_cwd, AgentKind::Pi, None);
+        assert_eq!(src.kind_for(&pi), TranscriptKind::Capture);
+        let pi_dir = pi_root.join("pi-session");
+        fs::create_dir_all(&pi_dir).unwrap();
+        fs::write(
+            pi_dir.join("session.jsonl"),
+            format!(r#"{{"type":"session","cwd":"{pi_cwd}"}}"#),
+        )
+        .unwrap();
+        assert_eq!(src.kind_for(&pi), TranscriptKind::Structured);
+
+        let claude_cwd = "/tmp/composite-claude";
+        let claude = conv(claude_cwd, AgentKind::ClaudeCode, None);
+        assert_eq!(src.kind_for(&claude), TranscriptKind::Capture);
+        let claude_dir = claude_root.join("claude-session");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(
+            claude_dir.join("session.jsonl"),
+            format!(r#"{{"type":"user","cwd":"{claude_cwd}"}}"#),
+        )
+        .unwrap();
+        assert_eq!(src.kind_for(&claude), TranscriptKind::Structured);
+    }
+
+    #[test]
+    fn test_codex_with_intercom_still_uses_capture() {
+        let mut src = CompositeTranscriptSource::new();
+        let codex = conv("/tmp/codex", AgentKind::Codex, Some("codex-route"));
+        assert_eq!(src.kind_for(&codex), TranscriptKind::Capture);
     }
 }
 
@@ -765,17 +815,26 @@ mod real_tests {
         let c = Conversation {
             id: "%9".into(),
             session: "Tmux-Deck".into(),
+            workspace_id: "Tmux-Deck".into(),
+            workspace_name: "Tmux-Deck".into(),
             cwd: "/Users/tsiji/Documents/TmuxDeck".into(),
             kind: AgentKind::Pi,
+            transcript_kind: TranscriptKind::Structured,
             title: "tmux".into(),
             intercom_session_id: Some("019fec77-b0ab-7f2b-b4fa-84d01c5f63b1".into()),
+            expected_intercom_id: None,
+            managed_claude_adapter: false,
             status: crate::bridge::ConversationStatus::Unknown,
         };
         let path = src.resolve(&c).expect("resolve real pi session");
         println!("RESOLVED: {}", path.display());
         let turns = src.poll(&c, 0).unwrap();
         for t in turns.iter().rev().take(3) {
-            println!("[{:?}] {}", t.role, t.text.chars().take(60).collect::<String>());
+            println!(
+                "[{:?}] {}",
+                t.role,
+                t.text.chars().take(60).collect::<String>()
+            );
         }
         assert!(!turns.is_empty(), "should have turns from real pi session");
     }

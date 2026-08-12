@@ -223,11 +223,42 @@ pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>)
 pub struct PaneDetail {
     pub id: String,
     pub session: String,
+    /// Authoritative mobile grouping metadata. Native slot sessions use the
+    /// TmuxDeck workspace option; ordinary tmux panes use their session name.
+    pub workspace_id: String,
+    pub workspace_name: String,
     pub agent_id: Option<String>,
+    pub expected_intercom_id: Option<String>,
+    pub managed_claude_adapter: bool,
     /// pane 内前台进程名，例如 pi / claude / codex / zsh
     pub command: String,
     pub cwd: String,
     pub active: bool,
+}
+
+fn parse_pane_detail(line: &str) -> Option<PaneDetail> {
+    let parts: Vec<&str> = line.splitn(10, '|').collect();
+    if parts.len() != 10 {
+        return None;
+    }
+    let session = parts[1].to_string();
+    let workspace = if parts[8] == "1" {
+        parts[9].to_string()
+    } else {
+        session.clone()
+    };
+    Some(PaneDetail {
+        id: parts[0].to_string(),
+        session,
+        workspace_id: workspace.clone(),
+        workspace_name: workspace,
+        agent_id: (!parts[5].is_empty()).then(|| parts[5].to_string()),
+        expected_intercom_id: (!parts[6].is_empty()).then(|| parts[6].to_string()),
+        managed_claude_adapter: parts[7] == crate::claude_adapter::MANAGED_ADAPTER_MARKER,
+        command: parts[2].to_string(),
+        cwd: parts[3].to_string(),
+        active: parts[4] == "1",
+    })
 }
 
 pub fn list_all_panes() -> Vec<PaneDetail> {
@@ -235,7 +266,7 @@ pub fn list_all_panes() -> Vec<PaneDetail> {
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}|#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}|#{@tmuxdeck-agent}",
+        "#{pane_id}|#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}|#{@tmuxdeck-agent}|#{@tmuxdeck-intercom-id}|#{@tmuxdeck-claude-adapter}|#{@tmuxdeck-native-split}|#{@tmuxdeck-workspace}",
     ]);
 
     if let Ok(out) = output {
@@ -243,17 +274,8 @@ pub fn list_all_panes() -> Vec<PaneDetail> {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let mut panes = Vec::new();
             for line in stdout.lines() {
-                // cwd 里可能含 '|' 极少见，但按固定字段数从左切、最后一段取右，避免误切
-                let parts: Vec<&str> = line.splitn(6, '|').collect();
-                if parts.len() == 6 {
-                    panes.push(PaneDetail {
-                        id: parts[0].to_string(),
-                        session: parts[1].to_string(),
-                        agent_id: (!parts[5].is_empty()).then(|| parts[5].to_string()),
-                        command: parts[2].to_string(),
-                        cwd: parts[3].to_string(),
-                        active: parts[4] == "1",
-                    });
+                if let Some(pane) = parse_pane_detail(line) {
+                    panes.push(pane);
                 }
             }
             return panes;
@@ -374,13 +396,31 @@ pub fn swap_panes(pane_id_a: &str, pane_id_b: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod attached_tests {
-    use super::has_attached_clients;
+    use super::{has_attached_clients, parse_pane_detail};
 
     #[test]
     fn attached_count_accepts_multiple_clients() {
         assert!(!has_attached_clients("0"));
         assert!(has_attached_clients("1"));
         assert!(has_attached_clients("2"));
+    }
+
+    #[test]
+    fn pane_workspace_uses_session_for_ordinary_tmux() {
+        let pane = parse_pane_detail("%1|plain|pi|/repo|1|pi|||0|").unwrap();
+        assert_eq!(pane.workspace_id, "plain");
+        assert_eq!(pane.workspace_name, "plain");
+    }
+
+    #[test]
+    fn pane_workspace_uses_native_metadata_without_parsing_session_name() {
+        let pane = parse_pane_detail(
+            "%2|alpha__td_slot_inside__td_slot_07|pi|/repo|0|pi|||1|alpha__td_slot_inside",
+        )
+        .unwrap();
+        assert_eq!(pane.workspace_id, "alpha__td_slot_inside");
+        assert_eq!(pane.workspace_name, "alpha__td_slot_inside");
+        assert_eq!(pane.session, "alpha__td_slot_inside__td_slot_07");
     }
 }
 

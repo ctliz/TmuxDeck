@@ -15,7 +15,7 @@ interface CardGridProps {
   onRenameChange: (val: string) => void;
   onRenameCommit: (oldName: string) => void;
   onKill: (name: string, paneCount: number) => void;
-  onAddPane: (name: string, agentId?: string) => void;
+  onAddPane: (name: string, agentId: string, count: number) => Promise<void>;
   onKillPane: (id: string, sessionTarget?: string) => void;
   onOpenSession: (name: string, termId: string) => void;
   onSwapPane: (

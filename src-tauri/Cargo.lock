@@ -3621,13 +3621,14 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "1.11.1"
+version = "1.12.0"
 dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "getrandom 0.2.17",
  "serde",
  "serde_json",
+ "sha2",
  "sys-locale",
  "tauri",
  "tauri-build",

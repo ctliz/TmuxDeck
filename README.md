@@ -105,7 +105,8 @@ Shipped today:
 - **One-click workspace creation.** Name a session, pick a directory, choose an agent, a pane count, and a terminal. Panes are created and the terminal opens automatically.
 - **Works with what you have.** Terminals and agents are detected at runtime; uninstalled ones are hidden. Terminals: Ghostty, iTerm2, WezTerm, kitty, Alacritty, system Terminal. Agents: Claude Code, Codex, OpenCode, Gemini CLI, Aider, Pi, or a plain shell.
 - **Lives in the menu bar.** Close the window and TmuxDeck keeps running — open a session, add a pane, or create a workspace without reopening the main window.
-- **Pane-level control.** Hover a pane preview to kill just that pane, or add one to grow the grid.
+- **Pane-level control.** Hover a pane preview to kill just that pane, or add 1, 2, or 4 panes in one atomic action; native workspaces rebuild their layout only once.
+- **Workspace-aware mobile conversations.** The trusted-LAN mobile view groups Agents by authoritative workspace metadata and offers compact Markdown chat, awaiting-human prioritization, context actions, and safe transcript-source labeling.
 - **No duplicate windows.** Clicking a session that is already open focuses its window instead of spawning another terminal.
 - **Remembers your choices.** Last terminal, agent, and pane count persist to the platform config directory.
 - **No setup required.** With nothing else installed, it falls back to the system terminal and your shell.
@@ -136,7 +137,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 | Agent | Adapter Installation | Registration / Activation |
 | :--- | :--- | :--- |
 | **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | Automatic on start (`/reload` in open sessions) |
-| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` (provides `cci`) | Ordinary `claude`: `claude mcp add -s user claude-intercom -- claude-intercom-mcp`; TmuxDeck prefers interactive `cci --tui` |
+| **Claude Code** | On macOS, install TmuxDeck's pinned Managed Adapter from the Create Workspace modal; global npm is not changed. | Choose **Use Managed** or persistently switch to **Standard Claude**. A global `cci` is left untouched and may still be used as a custom command. |
 | **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json`; `tui.mjs` adds `/intercom`, `/intercom-name`, and `/intercom-id` |
 
@@ -145,7 +146,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 Communicate across agent sessions using the shared broker:
 
 - **Session discovery & messaging:** Use `intercom_list`, `intercom_send`, `intercom_ask`, and `intercom_reply` to discover and exchange messages.
-- **Claude Code integration:** The adapter package provides `cci`, an Intercom-aware Claude wrapper. An ordinary `claude` process uses the registered MCP tools; `cci --tui` adds wakeable interactive identity and shortcuts. TmuxDeck selects `cci --tui` only after runtime verification that the executable supports `--tui`, `--id`, and `--name`, then supplies a stable unique identity for every legacy pane or Ghostty native slot. If `cci` is absent, non-executable, or incompatible, it falls back without error to the independently detected ordinary `claude`. The picker labels the current mode as **Claude Code · Intercom (cci)** or **Claude Code · Standard**. Custom agent commands are never rewritten. Inspect the current identity with `/claude-intercom:intercom-id` or Alt+I; advanced users launching `cci` themselves can specify `--id <stable-id> --name <name>`.
+- **Claude Code integration:** On macOS, TmuxDeck can install or repair its offline, pinned **Managed Claude Intercom** adapter from the Create Workspace modal. The installer verifies the bundled SHA-256, rejects unsafe archive entries, validates the Claude plugin → Monitor → runtime chain, and never modifies global npm. Each newly created managed pane or Ghostty native slot starts Claude in explicit safe permission mode and gets a cryptographically random Intercom ID that remains attached to that pane/slot for its lifetime, plus a readable workspace/pane name. This ID is routing metadata, not an authentication credential. **Use Standard Claude** is persistent; installing/repairing or choosing **Use Managed** switches back. Windows/WSL keeps Standard Claude behavior. Existing global `cci` installations are not selected as Managed, changed, or removed; use a custom Agent command if you intentionally want one. Custom commands are never rewritten.
 - **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
 - **Rename an OpenCode Intercom session:** Run `/intercom-name`, or choose **Rename intercom session** in the command palette; the prompt is titled **Rename this Intercom session**. The model can also call `intercom_set_name({ name: "<new-name>" })`. This changes only the discoverable name, not the stable Intercom session ID.
 

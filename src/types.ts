@@ -21,6 +21,50 @@ export interface Config {
   default_panes: number;
   custom_agent?: CustomAgent;
   recent_dirs: string[];
+  use_standard_claude: boolean;
+}
+
+export type ManagedClaudeState =
+  | "not-installed"
+  | "needs-repair"
+  | "healthy"
+  | "unavailable";
+
+export interface ManagedClaudeStatus {
+  state: ManagedClaudeState;
+  version: string;
+  path?: string;
+  standardClaudeAvailable: boolean;
+  usingStandard: boolean;
+}
+
+/** Which Claude mode an action switches to. Install/repair are the "managed" path. */
+export type ClaudeMode = "managed" | "standard";
+
+/** The one-line nudge shown when Claude cannot yet use managed comms. */
+export type ClaudeHint = "install" | "repair" | null;
+
+/**
+ * Managed Claude only earns a line of the Create dialog when something is
+ * actually wrong and the user has not already chosen Standard on purpose.
+ * Everything else stays silent.
+ */
+export function claudeHint(status: ManagedClaudeStatus | null): ClaudeHint {
+  if (!status || status.state === "unavailable" || status.usingStandard) return null;
+  if (status.state === "needs-repair") return "repair";
+  if (status.state === "not-installed") return "install";
+  return null;
+}
+
+/**
+ * The quiet mode switch tucked into the Claude chip. It is null whenever
+ * `claudeHint` has something to say, so the two never compete for attention.
+ */
+export function claudeSwitchTarget(status: ManagedClaudeStatus | null): ClaudeMode | null {
+  if (!status || status.state === "unavailable") return null;
+  if (status.usingStandard) return "managed";
+  if (status.state !== "healthy") return null;
+  return status.standardClaudeAvailable ? "standard" : null;
 }
 
 /** Mirrors `CreateOpts` in src-tauri/src/models.rs (serde snake_case fields). */

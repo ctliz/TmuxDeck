@@ -1,7 +1,15 @@
-import { Bot, Folder, Plus, Settings } from "lucide-react";
-import { t, tPlural, translateName } from "../i18n";
+import { useState } from "react";
+import { Bot, ChevronDown, Folder, Plus, Settings, TriangleAlert } from "lucide-react";
+import { agentDisplayName, t, tPlural, translateName } from "../i18n";
 import { sanitizeNameFrontend, summarizePaneAgents } from "../utils";
-import { Config, Environment } from "../types";
+import {
+  ClaudeMode,
+  Config,
+  Environment,
+  ManagedClaudeStatus,
+  claudeHint,
+  claudeSwitchTarget,
+} from "../types";
 
 interface CreateWorkspaceModalProps {
   show: boolean;
@@ -27,9 +35,13 @@ interface CreateWorkspaceModalProps {
   setCustomAgentCmd: (cmd: string) => void;
   env: Environment | null;
   config: Config | null;
+  managedClaude: ManagedClaudeStatus | null;
+  managedClaudeBusy: boolean;
   loading: boolean;
   onPickDirectory: () => void;
   onSaveCustomAgent: () => void;
+  /** "managed" installs, repairs or re-selects the enhanced link; "standard" opts out. */
+  onClaudeAction: (mode: ClaudeMode) => void;
   onCreate: () => void;
 }
 
@@ -56,12 +68,37 @@ export function CreateWorkspaceModal({
   setCustomAgentCmd,
   env,
   config,
+  managedClaude,
+  managedClaudeBusy,
   loading,
   onPickDirectory,
   onSaveCustomAgent,
+  onClaudeAction,
   onCreate,
 }: CreateWorkspaceModalProps) {
+  const [showClaudeMenu, setShowClaudeMenu] = useState(false);
+
   if (!show) return null;
+
+  // Exactly one of these is ever non-null, so Claude never shouts twice.
+  const hint = claudeHint(managedClaude);
+  const switchTarget = claudeSwitchTarget(managedClaude);
+  const claudeModeLabel = managedClaude?.usingStandard
+    ? t("claude.modeStandard")
+    : t("claude.modeManaged");
+  const switchLabel =
+    switchTarget === "standard"
+      ? t("claude.useStandard")
+      : managedClaude?.state === "healthy"
+        ? t("claude.useManaged")
+        : managedClaude?.state === "needs-repair"
+          ? t("claude.repair")
+          : t("claude.enable");
+
+  const runClaudeAction = (mode: ClaudeMode) => {
+    setShowClaudeMenu(false);
+    onClaudeAction(mode);
+  };
 
   const currentTerminalObj =
     env?.terminals.find((term) => term.id === selectedTerminal) ||
@@ -71,7 +108,7 @@ export function CreateWorkspaceModal({
 
   const agentNameFor = (agentId: string) => {
     const matched = env?.agents.find((agent) => agent.id === agentId);
-    return translateName(matched?.name || agentId);
+    return matched ? agentDisplayName(matched) : agentId;
   };
 
   const paneAgentSummary = summarizePaneAgents(paneAgentIds);
@@ -195,31 +232,91 @@ export function CreateWorkspaceModal({
               <div className="flex items-center space-x-2 flex-wrap gap-y-2">
                 {env.agents.map((agent) => {
                   const isSelected = selectedAgent === agent.id;
+                  // The mode switch lives inside the chip: no extra row while healthy.
+                  const hasClaudeMenu =
+                    agent.id === "claude" && isSelected && switchTarget !== null;
                   return (
-                    <button
+                    <div
                       key={agent.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedAgent(agent.id);
-                        setShowCustomAgentForm(false);
+                      className="relative"
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape" && showClaudeMenu) {
+                          e.stopPropagation();
+                          setShowClaudeMenu(false);
+                        }
                       }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer flex items-center space-x-1 ${
-                        isSelected
-                          ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
-                          : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
-                      }`}
                     >
-                      <span>{translateName(agent.name)}</span>
-                      {agent.id === "custom" && (
-                        <Settings
-                          className="w-3 h-3 ml-1 opacity-75 hover:opacity-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setShowCustomAgentForm(true);
-                          }}
-                        />
+                      <button
+                        type="button"
+                        title={
+                          agent.id === "claude" && managedClaude?.state !== "unavailable"
+                            ? claudeModeLabel
+                            : undefined
+                        }
+                        onClick={() => {
+                          setSelectedAgent(agent.id);
+                          setShowCustomAgentForm(false);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer flex items-center space-x-1 ${
+                          isSelected
+                            ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
+                            : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
+                        }`}
+                      >
+                        <span>{agentDisplayName(agent)}</span>
+                        {agent.id === "custom" && (
+                          <Settings
+                            className="w-3 h-3 ml-1 opacity-75 hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowCustomAgentForm(true);
+                            }}
+                          />
+                        )}
+                        {hasClaudeMenu && (
+                          <ChevronDown
+                            aria-label={t("claude.menuLabel")}
+                            className="w-3 h-3 ml-0.5 opacity-70 hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowClaudeMenu(!showClaudeMenu);
+                            }}
+                          />
+                        )}
+                      </button>
+
+                      {hasClaudeMenu && showClaudeMenu && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowClaudeMenu(false);
+                            }}
+                          />
+                          <div
+                            role="menu"
+                            className="absolute z-30 top-full left-0 mt-1 min-w-[11rem] py-1 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-white/15 shadow-xl shadow-black/40"
+                          >
+                            <div className="px-2.5 py-1 text-[9px] uppercase tracking-wide text-slate-500">
+                              {t("claude.modeCurrent", { mode: claudeModeLabel })}
+                            </div>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={managedClaudeBusy}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                runClaudeAction(switchTarget);
+                              }}
+                              className="w-full text-left px-2.5 py-1 text-[10px] text-slate-300 hover:bg-white/10 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {managedClaudeBusy ? t("claude.working") : switchLabel}
+                            </button>
+                          </div>
+                        </>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
 
@@ -239,6 +336,40 @@ export function CreateWorkspaceModal({
                   </button>
                 )}
               </div>
+
+              {/* One compact line, only when Claude needs a decision. */}
+              {selectedAgent === "claude" && hint && (
+                <div className="flex items-center gap-2 mt-2 text-[11px]">
+                  {hint === "repair" && (
+                    <TriangleAlert className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  )}
+                  <span className={hint === "repair" ? "text-amber-400" : "text-slate-400"}>
+                    {hint === "repair" ? t("claude.hintRepair") : t("claude.hintInstall")}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={managedClaudeBusy}
+                    onClick={() => runClaudeAction("managed")}
+                    className="px-2 py-0.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {managedClaudeBusy
+                      ? t("claude.working")
+                      : hint === "repair"
+                        ? t("claude.repair")
+                        : t("claude.enable")}
+                  </button>
+                  {managedClaude?.standardClaudeAvailable && (
+                    <button
+                      type="button"
+                      disabled={managedClaudeBusy}
+                      onClick={() => runClaudeAction("standard")}
+                      className="text-slate-500 hover:text-slate-300 transition shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {t("claude.useStandard")}
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Inline Custom Agent Editor */}
               {showCustomAgentForm && (
@@ -360,7 +491,7 @@ export function CreateWorkspaceModal({
                           value={agent.id}
                           className="bg-slate-900"
                         >
-                          {translateName(agent.name)}
+                          {agentDisplayName(agent)}
                         </option>
                       ))}
                       {!env?.agents.some((agent) => agent.id === agentId) && (
@@ -408,9 +539,9 @@ export function CreateWorkspaceModal({
             {paneAgentSummary.uniform
               ? t("modal.summary", {
                   panesText: tPlural("modal.panesCount", selectedPanes),
-                  agent: paneAgentSummary.agentId
-                    ? agentNameFor(paneAgentSummary.agentId)
-                    : translateName(currentAgentObj?.name || selectedAgent),
+                  agent: agentNameFor(
+                    paneAgentSummary.agentId ?? currentAgentObj?.id ?? selectedAgent
+                  ),
                   terminal: translateName(
                     currentTerminalObj?.name || selectedTerminal
                   ),

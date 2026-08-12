@@ -225,14 +225,25 @@ impl BridgeEngine {
             }
         }
 
+        // Transcript availability is authoritative backend metadata and may
+        // change while a pane keeps the same identity and subscription.
+        for conv in self.registry.list() {
+            let kind = self.transcript.kind_for(&conv);
+            self.registry.set_transcript_kind(&conv.id, kind);
+        }
+
         // 3) 状态比对：向手机端推送变化
         let list = self.registry.list();
         if let Ok(mut convs) = self.state.conversations.lock() {
             let changed = convs.len() != list.len()
-                || convs
-                    .iter()
-                    .zip(list.iter())
-                    .any(|(a, b)| a.status != b.status || a.title != b.title || a.id != b.id);
+                || convs.iter().zip(list.iter()).any(|(a, b)| {
+                    a.status != b.status
+                        || a.title != b.title
+                        || a.id != b.id
+                        || a.workspace_id != b.workspace_id
+                        || a.workspace_name != b.workspace_name
+                        || a.transcript_kind != b.transcript_kind
+                });
             if changed {
                 let snapshot = list.clone();
                 *convs = snapshot;
@@ -762,7 +773,11 @@ mod tests {
             engine.registry.refresh_panes(vec![
                 PaneDetail {
                     id: "%3".into(),
+                    workspace_id: "a".into(),
+                    workspace_name: "a".into(),
                     agent_id: None,
+                    expected_intercom_id: None,
+                    managed_claude_adapter: false,
                     session: "a".into(),
                     command: "pi".into(),
                     cwd: "/tmp".into(),
@@ -770,7 +785,11 @@ mod tests {
                 },
                 PaneDetail {
                     id: "%9".into(),
+                    workspace_id: "b".into(),
+                    workspace_name: "b".into(),
                     agent_id: None,
+                    expected_intercom_id: None,
+                    managed_claude_adapter: false,
                     session: "b".into(),
                     command: "pi".into(),
                     cwd: "/tmp".into(),
@@ -852,7 +871,11 @@ mod tests {
         let mut reg = ConversationRegistry::new();
         reg.refresh_panes(vec![PaneDetail {
             id: "%1".into(),
+            workspace_id: "s".into(),
+            workspace_name: "s".into(),
             agent_id: None,
+            expected_intercom_id: None,
+            managed_claude_adapter: false,
             session: "s".into(),
             command: "pi".into(),
             cwd: "/tmp".into(),
@@ -886,7 +909,11 @@ mod tests {
         let mut reg = ConversationRegistry::new();
         reg.refresh_panes(vec![PaneDetail {
             id: "%1".into(),
+            workspace_id: "s".into(),
+            workspace_name: "s".into(),
             agent_id: None,
+            expected_intercom_id: None,
+            managed_claude_adapter: false,
             session: "s".into(),
             command: "pi".into(),
             cwd: "/tmp".into(),
@@ -934,10 +961,15 @@ mod tests {
         let mk = |st: ConversationStatus| Conversation {
             id: "%1".into(),
             session: "s".into(),
+            workspace_id: "s".into(),
+            workspace_name: "s".into(),
             cwd: "/tmp".into(),
             kind: crate::bridge::AgentKind::Pi,
+            transcript_kind: crate::bridge::TranscriptKind::Capture,
             title: "t".into(),
             intercom_session_id: None,
+            expected_intercom_id: None,
+            managed_claude_adapter: false,
             status: st,
         };
         assert!(needs_fast(&mk(ConversationStatus::AwaitingHuman)));

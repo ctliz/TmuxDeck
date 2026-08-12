@@ -1,9 +1,9 @@
+use crate::config::load_config;
+use crate::tmux::check_tmux_installed;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use crate::config::load_config;
-use crate::tmux::check_tmux_installed;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolInfo {
@@ -55,7 +55,11 @@ pub fn find_app_icon(app_path_str: &str) -> Option<String> {
         .unwrap_or_default();
 
     for p in &icns_files {
-        let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
+        let stem = p
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
         if stem == "appicon" || stem == "icon" || stem == app_stem {
             return Some(p.to_string_lossy().to_string());
         }
@@ -70,10 +74,19 @@ pub fn find_binary(bin_name: &str, candidate_paths: &[&str]) -> Option<String> {
             return Some(path.to_string());
         }
     }
-    let cmd = if cfg!(target_os = "windows") { "where.exe" } else { "which" };
+    let cmd = if cfg!(target_os = "windows") {
+        "where.exe"
+    } else {
+        "which"
+    };
     if let Ok(output) = Command::new(cmd).arg(bin_name).output() {
         if output.status.success() {
-            let p = String::from_utf8_lossy(&output.stdout).trim().lines().next().unwrap_or("").to_string();
+            let p = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
             if !p.is_empty() {
                 return Some(p);
             }
@@ -92,8 +105,14 @@ pub fn find_agent_binary(bin: &str) -> Option<String> {
             }
         }
     }
-    let nvm_cmd = format!("ls ~/.nvm/versions/node/*/bin/{} 2>/dev/null | head -n 1", bin);
-    if let Ok(out) = Command::new("wsl.exe").args(["--", "bash", "-c", &nvm_cmd]).output() {
+    let nvm_cmd = format!(
+        "ls ~/.nvm/versions/node/*/bin/{} 2>/dev/null | head -n 1",
+        bin
+    );
+    if let Ok(out) = Command::new("wsl.exe")
+        .args(["--", "bash", "-c", &nvm_cmd])
+        .output()
+    {
         if out.status.success() {
             let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !p.is_empty() {
@@ -144,57 +163,14 @@ pub fn find_agent_binary(bin: &str) -> Option<String> {
     None
 }
 
-fn cci_supports_panel_mode(path: &str) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let Ok(metadata) = std::fs::metadata(path) else {
-            return false;
-        };
-        if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
-            return false;
-        }
-    }
-
-    // cci is a script entry point. Inspecting its installed source avoids
-    // launching the worker/daemon during UI environment discovery.
-    #[cfg(target_os = "windows")]
-    let help = {
-        let output = Command::new("wsl.exe")
-            .args(["--", "cat", path])
-            .output();
-        match output {
-            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).into_owned(),
-            _ => return false,
-        }
-    };
-    #[cfg(not(target_os = "windows"))]
-    let help = match std::fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(_) => return false,
-    };
-    ["--tui", "--id", "--name"]
-        .iter()
-        .all(|flag| help.contains(flag))
-}
-
-fn select_claude_entry<F>(
-    cci: Option<String>,
-    claude: Option<String>,
-    supports_panel_mode: F,
-) -> Option<ToolInfo>
-where
-    F: FnOnce(&str) -> bool,
-{
+fn select_claude_entry(cci: Option<String>, claude: Option<String>) -> Option<ToolInfo> {
     if let Some(path) = cci {
-        if supports_panel_mode(&path) {
-            return Some(ToolInfo {
-                id: "claude".to_string(),
-                name: "Claude Code · Intercom (cci)".to_string(),
-                path,
-                icon_path: None,
-            });
-        }
+        return Some(ToolInfo {
+            id: "claude".to_string(),
+            name: "Claude Code · Intercom (Managed)".to_string(),
+            path,
+            icon_path: None,
+        });
     }
     claude.map(|path| ToolInfo {
         id: "claude".to_string(),
@@ -259,7 +235,11 @@ fn detect_environment_uncached() -> Environment {
             ),
             ("wezterm", "WezTerm", vec!["/Applications/WezTerm.app"]),
             ("kitty", "kitty", vec!["/Applications/kitty.app"]),
-            ("alacritty", "Alacritty", vec!["/Applications/Alacritty.app"]),
+            (
+                "alacritty",
+                "Alacritty",
+                vec!["/Applications/Alacritty.app"],
+            ),
         ];
 
         for (id, name, paths) in known_terminals {
@@ -295,14 +275,18 @@ fn detect_environment_uncached() -> Environment {
     ];
 
     let mut installed_agents = Vec::new();
-    // Only select cci after runtime verification that it is executable and
-    // supports the identity flags used by the panel. Otherwise fall back to
-    // the independently detected ordinary Claude binary without an error.
-    if let Some(agent) = select_claude_entry(
-        find_agent_binary("cci"),
-        find_agent_binary("claude"),
-        cci_supports_panel_mode,
-    ) {
+    // Prefer only TmuxDeck's pinned, health-checked adapter. A user/global cci
+    // is never mutated and cannot be marked healthy without its Monitor files.
+    let config = load_config();
+    let standard_claude = find_agent_binary("claude");
+    let managed_cci = crate::claude_adapter::healthy_managed_cci();
+    let (selected_managed, selected_standard) =
+        if config.use_standard_claude && standard_claude.is_some() {
+            (None, standard_claude)
+        } else {
+            (managed_cci, standard_claude)
+        };
+    if let Some(agent) = select_claude_entry(selected_managed, selected_standard) {
         installed_agents.push(agent);
     }
     for (id, name, bin) in known_agents {
@@ -317,12 +301,16 @@ fn detect_environment_uncached() -> Environment {
     }
 
     // Custom Agent Support
-    let cfg = load_config();
+    let cfg = config;
     if let Some(custom) = cfg.custom_agent {
         if !custom.command.trim().is_empty() {
             installed_agents.push(ToolInfo {
                 id: "custom".to_string(),
-                name: if custom.name.trim().is_empty() { "agent.custom".to_string() } else { custom.name },
+                name: if custom.name.trim().is_empty() {
+                    "agent.custom".to_string()
+                } else {
+                    custom.name
+                },
                 path: custom.command,
                 icon_path: None,
             });
@@ -387,12 +375,15 @@ mod tests {
 
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn agent_candidates_include_native_claude_and_opencode_installs() {
+    fn agent_candidates_include_native_claude_opencode_and_nvm_node_installs() {
         let claude = agent_candidate_paths("/Users/test", "claude");
         assert!(claude.contains(&"/Users/test/.local/bin/claude".to_string()));
 
         let opencode = agent_candidate_paths("/Users/test", "opencode");
         assert!(opencode.contains(&"/Users/test/.opencode/bin/opencode".to_string()));
+
+        let node = agent_candidate_paths("/Users/test", "node");
+        assert!(node.contains(&"/Users/test/.local/bin/node".to_string()));
     }
 
     #[test]
@@ -400,30 +391,17 @@ mod tests {
         let entry = select_claude_entry(
             Some("/opt/bin/cci".to_string()),
             Some("/opt/bin/claude".to_string()),
-            |path| path == "/opt/bin/cci",
         )
         .unwrap();
         assert_eq!(entry.path, "/opt/bin/cci");
-        assert!(entry.name.contains("Intercom (cci)"));
+        assert!(entry.name.contains("Intercom (Managed)"));
     }
 
     #[test]
     fn claude_entry_falls_back_when_cci_is_missing_or_incompatible() {
-        let missing = select_claude_entry(
-            None,
-            Some("/opt/bin/claude".to_string()),
-            |_| unreachable!(),
-        )
-        .unwrap();
+        let missing = select_claude_entry(None, Some("/opt/bin/claude".to_string())).unwrap();
         assert_eq!(missing.path, "/opt/bin/claude");
 
-        let incompatible = select_claude_entry(
-            Some("/old/bin/cci".to_string()),
-            Some("/opt/bin/claude".to_string()),
-            |_| false,
-        )
-        .unwrap();
-        assert_eq!(incompatible.path, "/opt/bin/claude");
-        assert!(incompatible.name.contains("Standard"));
+        assert!(select_claude_entry(None, None).is_none());
     }
 }

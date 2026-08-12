@@ -3,6 +3,7 @@ use tauri::Emitter;
 mod audit;
 mod bridge;
 mod bridge_state;
+mod claude_adapter;
 mod commands;
 mod config;
 mod connection;
@@ -18,6 +19,7 @@ mod usage;
 
 pub use bridge::*;
 pub use bridge_state::*;
+pub use claude_adapter::*;
 pub use commands::*;
 pub use config::*;
 pub use engine::*;
@@ -190,6 +192,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             to_wsl_path,
             detect_environment,
+            get_managed_claude_status,
+            install_managed_claude,
+            use_managed_claude,
+            use_standard_claude,
             load_config,
             save_config,
             create_session,
@@ -199,6 +205,7 @@ pub fn run() {
             rename_session,
             capture_pane,
             add_pane,
+            add_panes,
             kill_pane,
             kill_slot,
             get_terminal_icon,
