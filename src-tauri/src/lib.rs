@@ -118,6 +118,7 @@ pub fn run() {
             send_pane_key,
             list_panes,
             swap_pane,
+            swap_native_slots,
             bridge_pairing,
             bridge_conversations
         ])

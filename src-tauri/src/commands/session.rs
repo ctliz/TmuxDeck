@@ -7,11 +7,9 @@ use std::os::unix::fs::PermissionsExt;
 use crate::audit::{observe_session_count, record_kill, tmux_counts};
 use crate::commands::native::{
     create_native_workspace, destroy_native_workspace, ghostty_native_available, list_native_slots,
-    open_native_workspace, TERMINAL_OPTION,
+    open_native_workspace, rename_native_workspace, TERMINAL_OPTION,
 };
-use crate::commands::utils::{
-    append_identity_env_clears, isolated_agent_command, to_wsl_path,
-};
+use crate::commands::utils::{append_identity_env_clears, isolated_agent_command, to_wsl_path};
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
 use crate::registry::{detect_environment, ToolInfo};
@@ -49,7 +47,8 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     let sanitized_name = sanitize_session_name(&name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
-    }    let native_slots = list_native_slots(&sanitized_name)?;
+    }
+    let native_slots = list_native_slots(&sanitized_name)?;
     if !native_slots.is_empty() {
         // 打开 workspace：补全到全部 slot（行为不变）
         return open_native_workspace(&sanitized_name, &native_slots, native_slots.len());
@@ -535,14 +534,6 @@ pub fn kill_session(session_name: String) -> Result<(), String> {
     Ok(())
 }
 
-fn reject_native_rename(is_native: bool) -> Result<(), String> {
-    if is_native {
-        Err("ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED".to_string())
-    } else {
-        Ok(())
-    }
-}
-
 #[tauri::command]
 pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> {
     let sanitized_old = sanitize_session_name(&old_name)?;
@@ -551,7 +542,9 @@ pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> 
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
-    reject_native_rename(!list_native_slots(&sanitized_old)?.is_empty())?;
+    if rename_native_workspace(&sanitized_old, &sanitized_new)? {
+        return Ok(());
+    }
 
     let output = run_tmux(&["rename-session", "-t", &sanitized_old, &sanitized_new])
         .map_err(|e| format!("ERR_RENAME_FAILED|{}", e))?;
@@ -571,15 +564,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_workspace_rename_is_rejected_before_mutation() {
-        assert_eq!(
-            reject_native_rename(true),
-            Err("ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED".to_string())
-        );
-        assert_eq!(reject_native_rename(false), Ok(()));
-    }
-
-    #[test]
     fn resolve_agent_uses_detected_shell_and_agent_paths() {
         let agents = vec![
             ToolInfo {
@@ -597,7 +581,10 @@ mod tests {
         ];
         assert_eq!(resolve_agent_command("shell", &agents), "/bin/zsh");
         assert_eq!(resolve_agent_command("pi", &agents), "/opt/bin/pi");
-        assert_eq!(resolve_agent_command("unknown-agent", &agents), "unknown-agent");
+        assert_eq!(
+            resolve_agent_command("unknown-agent", &agents),
+            "unknown-agent"
+        );
     }
 
     #[test]

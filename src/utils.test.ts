@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { test } from "node:test";
 import { t, tPlural, translateError } from "./i18n.ts";
-import { sanitizeNameFrontend } from "./utils.ts";
+import { reorderIds, sanitizeNameFrontend } from "./utils.ts";
 import type { TmuxSession, TmuxPane } from "./types.ts";
 
 test("sanitizeNameFrontend - valid alphanumeric names", () => {
@@ -17,6 +17,15 @@ test("sanitizeNameFrontend - trims whitespace and special characters", () => {
 test("sanitizeNameFrontend - collapse multiple dashes and strips leading/trailing dashes", () => {
   assert.strictEqual(sanitizeNameFrontend("---foo---bar---"), "foo-bar");
   assert.strictEqual(sanitizeNameFrontend("!!!"), "");
+});
+
+test("card reorder remains stable for native session ids", () => {
+  const order = ["native:alpha", "$2", "native:beta"];
+  assert.deepStrictEqual(
+    reorderIds(order, "native:beta", "native:alpha"),
+    ["native:beta", "native:alpha", "$2"]
+  );
+  assert.deepStrictEqual(order, ["native:alpha", "$2", "native:beta"]);
 });
 
 test("destroy confirmation distinguishes pane termination from terminal detach", () => {

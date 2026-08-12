@@ -298,6 +298,18 @@ fn parse_visible_slot_numbers(stdout: &str, prefix: &str) -> Vec<usize> {
     numbers
 }
 
+fn validate_visible_slot_swap(
+    visible: &[usize],
+    slot_a: usize,
+    slot_b: usize,
+) -> Result<(), String> {
+    if visible.contains(&slot_a) && visible.contains(&slot_b) {
+        Ok(())
+    } else {
+        Err("ERR_PANE_INVALID".to_string())
+    }
+}
+
 pub(crate) fn visible_native_slot_numbers(workspace: &str) -> Result<Vec<usize>, String> {
     let prefix = format!("TmuxDeck::{}::", workspace);
     let script = format!(
@@ -333,8 +345,173 @@ pub(crate) fn rebuild_native_workspace(
         .lock()
         .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
     let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let script = ghostty_rebuild_script(workspace, slots, &tmux);
+    let script = ghostty_rebuild_script(workspace, workspace, slots, &tmux);
     run_ghostty_script(&script)
+}
+
+fn rebuild_renamed_native_workspace(
+    old_workspace: &str,
+    new_workspace: &str,
+    slots: &[NativeSlot],
+) -> Result<(), String> {
+    let _layout_guard = GHOSTTY_LAYOUT_LOCK
+        .lock()
+        .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
+    let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
+    let script = ghostty_rebuild_script(old_workspace, new_workspace, slots, &tmux);
+    run_ghostty_script(&script)
+}
+
+pub(crate) fn swap_native_slots(target_a: &str, target_b: &str) -> Result<(), String> {
+    let target_a = validate_native_slot_target(target_a)?;
+    let target_b = validate_native_slot_target(target_b)?;
+    let workspace_a = target_a
+        .rsplit_once("__td_slot_")
+        .map(|(workspace, _)| workspace)
+        .ok_or_else(|| "ERR_PANE_INVALID".to_string())?;
+    let workspace_b = target_b
+        .rsplit_once("__td_slot_")
+        .map(|(workspace, _)| workspace)
+        .ok_or_else(|| "ERR_PANE_INVALID".to_string())?;
+    if workspace_a != workspace_b {
+        return Err("ERR_PANE_INVALID".to_string());
+    }
+
+    let slots = list_native_slots(workspace_a)?;
+    let visible = visible_native_slot_numbers(workspace_a)?;
+    let slot_a = slots
+        .iter()
+        .find(|slot| slot.target == target_a)
+        .map(|slot| slot.slot.clone())
+        .ok_or_else(|| "ERR_PANE_INVALID".to_string())?;
+    let slot_b = slots
+        .iter()
+        .find(|slot| slot.target == target_b)
+        .map(|slot| slot.slot.clone())
+        .ok_or_else(|| "ERR_PANE_INVALID".to_string())?;
+    let number_a = slot_a
+        .parse::<usize>()
+        .map_err(|_| "ERR_PANE_INVALID".to_string())?;
+    let number_b = slot_b
+        .parse::<usize>()
+        .map_err(|_| "ERR_PANE_INVALID".to_string())?;
+    validate_visible_slot_swap(&visible, number_a, number_b)?;
+
+    for (target, slot) in [(target_a, slot_b.as_str()), (target_b, slot_a.as_str())] {
+        let output = run_tmux(&[
+            "set-option",
+            "-t",
+            target,
+            SLOT_OPTION,
+            slot,
+            ";",
+            "set-environment",
+            "-t",
+            target,
+            "TMUXDECK_SLOT",
+            slot,
+        ])
+        .map_err(|error| format!("ERR_SWAP_PANE_FAILED|{}", error))?;
+        if !output.status.success() {
+            return Err(format!(
+                "ERR_SWAP_PANE_FAILED|{}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+
+    let swapped = list_native_slots(workspace_a)?;
+    // 元数据交换后按 slot 升序重建；get_tmux_sessions 同样按 slot 排序，
+    // 因此 Ghostty 视觉位置与刷新后的卡片 pane 顺序保持一致。
+    let target_slots: Vec<_> = visible
+        .iter()
+        .filter_map(|number| {
+            swapped
+                .iter()
+                .find(|slot| slot.slot.parse::<usize>().ok() == Some(*number))
+                .cloned()
+        })
+        .collect();
+    rebuild_native_workspace(workspace_a, &target_slots)
+}
+
+pub(crate) fn rename_native_workspace(old_name: &str, new_name: &str) -> Result<bool, String> {
+    let old_name = sanitize_session_name(old_name)?;
+    let new_name = sanitize_session_name(new_name)?;
+    let slots = list_native_slots(&old_name)?;
+    if slots.is_empty() {
+        return Ok(false);
+    }
+    if !list_native_slots(&new_name)?.is_empty()
+        || run_tmux(&["has-session", "-t", &new_name]).is_ok_and(|output| output.status.success())
+    {
+        return Err("ERR_RENAME_OUTPUT_ERR|workspace already exists".to_string());
+    }
+
+    let mut renamed: Vec<NativeSlot> = Vec::new();
+    for slot in &slots {
+        let slot_number = slot
+            .slot
+            .parse::<usize>()
+            .map_err(|_| "ERR_RENAME_FAILED|invalid native slot".to_string())?;
+        let new_target = slot_target(&new_name, slot_number);
+        let output = run_tmux(&["rename-session", "-t", &slot.target, &new_target])
+            .map_err(|error| format!("ERR_RENAME_FAILED|{}", error))?;
+        if !output.status.success() {
+            for previous in &renamed {
+                if let Some(original) = slots.iter().find(|item| item.slot == previous.slot) {
+                    let _ = run_tmux(&[
+                        "rename-session",
+                        "-t",
+                        &previous.target,
+                        &original.target,
+                    ]);
+                }
+            }
+            return Err(format!(
+                "ERR_RENAME_OUTPUT_ERR|{}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        renamed.push(NativeSlot {
+            target: new_target,
+            slot: slot.slot.clone(),
+        });
+    }
+
+    for slot in &renamed {
+        for (option, value) in [
+            (WORKSPACE_OPTION, new_name.as_str()),
+            (NATIVE_OPTION, "1"),
+            (SLOT_OPTION, slot.slot.as_str()),
+            (TERMINAL_OPTION, "ghostty"),
+        ] {
+            let output = run_tmux(&["set-option", "-t", &slot.target, option, value])
+                .map_err(|error| format!("ERR_RENAME_FAILED|{}", error))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "ERR_RENAME_OUTPUT_ERR|{}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+        }
+        let environment = run_tmux(&[
+            "set-environment",
+            "-t",
+            &slot.target,
+            "TMUXDECK_WORKSPACE",
+            &new_name,
+        ])
+        .map_err(|error| format!("ERR_RENAME_FAILED|{}", error))?;
+        if !environment.status.success() {
+            return Err(format!(
+                "ERR_RENAME_OUTPUT_ERR|{}",
+                String::from_utf8_lossy(&environment.stderr)
+            ));
+        }
+    }
+    rebuild_renamed_native_workspace(&old_name, &new_name, &renamed)?;
+    Ok(true)
 }
 
 pub(crate) fn kill_native_slot(target: &str) -> Result<(), String> {
@@ -542,8 +719,13 @@ fn ghostty_layout_script(
     script
 }
 
-fn ghostty_rebuild_script(workspace: &str, slots: &[NativeSlot], tmux: &str) -> String {
-    let prefix = applescript_string(&format!("TmuxDeck::{}::", workspace));
+fn ghostty_rebuild_script(
+    close_workspace: &str,
+    workspace: &str,
+    slots: &[NativeSlot],
+    tmux: &str,
+) -> String {
+    let prefix = applescript_string(&format!("TmuxDeck::{}::", close_workspace));
     // Ghostty 在最后一个窗口被关掉时会退出：不能 close-old 后再 new-window。
     // native workspace 本来就是独立窗口：先保存含该 workspace surface 的 window id，
     // 创建新网格后按 id 关闭旧窗口。tmux 只短暂双 attach，agent 不受影响。
@@ -587,6 +769,15 @@ mod tests {
     }
 
     #[test]
+    fn test_native_slot_swap_requires_two_visible_slots() {
+        assert_eq!(validate_visible_slot_swap(&[1, 2, 5], 1, 5), Ok(()));
+        assert_eq!(
+            validate_visible_slot_swap(&[1, 2, 5], 1, 3),
+            Err("ERR_PANE_INVALID".to_string())
+        );
+    }
+
+    #[test]
     fn test_grid_split_rules() {
         // 非 6 格：2 列逐行填充
         assert_eq!(grid_split_for(2, 2), (1, "right"));
@@ -618,7 +809,7 @@ mod tests {
                 slot: "5".into(),
             },
         ];
-        let script = ghostty_rebuild_script("deck", &slots, "/opt/homebrew/bin/tmux");
+        let script = ghostty_rebuild_script("deck", "deck", &slots, "/opt/homebrew/bin/tmux");
         assert!(script.contains("set end of oldWindowIds to id of w"));
         assert!(script.contains("if id of w is contents of oldWindowId then"));
         assert!(script.contains("close window oldWindow\ndelay 0.3"));
@@ -787,7 +978,12 @@ mod tests {
             .collect();
         let scripts = [
             ghostty_layout_script("compile-test", &slots, "/opt/homebrew/bin/tmux", "down", 4),
-            ghostty_rebuild_script("compile-test", &slots, "/opt/homebrew/bin/tmux"),
+            ghostty_rebuild_script(
+                "compile-test",
+                "compile-test",
+                &slots,
+                "/opt/homebrew/bin/tmux",
+            ),
         ];
         for (index, script) in scripts.iter().enumerate() {
             let output_path = std::env::temp_dir().join(format!(

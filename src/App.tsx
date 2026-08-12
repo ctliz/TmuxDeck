@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t, tPlural, translateError } from "./i18n";
-import { sanitizeNameFrontend } from "./utils";
+import { reorderIds, sanitizeNameFrontend } from "./utils";
 import { Config, CustomAgent, Environment, TmuxSession } from "./types";
 import { TmuxMissingScreen } from "./components/TmuxMissingScreen";
 import { SearchHeader } from "./components/SearchHeader";
@@ -280,9 +280,21 @@ export default function App() {
     }
   };
 
-  const handleSwapPane = async (paneIdA: string, paneIdB: string) => {
+  const handleSwapPane = async (
+    paneIdA: string,
+    paneIdB: string,
+    sessionTargetA?: string,
+    sessionTargetB?: string
+  ) => {
     try {
-      await invoke("swap_pane", { paneIdA, paneIdB });
+      if (sessionTargetA && sessionTargetB) {
+        await invoke("swap_native_slots", {
+          sessionTargetA,
+          sessionTargetB,
+        });
+      } else {
+        await invoke("swap_pane", { paneIdA, paneIdB });
+      }
       await loadData();
     } catch (err: any) {
       alert(translateError(err));
@@ -302,16 +314,10 @@ export default function App() {
   };
 
   const handleReorderCards = (sourceSessionId: string, targetSessionId: string) => {
-    const currentOrder = [...cardOrderRef.current];
-    const fromIndex = currentOrder.indexOf(sourceSessionId);
-    const toIndex = currentOrder.indexOf(targetSessionId);
-    if (fromIndex !== -1 && toIndex !== -1) {
-      currentOrder.splice(fromIndex, 1);
-      currentOrder.splice(toIndex, 0, sourceSessionId);
-      cardOrderRef.current = currentOrder;
-      setCardOrder(currentOrder);
-      setSessions((prev) => sortSessionsByOrder(prev, currentOrder));
-    }
+    const currentOrder = reorderIds(cardOrderRef.current, sourceSessionId, targetSessionId);
+    cardOrderRef.current = currentOrder;
+    setCardOrder(currentOrder);
+    setSessions((prev) => sortSessionsByOrder(prev, currentOrder));
   };
 
   const copyCommandHelper = (text: string) => {

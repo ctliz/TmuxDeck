@@ -1,7 +1,7 @@
 use crate::audit::{record_kill, tmux_counts};
 use crate::commands::native::{
     create_native_slot, kill_native_slot, list_native_slots, rebuild_native_workspace,
-    visible_native_slot_numbers,
+    swap_native_slots as swap_native_slot_targets, visible_native_slot_numbers,
 };
 use crate::commands::utils::isolated_agent_command;
 use crate::tmux::{
@@ -37,6 +37,11 @@ pub fn list_panes() -> Vec<crate::tmux::PaneDetail> {
 #[tauri::command]
 pub fn swap_pane(pane_id_a: String, pane_id_b: String) -> Result<(), String> {
     crate::tmux::swap_panes(&pane_id_a, &pane_id_b)
+}
+
+#[tauri::command]
+pub fn swap_native_slots(session_target_a: String, session_target_b: String) -> Result<(), String> {
+    swap_native_slot_targets(&session_target_a, &session_target_b)
 }
 
 #[tauri::command]

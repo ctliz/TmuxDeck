@@ -18,7 +18,12 @@ interface CardGridProps {
   onAddPane: (name: string) => void;
   onKillPane: (id: string, sessionTarget?: string) => void;
   onOpenSession: (name: string, termId: string) => void;
-  onSwapPane: (paneIdA: string, paneIdB: string) => void;
+  onSwapPane: (
+    paneIdA: string,
+    paneIdB: string,
+    sessionTargetA?: string,
+    sessionTargetB?: string
+  ) => void;
   onReorderCards: (sourceSessionId: string, targetSessionId: string) => void;
 }
 

@@ -19,7 +19,12 @@ interface SessionCardProps {
   onAddPane: (name: string) => void;
   onKillPane: (id: string, sessionTarget?: string) => void;
   onOpenSession: (name: string, termId: string) => void;
-  onSwapPane: (paneIdA: string, paneIdB: string) => void;
+  onSwapPane: (
+    paneIdA: string,
+    paneIdB: string,
+    sessionTargetA?: string,
+    sessionTargetB?: string
+  ) => void;
   onCardDragStart?: (e: React.DragEvent, sessionId: string) => void;
   onCardDragOver?: (e: React.DragEvent, sessionId: string) => void;
   onCardDragLeave?: (e: React.DragEvent, sessionId: string) => void;
@@ -119,13 +124,17 @@ export function SessionCard({
 
   // Handlers for Pane Drag & Drop (inner-card)
   const handlePaneDragStart = (e: React.DragEvent, pane: TmuxPane) => {
-    if (session.native_split || session.panes_count <= 1) return;
+    if (session.panes_count <= 1) return;
     e.stopPropagation();
     isPaneDraggingRef.current = true;
     setDraggingPaneId(pane.id);
     e.dataTransfer.setData(
       "application/x-tmuxdeck-pane",
-      JSON.stringify({ sessionId: session.id, paneId: pane.id })
+      JSON.stringify({
+        sessionId: session.id,
+        paneId: pane.id,
+        sessionTarget: pane.session_target,
+      })
     );
     e.dataTransfer.effectAllowed = "move";
   };
@@ -160,7 +169,12 @@ export function SessionCard({
     try {
       const data = JSON.parse(rawData);
       if (data.sessionId === session.id && data.paneId !== targetPane.id) {
-        onSwapPane(data.paneId, targetPane.id);
+        onSwapPane(
+          data.paneId,
+          targetPane.id,
+          data.sessionTarget,
+          targetPane.session_target
+        );
       }
     } catch (err) {
       console.error("Pane drop error", err);
@@ -188,21 +202,20 @@ export function SessionCard({
       }`}
     >
       {/* Card Header */}
-      <div
-        draggable={!isRenaming}
-        onDragStart={(e) => !isPaneDraggingRef.current && onCardDragStart?.(e, session.id)}
-        onDragEnd={(e) => !isPaneDraggingRef.current && onCardDragEnd?.(e)}
-        className="p-4 border-b border-white/10 cursor-grab active:cursor-grabbing"
-      >
+      <div className="p-4 border-b border-white/10">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center space-x-2 min-w-0 flex-1">
-            <span
-              className="shrink-0 px-0.5 text-slate-500 hover:text-cyan-300 transition"
+            <button
+              type="button"
+              draggable={!isRenaming}
+              onDragStart={(e) => onCardDragStart?.(e, session.id)}
+              onDragEnd={(e) => onCardDragEnd?.(e)}
+              className="shrink-0 px-0.5 text-slate-500 hover:text-cyan-300 cursor-grab active:cursor-grabbing transition"
               title={t("card.drag")}
               aria-label={t("card.drag")}
             >
               ⠿
-            </span>
+            </button>
             <span
               className={`w-2.5 h-2.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
               title={activityInfo.statusTooltip}
@@ -226,22 +239,13 @@ export function SessionCard({
               <div className="flex items-center space-x-2 min-w-0">
                 <h2
                   onClick={(e) => {
-                    if (session.native_split) return;
                     e.stopPropagation();
                     onRenameStart(session.name);
                   }}
                   onPointerDown={(e) => e.stopPropagation()}
                   onDragStart={(e) => e.stopPropagation()}
-                  className={`font-semibold text-slate-100 truncate text-base transition ${
-                    session.native_split
-                      ? "cursor-default"
-                      : "hover:text-cyan-300 hover:underline cursor-pointer"
-                  }`}
-                  title={
-                    session.native_split
-                      ? t("card.nativeRenameUnsupported")
-                      : t("card.rename")
-                  }
+                  className="font-semibold text-slate-100 truncate text-base transition hover:text-cyan-300 hover:underline cursor-pointer"
+                  title={t("card.rename")}
                 >
                   {session.name}
                 </h2>
@@ -334,7 +338,7 @@ export function SessionCard({
 
             const isThisPaneDragging = draggingPaneId === pane.id;
             const isThisPaneDragOver = dragOverPaneId === pane.id;
-            const isPaneDraggable = !session.native_split && session.panes_count > 1;
+            const isPaneDraggable = session.panes_count > 1;
 
             const isPaneColSpan = panesCount === 3 && idx === 0;
             const isPaneFullHeight = panesCount <= 2;
