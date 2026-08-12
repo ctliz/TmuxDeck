@@ -215,6 +215,14 @@ jobs:
               exit 0
             }
             Write-Warning "Tauri build attempt $attempt failed with exit $lastExit"
+            $changed = @(git diff --name-only)
+            if ($changed.Count -ne 0) {
+              Write-Warning "Restoring tracked files changed by the failed build: $($changed -join ', ')"
+              git restore --worktree -- .
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to restore tracked source after build attempt $attempt"
+              }
+            }
           }
           exit $lastExit
       - name: Verify Windows artifacts
