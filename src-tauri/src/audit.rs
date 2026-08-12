@@ -69,6 +69,26 @@ fn nonzero_to_zero(previous: Option<usize>, current: usize) -> Option<usize> {
     previous.filter(|count| *count > 0 && current == 0)
 }
 
+pub(crate) fn record_mobile_command(
+    peer_ip: std::net::IpAddr,
+    command: &str,
+    pane: Option<&str>,
+    text: Option<&str>,
+    outcome: &str,
+) {
+    let text_bytes = text.map(str::len);
+    append(json!({
+        "timestamp": timestamp_ms(),
+        "app_pid": std::process::id(),
+        "event": "mobile_command",
+        "peer_ip": peer_ip.to_string(),
+        "command": command,
+        "pane": pane,
+        "text_bytes": text_bytes,
+        "outcome": outcome,
+    }));
+}
+
 pub(crate) fn observe_session_count(current: usize, no_server: bool) {
     let previous_count = {
         let Ok(mut previous) = PREVIOUS_SESSION_COUNT.lock() else {
@@ -127,6 +147,16 @@ mod tests {
         assert_eq!(nonzero_to_zero(Some(0), 0), None);
         assert_eq!(nonzero_to_zero(Some(3), 2), None);
         assert_eq!(nonzero_to_zero(Some(3), 0), Some(3));
+    }
+
+    #[test]
+    fn test_mobile_audit_records_text_bytes_without_content() {
+        let value = "密钥abc";
+        let event = json!({
+            "text_bytes": Some(value.len()),
+        });
+        assert_eq!(event["text_bytes"], value.len());
+        assert!(!event.to_string().contains(value));
     }
 
     #[test]

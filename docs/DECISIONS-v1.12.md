@@ -7,7 +7,7 @@
 
 ## 1. Embedded HTTP server + mobile web PWA
 
-**Rejected.**
+**Rejected in the original form; narrowly revisited for v1.14 trusted-LAN mode (2026-08).**
 
 Initial design: run axum inside the Tauri process, bind `0.0.0.0:7420`, and serve a responsive web page; the phone pairs by scanning a QR code. It shipped with a pairing code, device tokens, a revocation list, CORS and DNS-rebinding protection.
 
@@ -18,7 +18,7 @@ Why rejected:
 - iOS Web Push only works once a PWA is added to the home screen — a precondition users won't follow
 - The whole pairing/auth/revocation scheme is a **home-grown security mechanism**, and this is an attack surface that exposes shell execution
 
-**Revisit if:** a desktop-grade, information-dense multi-conversation interface is needed and HTTPS already exists (Tailscale or a tunnel).
+**Revisit outcome:** the user explicitly selected LAN-first access and accepted a **trusted-LAN-only** plaintext boundary. The implementation is substantially narrower than the rejected design: one dynamic port, one embedded HTML file, one per-launch 256-bit token, HTTP+WS Host/source checks, no persistent device credentials/revocation database, and no arbitrary shell/input endpoint. VPN/TLS remains the recommended future extension for untrusted networks.
 
 ---
 

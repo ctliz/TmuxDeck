@@ -23,6 +23,17 @@ export interface Config {
   recent_dirs: string[];
 }
 
+/** Mirrors `CreateOpts` in src-tauri/src/models.rs (serde snake_case fields). */
+export interface CreateOpts {
+  name: string;
+  dir: string | null;
+  agent_id: string;
+  /** Per-pane Agent ids; must be empty or exactly `panes` long. */
+  pane_agent_ids: string[];
+  panes: number;
+  terminal_id: string;
+}
+
 export interface TmuxPane {
   id: string;
   command: string;
@@ -31,6 +42,8 @@ export interface TmuxPane {
   session_target?: string;
   slot?: string | null;
   attached?: boolean;
+  /** Agent this pane was launched with; authoritative over matching `command`. */
+  agent_id?: string;
 }
 
 export interface TmuxSession {
@@ -44,4 +57,17 @@ export interface TmuxSession {
   panes: TmuxPane[];
   native_split?: boolean;
   terminal_id?: string;
+}
+
+export interface BridgePairingStatus {
+  enabled: boolean;
+  port: number;
+  httpUrl?: string;
+  wsUrl?: string;
+  httpUrls?: string[];
+  wsUrls?: string[];
+  token: string;
+  connectedClients: number;
+  brokerConnected: boolean;
+  trustedLanOnly?: boolean;
 }

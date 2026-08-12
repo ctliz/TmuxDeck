@@ -3,17 +3,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t, tPlural, translateError } from "./i18n";
-import { reorderIds, sanitizeNameFrontend } from "./utils";
-import { Config, CustomAgent, Environment, TmuxSession } from "./types";
+import {
+  applyPaneContents,
+  preservePaneContent,
+  reorderIds,
+  resizePaneAgents,
+  sanitizeNameFrontend,
+} from "./utils";
+import { Config, CreateOpts, CustomAgent, Environment, TmuxSession } from "./types";
 import { TmuxMissingScreen } from "./components/TmuxMissingScreen";
 import { SearchHeader } from "./components/SearchHeader";
 import { CardGrid } from "./components/CardGrid";
 import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
+import { MobilePairingModal } from "./components/MobilePairingModal";
 
 export default function App() {
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
+  const [showMobilePairingModal, setShowMobilePairingModal] = useState(false);
   const sessionsRef = useRef<TmuxSession[]>([]);
   const failedPaneCountsRef = useRef(new Map<string, number>());
+  const sessionPollInFlightRef = useRef(false);
+  const captureInFlightRef = useRef(false);
 
   // Card reordering & Drag state
   const [, setCardOrder] = useState<string[]>([]);
@@ -33,10 +43,17 @@ export default function App() {
   const [workingDir, setWorkingDir] = useState("");
   const [selectedAgent, setSelectedAgent] = useState("pi");
   const [selectedPanes, setSelectedPanes] = useState(4);
+  // Per-pane overrides; normalized against selectedPanes/selectedAgent on every render.
+  const [paneAgentIds, setPaneAgentIds] = useState<string[]>([]);
   const [selectedTerminal, setSelectedTerminal] = useState("ghostty");
   const [showCustomAgentForm, setShowCustomAgentForm] = useState(false);
   const [customAgentName, setCustomAgentName] = useState("");
   const [customAgentCmd, setCustomAgentCmd] = useState("");
+  const effectivePaneAgentIds = resizePaneAgents(
+    paneAgentIds,
+    selectedPanes,
+    selectedAgent
+  );
 
   // Rename & Icon Cache State
   const [renamingSession, setRenamingSession] = useState<string | null>(null);
@@ -71,39 +88,19 @@ export default function App() {
     });
   };
 
-  const loadData = async () => {
-    setErrorMsg("");
+  /**
+   * Environment and config are effectively static: detecting terminals/agents
+   * shells out to the filesystem, so it runs on mount and after the few actions
+   * that can change it — never on the session poll.
+   */
+  const loadStaticData = async () => {
     try {
-      const [envData, cfgData, sessionList] = await Promise.all([
+      const [envData, cfgData] = await Promise.all([
         invoke<Environment>("detect_environment"),
         invoke<Config>("load_config"),
-        invoke<TmuxSession[]>("get_tmux_sessions"),
       ]);
       setEnv(envData);
       setConfig(cfgData);
-      setSessions((prevSessions) => {
-        const mergedList = sessionList.map((newSess) => {
-          const oldSess = prevSessions.find((s) => s.id === newSess.id || s.name === newSess.name);
-          if (!oldSess) return newSess;
-          return {
-            ...newSess,
-            panes: newSess.panes.map((newPane) => {
-              const oldPane = oldSess.panes.find((p) => p.id === newPane.id);
-              return oldPane?.content ? { ...newPane, content: oldPane.content } : newPane;
-            }),
-          };
-        });
-
-        const activeIds = new Set(mergedList.map((s) => s.id));
-        const updatedOrder = cardOrderRef.current.filter((id) => activeIds.has(id));
-        mergedList.forEach((s) => {
-          if (!updatedOrder.includes(s.id)) updatedOrder.push(s.id);
-        });
-        cardOrderRef.current = updatedOrder;
-        setCardOrder(updatedOrder);
-
-        return sortSessionsByOrder(mergedList, updatedOrder);
-      });
 
       if (cfgData.custom_agent) {
         setCustomAgentName(cfgData.custom_agent.name || "");
@@ -122,53 +119,109 @@ export default function App() {
         }
         if (cfgData.default_panes) setSelectedPanes(cfgData.default_panes);
       }
+    } catch (err: any) {
+      setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
+    }
+  };
+
+  const refreshSessions = async () => {
+    // A slow tmux call must not stack up behind the 4s timer.
+    if (sessionPollInFlightRef.current) return;
+    sessionPollInFlightRef.current = true;
+    try {
+      const sessionList = await invoke<TmuxSession[]>("get_tmux_sessions");
+      setErrorMsg("");
+      setSessions((prevSessions) => {
+        const mergedList = preservePaneContent(prevSessions, sessionList);
+
+        const activeIds = new Set(mergedList.map((s) => s.id));
+        const updatedOrder = cardOrderRef.current.filter((id) => activeIds.has(id));
+        mergedList.forEach((s) => {
+          if (!updatedOrder.includes(s.id)) updatedOrder.push(s.id);
+        });
+        cardOrderRef.current = updatedOrder;
+        setCardOrder(updatedOrder);
+
+        return sortSessionsByOrder(mergedList, updatedOrder);
+      });
 
       sessionsRef.current = sessionList;
       failedPaneCountsRef.current.clear();
     } catch (err: any) {
       setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
+    } finally {
+      sessionPollInFlightRef.current = false;
     }
+  };
+
+  const loadData = async () => {
+    await Promise.all([loadStaticData(), refreshSessions()]);
   };
 
   useEffect(() => {
     loadData();
     const unlistenPromise = listen("trigger-new-workspace", () => {
       setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
+      setPaneAgentIds([]);
       setShowCreateModal(true);
     });
 
-    const sessionTimer = setInterval(loadData, 4000);
-    const captureTimer = setInterval(() => {
+    const sessionTimer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
+      refreshSessions();
+    }, 4000);
+
+    const captureTimer = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      if (captureInFlightRef.current) return;
       const current = sessionsRef.current;
       if (current.length === 0) return;
+
+      captureInFlightRef.current = true;
       const failedPaneCounts = failedPaneCountsRef.current;
+      try {
+        const paneIds = current.flatMap((sess) =>
+          sess.panes
+            .filter((pane) => (failedPaneCounts.get(pane.id) || 0) < 3)
+            .map((pane) => pane.id)
+        );
 
-      for (const sess of current) {
-        for (const pane of sess.panes) {
-          const failCount = failedPaneCounts.get(pane.id) || 0;
-          if (failCount >= 3) continue;
+        const captured = await Promise.all(
+          paneIds.map(async (paneId) => {
+            try {
+              const content = await invoke<string>("capture_pane", { paneId, maxLines: 5 });
+              failedPaneCounts.set(paneId, 0);
+              return [paneId, content] as const;
+            } catch {
+              failedPaneCounts.set(paneId, (failedPaneCounts.get(paneId) || 0) + 1);
+              return null;
+            }
+          })
+        );
 
-          invoke<string>("capture_pane", { paneId: pane.id, maxLines: 5 })
-            .then((content) => {
-              failedPaneCounts.set(pane.id, 0);
-              setSessions((prev) =>
-                prev.map((s) =>
-                  s.id === sess.id
-                    ? { ...s, panes: s.panes.map((p) => (p.id === pane.id ? { ...p, content } : p)) }
-                    : s
-                )
-              );
-            })
-            .catch(() => failedPaneCounts.set(pane.id, failCount + 1));
+        // One state write per round instead of one per pane.
+        const contents = new Map(
+          captured.filter((entry): entry is readonly [string, string] => entry !== null)
+        );
+        if (contents.size > 0) {
+          setSessions((prev) => applyPaneContents(prev, contents));
         }
+      } finally {
+        captureInFlightRef.current = false;
       }
     }, 8000);
+
+    // Polling is paused while hidden, so catch up as soon as the window returns.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshSessions();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
       clearInterval(sessionTimer);
       clearInterval(captureTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -219,12 +272,20 @@ export default function App() {
     if (!cleanName) return alert(t("val.enterName"));
     setLoading(true);
     try {
-      await invoke("create_session", {
-        opts: { name: cleanName, dir: workingDir.trim() || null, agent_id: selectedAgent, panes: selectedPanes, terminal_id: selectedTerminal },
-      });
+      const opts: CreateOpts = {
+        name: cleanName,
+        dir: workingDir.trim() || null,
+        agent_id: selectedAgent,
+        pane_agent_ids: effectivePaneAgentIds,
+        panes: selectedPanes,
+        terminal_id: selectedTerminal,
+      };
+      await invoke("create_session", { opts });
       setShowCreateModal(false);
       setNewSessionName("");
       setWorkingDir("");
+      setPaneAgentIds([]);
+      // Full reload: creating a workspace also appends to config.recent_dirs.
       await loadData();
     } catch (err: any) {
       alert(t("val.createFailed") + ": " + translateError(err));
@@ -241,16 +302,16 @@ export default function App() {
     if (!confirm(tPlural(confirmKey, paneCount, { name: sessionName }))) return;
     try {
       await invoke("kill_session", { sessionName });
-      await loadData();
+      await refreshSessions();
     } catch (err: any) {
       alert(t("val.destroyFailed") + ": " + translateError(err));
     }
   };
 
-  const handleAddPane = async (sessionName: string) => {
+  const handleAddPane = async (sessionName: string, agentId?: string) => {
     try {
-      await invoke("add_pane", { sessionName });
-      await loadData();
+      await invoke("add_pane", { sessionName, agentId: agentId ?? null });
+      await refreshSessions();
     } catch (err: any) {
       alert(t("val.createFailed") + ": " + translateError(err));
     }
@@ -274,7 +335,7 @@ export default function App() {
       } else {
         await invoke("kill_pane", { paneId });
       }
-      await loadData();
+      await refreshSessions();
     } catch (err: any) {
       alert(translateError(err));
     }
@@ -295,7 +356,7 @@ export default function App() {
       } else {
         await invoke("swap_pane", { paneIdA, paneIdB });
       }
-      await loadData();
+      await refreshSessions();
     } catch (err: any) {
       alert(translateError(err));
     }
@@ -307,7 +368,7 @@ export default function App() {
     try {
       await invoke("rename_session", { oldName, newName: cleanNew });
       setRenamingSession(null);
-      await loadData();
+      await refreshSessions();
     } catch (err: any) {
       alert(t("val.renameFailed") + ": " + translateError(err));
     }
@@ -348,6 +409,7 @@ export default function App() {
         onSearchChange={setSearch}
         totalSessions={sessions.length}
         runningSessions={sessions.filter((s) => s.attached).length}
+        onOpenMobilePairing={() => setShowMobilePairingModal(true)}
       />
 
       <main className="flex-1 overflow-y-auto p-6">
@@ -366,6 +428,7 @@ export default function App() {
           terminalIconUrls={terminalIconUrls}
           onNewWorkspaceClick={() => {
             setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
+            setPaneAgentIds([]);
             setShowCreateModal(true);
           }}
           onRenameStart={(name) => {
@@ -400,6 +463,8 @@ export default function App() {
         setSelectedAgent={setSelectedAgent}
         selectedPanes={selectedPanes}
         setSelectedPanes={setSelectedPanes}
+        paneAgentIds={effectivePaneAgentIds}
+        setPaneAgentIds={setPaneAgentIds}
         selectedTerminal={selectedTerminal}
         setSelectedTerminal={setSelectedTerminal}
         showCustomAgentForm={showCustomAgentForm}
@@ -414,6 +479,11 @@ export default function App() {
         onPickDirectory={handlePickDirectory}
         onSaveCustomAgent={handleSaveCustomAgent}
         onCreate={handleCreate}
+      />
+
+      <MobilePairingModal
+        show={showMobilePairingModal}
+        onClose={() => setShowMobilePairingModal(false)}
       />
     </div>
   );

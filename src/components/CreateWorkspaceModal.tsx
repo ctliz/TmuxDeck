@@ -1,6 +1,6 @@
 import { Bot, Folder, Plus, Settings } from "lucide-react";
 import { t, tPlural, translateName } from "../i18n";
-import { sanitizeNameFrontend } from "../utils";
+import { sanitizeNameFrontend, summarizePaneAgents } from "../utils";
 import { Config, Environment } from "../types";
 
 interface CreateWorkspaceModalProps {
@@ -14,6 +14,9 @@ interface CreateWorkspaceModalProps {
   setSelectedAgent: (agent: string) => void;
   selectedPanes: number;
   setSelectedPanes: (panes: number) => void;
+  /** Always exactly `selectedPanes` long — the caller normalizes it. */
+  paneAgentIds: string[];
+  setPaneAgentIds: (ids: string[]) => void;
   selectedTerminal: string;
   setSelectedTerminal: (term: string) => void;
   showCustomAgentForm: boolean;
@@ -41,6 +44,8 @@ export function CreateWorkspaceModal({
   setSelectedAgent,
   selectedPanes,
   setSelectedPanes,
+  paneAgentIds,
+  setPaneAgentIds,
   selectedTerminal,
   setSelectedTerminal,
   showCustomAgentForm,
@@ -63,6 +68,31 @@ export function CreateWorkspaceModal({
     env?.terminals[0];
   const currentAgentObj =
     env?.agents.find((agent) => agent.id === selectedAgent) || env?.agents[0];
+
+  const agentNameFor = (agentId: string) => {
+    const matched = env?.agents.find((agent) => agent.id === agentId);
+    return translateName(matched?.name || agentId);
+  };
+
+  const paneAgentSummary = summarizePaneAgents(paneAgentIds);
+  const agentMixText = paneAgentSummary.groups
+    .map((group) =>
+      t("modal.agentMixItem", {
+        agent: agentNameFor(group.agentId),
+        n: group.count,
+      })
+    )
+    .join(t("modal.agentMixSeparator"));
+
+  const setPaneAgentAt = (index: number, agentId: string) => {
+    setPaneAgentIds(
+      paneAgentIds.map((current, idx) => (idx === index ? agentId : current))
+    );
+  };
+
+  const showPerPaneAgents = Boolean(env && env.agents.length > 1);
+  const alreadyUniform =
+    paneAgentSummary.uniform && paneAgentSummary.agentId === selectedAgent;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in-up">
@@ -288,6 +318,63 @@ export function CreateWorkspaceModal({
             </div>
           </div>
 
+          {/* Per-pane Agent Assignment */}
+          {showPerPaneAgents && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-slate-400">
+                  {t("modal.perPaneAgentLabel")}
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPaneAgentIds(paneAgentIds.map(() => selectedAgent))
+                  }
+                  disabled={alreadyUniform}
+                  title={t("modal.applyToAllTitle", {
+                    agent: agentNameFor(selectedAgent),
+                  })}
+                  className="px-2 py-0.5 rounded-lg border border-slate-700 text-[10px] text-slate-300 hover:text-cyan-300 hover:border-cyan-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-slate-300 disabled:hover:border-slate-700"
+                >
+                  {t("modal.applyToAll")}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-0.5">
+                {paneAgentIds.map((agentId, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center space-x-2 px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-800"
+                  >
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0">
+                      {t("modal.paneIndexLabel", { n: idx + 1 })}
+                    </span>
+                    <select
+                      value={agentId}
+                      aria-label={t("modal.paneIndexLabel", { n: idx + 1 })}
+                      onChange={(e) => setPaneAgentAt(idx, e.target.value)}
+                      className="flex-1 min-w-0 bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      {env?.agents.map((agent) => (
+                        <option
+                          key={agent.id}
+                          value={agent.id}
+                          className="bg-slate-900"
+                        >
+                          {translateName(agent.name)}
+                        </option>
+                      ))}
+                      {!env?.agents.some((agent) => agent.id === agentId) && (
+                        <option value={agentId} className="bg-slate-900">
+                          {agentId}
+                        </option>
+                      )}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Terminal Selection Segmented Chips */}
           {env && env.terminals.length > 1 && (
             <div>
@@ -318,14 +405,23 @@ export function CreateWorkspaceModal({
 
           {/* Dynamic Summary */}
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/60 text-xs text-slate-400">
-            {t("modal.summary", {
-              panes: selectedPanes,
-              panesText: tPlural("modal.panesCount", selectedPanes),
-              agent: translateName(currentAgentObj?.name || selectedAgent),
-              terminal: translateName(
-                currentTerminalObj?.name || selectedTerminal
-              ),
-            })}
+            {paneAgentSummary.uniform
+              ? t("modal.summary", {
+                  panesText: tPlural("modal.panesCount", selectedPanes),
+                  agent: paneAgentSummary.agentId
+                    ? agentNameFor(paneAgentSummary.agentId)
+                    : translateName(currentAgentObj?.name || selectedAgent),
+                  terminal: translateName(
+                    currentTerminalObj?.name || selectedTerminal
+                  ),
+                })
+              : t("modal.summaryMixed", {
+                  panesText: tPlural("modal.panesCount", selectedPanes),
+                  mix: agentMixText,
+                  terminal: translateName(
+                    currentTerminalObj?.name || selectedTerminal
+                  ),
+                })}
           </div>
         </div>
 

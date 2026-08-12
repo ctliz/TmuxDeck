@@ -63,5 +63,6 @@ pub fn save_config(config: Config) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(&config).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
     std::fs::write(path, json).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
+    crate::registry::invalidate_environment_cache();
     Ok(())
 }

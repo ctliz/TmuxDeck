@@ -6,6 +6,7 @@ use crate::registry::find_binary;
 pub struct TmuxPane {
     pub id: String,
     pub command: String,
+    pub agent_id: Option<String>,
     pub active: bool,
     pub session_target: String,
     pub slot: Option<String>,
@@ -184,7 +185,7 @@ pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>)
         "-t",
         session_name,
         "-F",
-        "#{pane_id}|#{pane_current_command}|#{pane_active}",
+        "#{pane_id}|#{pane_current_command}|#{pane_active}|#{@tmuxdeck-agent}",
     ]);
 
     if let Ok(out) = output {
@@ -197,6 +198,7 @@ pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>)
                     panes.push(TmuxPane {
                         id: parts[0].to_string(),
                         command: parts[1].to_string(),
+                        agent_id: parts.get(3).filter(|value| !value.is_empty()).map(|value| (*value).to_string()),
                         active: parts[2] == "1",
                         session_target: session_name.to_string(),
                         slot: slot.map(String::from),
@@ -221,6 +223,7 @@ pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>)
 pub struct PaneDetail {
     pub id: String,
     pub session: String,
+    pub agent_id: Option<String>,
     /// pane 内前台进程名，例如 pi / claude / codex / zsh
     pub command: String,
     pub cwd: String,
@@ -232,7 +235,7 @@ pub fn list_all_panes() -> Vec<PaneDetail> {
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}|#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}",
+        "#{pane_id}|#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}|#{@tmuxdeck-agent}",
     ]);
 
     if let Ok(out) = output {
@@ -241,11 +244,12 @@ pub fn list_all_panes() -> Vec<PaneDetail> {
             let mut panes = Vec::new();
             for line in stdout.lines() {
                 // cwd 里可能含 '|' 极少见，但按固定字段数从左切、最后一段取右，避免误切
-                let parts: Vec<&str> = line.splitn(5, '|').collect();
-                if parts.len() == 5 {
+                let parts: Vec<&str> = line.splitn(6, '|').collect();
+                if parts.len() == 6 {
                     panes.push(PaneDetail {
                         id: parts[0].to_string(),
                         session: parts[1].to_string(),
+                        agent_id: (!parts[5].is_empty()).then(|| parts[5].to_string()),
                         command: parts[2].to_string(),
                         cwd: parts[3].to_string(),
                         active: parts[4] == "1",
@@ -315,7 +319,7 @@ pub fn send_keys(pane_id: &str, text: &str, submit: bool) -> Result<(), String> 
 }
 
 /// 允许发送的控制键白名单。不开放任意键名，避免把 send-keys 变成通用键盘注入口。
-const ALLOWED_KEYS: &[&str] = &[
+pub const ALLOWED_KEYS: &[&str] = &[
     "Enter", "Escape", "Tab", "BSpace", "Space",
     "Up", "Down", "Left", "Right",
     "C-c", "C-d", "C-l", "C-u", "C-r", "C-p", "C-n",

@@ -6,6 +6,8 @@ pub struct CreateOpts {
     pub name: String,
     pub dir: Option<String>,
     pub agent_id: String,
+    #[serde(default)]
+    pub pane_agent_ids: Vec<String>,
     pub panes: u8,
     pub terminal_id: String,
 }

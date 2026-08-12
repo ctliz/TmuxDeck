@@ -20,7 +20,7 @@ pub(crate) const AGENT_IDENTITY_ENV_VARS: &[&str] = &[
     "CLAUDE_INTERCOM_MODEL",
 ];
 
-fn shell_single_quote(value: &str) -> String {
+pub(crate) fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 

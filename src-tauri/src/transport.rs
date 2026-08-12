@@ -2,8 +2,8 @@
 //!
 //! 安全设计见 `docs/DESIGN-v1.14-transport-security.md`，要点：
 //!
-//! - 只绑 `127.0.0.1:<动态端口>`，手机经 Tailscale（WireGuard E2E）接入，
-//!   服务端永不直接暴露在局域网明文上
+//! - 单端口绑定 `0.0.0.0:<动态端口>`，同时服务 HTTP 手机页与 WebSocket；
+//!   仅接受 loopback、可信局域网与预留 tailnet 来源，公网来源直接丢弃
 //! - 32 字节 CSPRNG token 每次启动生成、不落盘（无持久凭证 → 无吊销问题）；
 //!   握手校验用常量时间比较，不区分「无 token」与「token 错」
 //! - `Host` 头白名单防 DNS rebinding；子协议固定 `tmuxdeck.v1`
@@ -48,30 +48,36 @@ pub(crate) fn is_tailnet_ip(ip: IpAddr) -> bool {
     }
 }
 
-/// Host 头白名单：loopback / localhost / tailnet IP / MagicDNS 域名（*.ts.net）。
+/// 是否属于可访问手机服务的来源/目标地址。
+pub(crate) fn trusted_client_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || is_tailnet_ip(ip)
+        }
+        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
+    }
+}
+
+/// Host 头白名单：loopback / RFC1918 / link-local / tailnet / MagicDNS。
 pub(crate) fn host_allowed(host: &str) -> bool {
     let host = host.trim();
     if host.is_empty() {
         return false;
     }
-    // 去掉可能的端口段
-    let bare = if let Some(idx) = host.rfind(':') {
-        // IPv6 用 [..] 包裹；简单起见仅对 IPv4/域名截端口
-        if host.starts_with('[') {
-            host
-        } else {
-            &host[..idx]
-        }
+    // 去掉可选端口；IPv6 Host 使用标准 `[addr]:port` 形式。
+    let bare = if let Some(rest) = host.strip_prefix('[') {
+        rest.split_once(']').map(|(addr, _)| addr).unwrap_or("")
+    } else if host.matches(':').count() == 1 {
+        host.split_once(':').map(|(name, _)| name).unwrap_or(host)
     } else {
         host
     };
-    let bare = bare.trim_matches(['[', ']']);
     let lower = bare.to_ascii_lowercase();
     if lower == "localhost" || lower.ends_with(".localhost") {
         return true;
     }
     if let Ok(ip) = bare.parse::<IpAddr>() {
-        return ip.is_loopback() || is_tailnet_ip(ip);
+        return trusted_client_ip(ip);
     }
     // MagicDNS：<host>.<tailnet>.ts.net
     lower.ends_with(".ts.net")
@@ -131,6 +137,7 @@ pub struct ConnState {
 /// 带来源连接的入站指令，供引擎定向返回请求结果。
 pub struct InboundCommand {
     pub(crate) conn_id: u64,
+    pub(crate) peer_ip: IpAddr,
     pub(crate) command: ClientCommand,
 }
 
@@ -141,19 +148,20 @@ pub struct InboundCommand {
 /// - `subscribed_conversations()` 让引擎只轮询被订阅的对话（订阅粒度收窄）
 /// - 每个连接一个后台任务：收帧 → 限流校验 → 指令投递到 `cmd_tx`
 pub struct WsTransport {
-    /// 监听地址（127.0.0.1:<动态端口>），二维码/配对用
+    /// 监听地址（0.0.0.0:<动态端口>）；配对时只对外展示具体 LAN IP。
     addr: SocketAddr,
     token: String,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
     cmd_tx: mpsc::UnboundedSender<InboundCommand>,
+    client_count_rx: mpsc::UnboundedReceiver<usize>,
 }
 
 impl WsTransport {
-    /// 绑定 loopback 动态端口并开始接受连接。
+    /// 绑定所有网卡的动态端口并开始接受连接；连接层再限制可信来源。
     ///
     /// 返回 `(传输对象, 手机指令接收端)`。指令流由引擎消费。
     pub async fn bind() -> Result<(Self, mpsc::UnboundedReceiver<InboundCommand>), String> {
-        let listener = TcpListener::bind("127.0.0.1:0")
+        let listener = TcpListener::bind("0.0.0.0:0")
             .await
             .map_err(|e| format!("ERR_WS_BIND|{}", e))?;
         let addr = listener
@@ -161,12 +169,14 @@ impl WsTransport {
             .map_err(|e| format!("ERR_WS_ADDR|{}", e))?;
         let token = generate_token();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (client_count_tx, client_count_rx) = mpsc::unbounded_channel();
 
         let transport = Self {
             addr,
             token: token.clone(),
             clients: Arc::new(Mutex::new(HashMap::new())),
             cmd_tx,
+            client_count_rx,
         };
 
         let clients = transport.clients.clone();
@@ -174,16 +184,37 @@ impl WsTransport {
         let cmd_tx = transport.cmd_tx.clone();
         let token_cmp = token;
         tokio::spawn(async move {
-            let _ = crate::connection::accept_loop(listener, clients, next_id, token_cmp, cmd_tx)
-                .await;
+            let _ = crate::connection::accept_loop(
+                listener,
+                clients,
+                next_id,
+                token_cmp,
+                cmd_tx,
+                client_count_tx,
+            )
+            .await;
         });
 
         Ok((transport, cmd_rx))
     }
 
-    /// 配对信息：监听地址与 token（供桌面端展示二维码/文本）。
-    pub fn pairing(&self) -> (SocketAddr, &str) {
-        (self.addr, &self.token)
+    /// 配对信息：动态端口与一次性 token（供桌面端展示二维码/文本）。
+    pub fn pairing(&self) -> (u16, &str) {
+        (self.addr.port(), &self.token)
+    }
+
+    /// 取出下一个 connect/disconnect 产生的在线数变化。
+    pub fn try_client_count_change(&mut self) -> Option<usize> {
+        self.client_count_rx.try_recv().ok()
+    }
+
+    /// 更新指定连接的订阅；只允许引擎在校验 pane 存在后调用。
+    pub fn set_subscription(&self, conn_id: u64, subscribed: Option<String>) {
+        if let Ok(mut clients) = self.clients.lock() {
+            if let Some(conn) = clients.get_mut(&conn_id) {
+                conn.subscribed = subscribed;
+            }
+        }
     }
 
     /// 只向指定连接推送请求结果（快照、错误、未来回执）。
@@ -241,10 +272,7 @@ impl Transport for WsTransport {
     }
 
     fn has_clients(&self) -> bool {
-        self.clients
-            .lock()
-            .map(|c| !c.is_empty())
-            .unwrap_or(false)
+        self.clients.lock().map(|c| !c.is_empty()).unwrap_or(false)
     }
 }
 
@@ -259,19 +287,6 @@ impl WsTransport {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    /// 更新某连接的订阅状态（由连接任务在收到 subscribe/unsubscribe 时调用）。
-    pub(crate) fn set_subscription(
-        conn_id: u64,
-        subscribed: Option<String>,
-        clients: &Arc<Mutex<HashMap<u64, ConnState>>>,
-    ) {
-        if let Ok(mut c) = clients.lock() {
-            if let Some(conn) = c.get_mut(&conn_id) {
-                conn.subscribed = subscribed;
-            }
-        }
     }
 }
 
@@ -294,10 +309,14 @@ mod tests {
         assert!(host_allowed("localhost"));
         assert!(host_allowed("localhost:7420"));
         assert!(host_allowed("[::1]"));
+        assert!(host_allowed("[::1]:7420"));
+        assert!(host_allowed("[fd00::1]:7420"));
         assert!(host_allowed("100.64.0.5"));
         assert!(host_allowed("100.101.102.103:8080"));
         assert!(host_allowed("mac.tailnet-name.ts.net"));
-        assert!(!host_allowed("192.168.1.17"));
+        assert!(host_allowed("192.168.1.17"));
+        assert!(host_allowed("10.0.0.8:7420"));
+        assert!(host_allowed("172.16.2.3"));
         assert!(!host_allowed("evil.example.com"));
         assert!(!host_allowed(""));
     }
@@ -322,6 +341,8 @@ mod tests {
         assert!(is_tailnet_ip("100.127.255.255".parse().unwrap()));
         assert!(!is_tailnet_ip("100.63.255.255".parse().unwrap()));
         assert!(!is_tailnet_ip("192.168.1.1".parse().unwrap()));
+        assert!(trusted_client_ip("192.168.1.1".parse().unwrap()));
+        assert!(!trusted_client_ip("8.8.8.8".parse().unwrap()));
     }
 }
 
@@ -347,8 +368,8 @@ mod integration_tests {
         let rt = tokio_runtime();
         rt.block_on(async {
             let (transport, _cmd_rx) = WsTransport::bind().await.unwrap();
-            let (addr, token) = transport.pairing();
-            let url = format!("ws://{}/v1/ws?token={}", addr, token);
+            let (port, token) = transport.pairing();
+            let url = format!("ws://127.0.0.1:{}/v1/ws?token={}", port, token);
             let mut req = url.into_client_request().unwrap();
             req.headers_mut().insert(
                 "sec-websocket-protocol",
@@ -356,8 +377,26 @@ mod integration_tests {
             );
             let (ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
             let (mut sink, _) = ws.split();
-            sink.send(Message::Text("{\"type\":\"refresh\"}".into())).await.unwrap();
+            sink.send(Message::Text("{\"type\":\"refresh\"}".into()))
+                .await
+                .unwrap();
             drop(transport);
+        });
+    }
+
+    #[test]
+    fn test_ws_handshake_rejects_wrong_path() {
+        let rt = tokio_runtime();
+        rt.block_on(async {
+            let (transport, _cmd_rx) = WsTransport::bind().await.unwrap();
+            let (port, token) = transport.pairing();
+            let url = format!("ws://127.0.0.1:{}/wrong?token={}", port, token);
+            let mut req = url.into_client_request().unwrap();
+            req.headers_mut().insert(
+                "sec-websocket-protocol",
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_static(WS_SUBPROTOCOL),
+            );
+            assert!(tokio_tungstenite::connect_async(req).await.is_err());
         });
     }
 
@@ -366,8 +405,8 @@ mod integration_tests {
         let rt = tokio_runtime();
         rt.block_on(async {
             let (transport, _cmd_rx) = WsTransport::bind().await.unwrap();
-            let (addr, _token) = transport.pairing();
-            let url = format!("ws://{}/v1/ws?token=wrongtoken", addr);
+            let (port, _token) = transport.pairing();
+            let url = format!("ws://127.0.0.1:{}/v1/ws?token=wrongtoken", port);
             let req = url.into_client_request().unwrap();
             let res = tokio_tungstenite::connect_async(req).await;
             assert!(res.is_err(), "错误 token 应被拒绝");
@@ -379,9 +418,9 @@ mod integration_tests {
     fn test_ws_turn_filtered_by_subscription() {
         let rt = tokio_runtime();
         rt.block_on(async {
-            let (mut transport, _cmd_rx) = WsTransport::bind().await.unwrap();
-            let (addr, token) = transport.pairing();
-            let url = format!("ws://{}/v1/ws?token={}", addr, token);
+            let (mut transport, mut cmd_rx) = WsTransport::bind().await.unwrap();
+            let (port, token) = transport.pairing();
+            let url = format!("ws://127.0.0.1:{}/v1/ws?token={}", port, token);
             let mut req = url.into_client_request().unwrap();
             req.headers_mut().insert(
                 "sec-websocket-protocol",
@@ -434,9 +473,11 @@ mod integration_tests {
             }
             assert!(!got_turn, "未订阅时 turn 不应送达");
 
-            // 订阅 %3
+            // 传输过滤只信任引擎校验后设置的订阅。
             sink.send(Message::Text("{\"type\":\"subscribe\",\"id\":\"%3\"}".into())).await.unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let inbound = cmd_rx.recv().await.unwrap();
+            assert!(matches!(inbound.command, crate::bridge::ClientCommand::Subscribe { ref id } if id == "%3"));
+            transport.set_subscription(inbound.conn_id, Some("%3".into()));
 
             // 订阅后：turn 应送达
             transport.emit(&ClientEvent::Turn {

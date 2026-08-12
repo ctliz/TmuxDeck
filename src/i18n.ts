@@ -55,6 +55,9 @@ const en: Record<string, string> = {
   "card.confirmKillSlot": "Terminate this Agent slot? Its tmux session and process will end.",
   "card.confirmKillLastSlot": "Terminate the final Agent and delete this workspace? Its tmux session and process will end.",
   "card.addPane": "Add pane",
+  "card.addPaneWith": "Add pane running {agent}",
+  "card.addPaneChoose": "Pick an Agent for the new pane",
+  "card.addPaneRecommended": "Recommended",
   "card.agentReady": "Agent Ready",
   "card.selectTerminal": "Launch terminal:",
 
@@ -77,7 +80,14 @@ const en: Record<string, string> = {
   "modal.customAgentNamePlaceholder": "e.g. Claude Opus",
   "modal.customAgentCmdLabel": "Command *",
   "modal.customAgentCmdPlaceholder": "e.g. claude --model opus",
-  "modal.summary": "Will create {panes} {panesText}, running {agent} in each, and open with {terminal}.",
+  "modal.summary": "Will create {panesText}, running {agent} in each, and open with {terminal}.",
+  "modal.summaryMixed": "Will create {panesText} ({mix}), and open with {terminal}.",
+  "modal.perPaneAgentLabel": "Per-pane Agent",
+  "modal.paneIndexLabel": "Pane {n}",
+  "modal.applyToAll": "Apply to all",
+  "modal.applyToAllTitle": "Run {agent} in every pane",
+  "modal.agentMixItem": "{agent} ×{n}",
+  "modal.agentMixSeparator": " · ",
 
   // Missing Tmux Warning
   "tmux.missing.title": "tmux is required",
@@ -119,6 +129,9 @@ const en: Record<string, string> = {
   "ERR_TMUX_NO_SERVER": "tmux server is not running (create a workspace or start tmux)",
   "ERR_TMUX_LIST_FAILED": "Failed to list tmux sessions",
   "ERR_TMUX_GENERIC": "tmux error",
+  "ERR_AGENT_NOT_FOUND": "Agent not found (it may have been uninstalled or removed from configuration)",
+  "ERR_PANE_AGENT_COUNT": "Per-pane Agent count does not match the pane count",
+  "val.paneAgentCountDetail": "expected {expected}, got {actual}",
   "ERR_CREATE_FAILED": "Failed to create tmux session",
   "ERR_CREATE_OUTPUT_ERR": "Error creating tmux session",
   "ERR_KILL_FAILED": "Failed to destroy workspace",
@@ -127,6 +140,7 @@ const en: Record<string, string> = {
   "ERR_KILL_PANE_INVALID": "Invalid pane ID format",
   "ERR_KILL_PANE_LAST_IN_SESSION": "The last pane cannot be killed. Destroy the workspace explicitly instead.",
   "ERR_KILL_PANE_NOT_FOUND": "Pane not found",
+  "ERR_PANE_INVALID": "Invalid pane target",
   "ERR_KILL_PANE_OUTPUT_ERR": "Error killing pane",
   "ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED": "Native-split workspaces cannot be renamed while running.",
   "ERR_CREATE_NATIVE_SLOT_SETUP": "Failed to initialize native Agent slot",
@@ -154,6 +168,21 @@ const en: Record<string, string> = {
   "val.destroyFailed": "Failed to destroy workspace",
   "val.renameFailed": "Failed to rename workspace",
   "val.dataRefreshFailed": "Failed to refresh data",
+
+  // Mobile & Pairing
+  "mobile.pairingTitle": "Mobile Pairing",
+  "mobile.pairingDesc": "Scan QR code or open link on your mobile device (same LAN)",
+  "mobile.lanUrls": "LAN Access URLs",
+  "mobile.connectedClients_one": "{n} mobile device connected",
+  "mobile.connectedClients_other": "{n} mobile devices connected",
+  "mobile.noClients": "No mobile devices connected",
+  "mobile.brokerOffline": "Mobile Broker is not running",
+  "mobile.brokerOnline": "Mobile Broker Online",
+  "mobile.token": "Access Token",
+  "mobile.copyLink": "Copy Link",
+  "mobile.copiedLink": "Copied!",
+  "mobile.openPairing": "Mobile Pairing",
+  "mobile.trustedLanOnly": "Trusted LAN Only",
 };
 
 const zh: Record<string, string> = {
@@ -213,6 +242,9 @@ const zh: Record<string, string> = {
   "card.confirmKillSlot": "确定终止此 Agent 槽位？对应 tmux 会话和进程将结束。",
   "card.confirmKillLastSlot": "确定终止最后一个 Agent 并删除此工作区？对应 tmux 会话和进程将结束。",
   "card.addPane": "新增分屏",
+  "card.addPaneWith": "新增运行 {agent} 的分屏",
+  "card.addPaneChoose": "为新分屏选择 Agent",
+  "card.addPaneRecommended": "推荐",
   "card.agentReady": "Agent Ready",
   "card.selectTerminal": "选择启动终端:",
 
@@ -235,7 +267,14 @@ const zh: Record<string, string> = {
   "modal.customAgentNamePlaceholder": "如: Claude Opus",
   "modal.customAgentCmdLabel": "执行命令 *",
   "modal.customAgentCmdPlaceholder": "如: claude --model opus",
-  "modal.summary": "将创建 {panes} {panesText}，每个运行 {agent}，并用 {terminal} 打开。",
+  "modal.summary": "将创建 {panesText}，每个运行 {agent}，并用 {terminal} 打开。",
+  "modal.summaryMixed": "将创建 {panesText}（{mix}），并用 {terminal} 打开。",
+  "modal.perPaneAgentLabel": "逐分屏 Agent",
+  "modal.paneIndexLabel": "第 {n} 屏",
+  "modal.applyToAll": "应用到全部",
+  "modal.applyToAllTitle": "所有分屏均运行 {agent}",
+  "modal.agentMixItem": "{agent} ×{n}",
+  "modal.agentMixSeparator": " · ",
 
   // Missing Tmux Warning
   "tmux.missing.title": "未检测到 Tmux 安装",
@@ -277,6 +316,9 @@ const zh: Record<string, string> = {
   "ERR_TMUX_NO_SERVER": "tmux 服务未运行（新建工作区可自动启动）",
   "ERR_TMUX_LIST_FAILED": "无法运行 tmux list-sessions",
   "ERR_TMUX_GENERIC": "tmux 错误",
+  "ERR_AGENT_NOT_FOUND": "未找到该 Agent（可能已卸载或已从配置中移除）",
+  "ERR_PANE_AGENT_COUNT": "逐分屏 Agent 数量与分屏数量不一致",
+  "val.paneAgentCountDetail": "应为 {expected} 个，实际 {actual} 个",
   "ERR_CREATE_FAILED": "创建 tmux session 失败",
   "ERR_CREATE_OUTPUT_ERR": "创建会话报错",
   "ERR_KILL_FAILED": "销毁 session 失败",
@@ -285,6 +327,7 @@ const zh: Record<string, string> = {
   "ERR_KILL_PANE_INVALID": "非法的分屏 ID 格式",
   "ERR_KILL_PANE_LAST_IN_SESSION": "不能删除工作区的最后一个分屏；如需销毁，请明确使用“销毁工作区”。",
   "ERR_KILL_PANE_NOT_FOUND": "未找到该分屏",
+  "ERR_PANE_INVALID": "分屏目标无效",
   "ERR_KILL_PANE_OUTPUT_ERR": "删除分屏报错",
   "ERR_NATIVE_WORKSPACE_RENAME_UNSUPPORTED": "原生分屏工作区运行期间暂不支持重命名。",
   "ERR_CREATE_NATIVE_SLOT_SETUP": "初始化原生 Agent 槽位失败",
@@ -312,7 +355,25 @@ const zh: Record<string, string> = {
   "val.destroyFailed": "销毁失败",
   "val.renameFailed": "重命名失败",
   "val.dataRefreshFailed": "数据刷新失败",
+
+  // Mobile & Pairing
+  "mobile.pairingTitle": "手机配对",
+  "mobile.pairingDesc": "在同一局域网下用手机扫码或浏览器访问链接",
+  "mobile.lanUrls": "局域网访问地址",
+  "mobile.connectedClients_one": "已连接 {n} 台手机",
+  "mobile.connectedClients_other": "已连接 {n} 台手机",
+  "mobile.noClients": "暂无手机在线",
+  "mobile.brokerOffline": "手机 Broker 服务未启动",
+  "mobile.brokerOnline": "手机 Broker 运行中",
+  "mobile.token": "访问 Token",
+  "mobile.copyLink": "复制链接",
+  "mobile.copiedLink": "已复制！",
+  "mobile.openPairing": "手机配对",
+  "mobile.trustedLanOnly": "仅可信局域网使用",
 };
+
+/** Exposed so tests can assert both locales stay in sync. */
+export const dictionaries = { en, zh };
 
 const isZh = typeof navigator !== "undefined" && navigator.language.startsWith("zh");
 const lang = isZh ? zh : en;
@@ -349,6 +410,10 @@ export function translateError(raw: unknown): string {
       value,
     });
     return `${translated}: ${target} (${reason})`;
+  }
+  if (code === "ERR_PANE_AGENT_COUNT" && details.length >= 2) {
+    const [expected, actual] = details;
+    return `${translated}: ${t("val.paneAgentCountDetail", { expected, actual })}`;
   }
   if (details[0]) {
     return `${translated}: ${details[0]}`;

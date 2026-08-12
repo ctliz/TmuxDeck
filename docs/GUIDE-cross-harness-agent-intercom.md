@@ -157,9 +157,17 @@ claude mcp list
 The package also provides:
 
 - `claude-intercom-mcp`: tools inside ordinary Claude Code sessions.
-- `cci`: an ordinary wakeable Claude worker.
+- `cci`: an ordinary wakeable Claude worker; `cci --tui` starts the interactive Claude TUI with Intercom identity.
 - `ccim`: a minimal wakeable worker, equivalent to `cci --minimal`.
 - `claude-intercom-worker`: advanced use for publishing multiple background workers from one process.
+
+When Claude Code is selected from the TmuxDeck panel, TmuxDeck first runs the discovered `cci --help` and selects `cci --tui` only when the executable succeeds and advertises `--tui`, `--id`, and `--name`. Each legacy tmux pane receives an identity such as `tmuxdeck-<workspace>-pane-01`; each Ghostty native slot receives `tmuxdeck-<workspace>-slot-01`. The displayed name is `<workspace> · Claude 01`. These values are stable when the same workspace/pane or slot is recreated. If `cci` is missing, non-executable, or incompatible, TmuxDeck silently uses the independently detected ordinary `claude` binary instead. The panel entry reads `Claude Code · Intercom (cci)` or `Claude Code · Standard`, so the selected mode is visible before creation. Custom commands are passed through unchanged.
+
+To inspect an active `cci` identity, use `/claude-intercom:intercom-id` or Alt+I. When starting outside TmuxDeck, specify it yourself:
+
+```bash
+cci --tui --id my-stable-claude-id --name "Readable Claude name"
+```
 
 After updating, restart ordinary Claude Code sessions and all `cci` / `ccim` workers:
 

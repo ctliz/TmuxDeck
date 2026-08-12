@@ -93,7 +93,7 @@ flowchart TB
 
 TmuxDeck registers on that broker as a session named `me`. An agent that needs a decision addresses you the same way it would address another agent — and because the broker already tracks who is idle, who is thinking, and who is blocked waiting for a reply, **the "which one needs me" question is answered by data, not guesswork**.
 
-> Status: the intercom client and secure WebSocket transport are implemented; the complete mobile client UI is still pending.
+> Status: trusted-LAN mobile UI available with desktop QR pairing (plaintext trusted LAN only); physical-phone acceptance and push-when-browser-closed remain pending.
 
 ---
 
@@ -110,7 +110,7 @@ Shipped today:
 - **Remembers your choices.** Last terminal, agent, and pane count persist to the platform config directory.
 - **No setup required.** With nothing else installed, it falls back to the system terminal and your shell.
 
-Conversation bridge foundation (v1.8): directed pane input, intercom broker client, structured transcripts, unified conversation model, and subscription-scoped WebSocket transport. The complete mobile UI remains in progress.
+Conversation bridge foundation: directed pane input, intercom broker client, structured transcripts, unified conversation model, desktop QR pairing, and trusted-LAN mobile UI (plaintext trusted LAN only; physical-phone acceptance and offline push remain pending).
 
 ---
 
@@ -136,7 +136,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 | Agent | Adapter Installation | Registration / Activation |
 | :--- | :--- | :--- |
 | **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | Automatic on start (`/reload` in open sessions) |
-| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` | `claude mcp add -s user claude-intercom -- claude-intercom-mcp` |
+| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` (provides `cci`) | Ordinary `claude`: `claude mcp add -s user claude-intercom -- claude-intercom-mcp`; TmuxDeck prefers interactive `cci --tui` |
 | **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json`; `tui.mjs` adds `/intercom`, `/intercom-name`, and `/intercom-id` |
 
@@ -145,7 +145,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 Communicate across agent sessions using the shared broker:
 
 - **Session discovery & messaging:** Use `intercom_list`, `intercom_send`, `intercom_ask`, and `intercom_reply` to discover and exchange messages.
-- **Claude Code integration:** Registering via MCP (`claude mcp add`) provides tools; slash commands require plugin metadata.
+- **Claude Code integration:** The adapter package provides `cci`, an Intercom-aware Claude wrapper. An ordinary `claude` process uses the registered MCP tools; `cci --tui` adds wakeable interactive identity and shortcuts. TmuxDeck selects `cci --tui` only after runtime verification that the executable supports `--tui`, `--id`, and `--name`, then supplies a stable unique identity for every legacy pane or Ghostty native slot. If `cci` is absent, non-executable, or incompatible, it falls back without error to the independently detected ordinary `claude`. The picker labels the current mode as **Claude Code · Intercom (cci)** or **Claude Code · Standard**. Custom agent commands are never rewritten. Inspect the current identity with `/claude-intercom:intercom-id` or Alt+I; advanced users launching `cci` themselves can specify `--id <stable-id> --name <name>`.
 - **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
 - **Rename an OpenCode Intercom session:** Run `/intercom-name`, or choose **Rename intercom session** in the command palette; the prompt is titled **Rename this Intercom session**. The model can also call `intercom_set_name({ name: "<new-name>" })`. This changes only the discoverable name, not the stable Intercom session ID.
 

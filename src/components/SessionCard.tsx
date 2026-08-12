@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
-import { Plus, Zap, Play } from "lucide-react";
+import { ChevronDown, Plus, Zap, Play } from "lucide-react";
 import { t, translateName } from "../i18n";
 import { Environment, TmuxPane, TmuxSession } from "../types";
+import { dominantAgentId, resolvePaneAgentId } from "../utils";
 
 interface SessionCardProps {
   session: TmuxSession;
@@ -16,7 +17,7 @@ interface SessionCardProps {
   onRenameChange: (val: string) => void;
   onRenameCommit: (oldName: string) => void;
   onKill: (name: string, paneCount: number) => void;
-  onAddPane: (name: string) => void;
+  onAddPane: (name: string, agentId?: string) => void;
   onKillPane: (id: string, sessionTarget?: string) => void;
   onOpenSession: (name: string, termId: string) => void;
   onSwapPane: (
@@ -91,10 +92,10 @@ export function SessionCard({
   onCardDragEnd,
 }: SessionCardProps) {
   const isRenaming = renamingSession === session.name;
-  const mainCmds = session.panes.map((p) => p.command).filter(Boolean);
-  const isAgentActive = env?.agents.some((a) =>
-    mainCmds.some((c) => c.includes(a.id) || (a.path && c.includes(a.path)))
-  );
+  const runningAgentIds = session.panes
+    .map((pane) => resolvePaneAgentId(pane, env?.agents ?? []))
+    .filter((agentId): agentId is string => Boolean(agentId));
+  const isAgentActive = runningAgentIds.length > 0;
   const activityInfo = getSessionActivityInfo(session);
 
   const activeTermId =
@@ -103,6 +104,11 @@ export function SessionCard({
   const termName = matchedTerm ? translateName(matchedTerm.name) : activeTermId;
   const termIconSrc =
     terminalIconUrls[activeTermId] || `/terminal-icons/${activeTermId}.svg`;
+
+  // Add-pane Agent selector state
+  const [showAddPaneMenu, setShowAddPaneMenu] = useState(false);
+  // Highlight whichever Agent this workspace mostly runs; null when none do.
+  const recommendedAddAgentId = dominantAgentId(runningAgentIds);
 
   // Pane drag state inside card
   const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null);
@@ -303,17 +309,84 @@ export function SessionCard({
       {/* Pane Layout Preview */}
       <div className="p-4 flex-1">
         <div className="flex items-center justify-between mb-2">
-          <button
-            draggable={false}
-            onPointerDown={(e) => e.stopPropagation()}
-            onDragStart={(e) => e.stopPropagation()}
-            onClick={() => onAddPane(session.name)}
-            className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-[10px] text-slate-300 hover:text-cyan-300 transition-all duration-200 cursor-pointer flex items-center space-x-1"
-            title={t("card.addPane")}
-          >
-            <Plus className="w-3 h-3 text-cyan-400" />
-            <span>{t("card.addPane")}</span>
-          </button>
+          <div className="relative flex items-center">
+            {/* Adding a pane always goes through the Agent picker. */}
+            <button
+              draggable={false}
+              onPointerDown={(e) => e.stopPropagation()}
+              onDragStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAddPaneMenu((open) => !open);
+              }}
+              className={`px-2 py-0.5 rounded-lg border border-white/10 text-[10px] transition-all duration-200 cursor-pointer flex items-center space-x-1 ${
+                showAddPaneMenu
+                  ? "bg-white/15 text-cyan-300"
+                  : "bg-white/5 hover:bg-white/15 text-slate-300 hover:text-cyan-300"
+              }`}
+              title={t("card.addPaneChoose")}
+              aria-haspopup="menu"
+              aria-expanded={showAddPaneMenu}
+            >
+              <Plus className="w-3 h-3 text-cyan-400" />
+              <span>{t("card.addPane")}</span>
+              <ChevronDown className="w-3 h-3 opacity-70" />
+            </button>
+
+            {showAddPaneMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-20"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowAddPaneMenu(false);
+                  }}
+                />
+                <div
+                  role="menu"
+                  className="absolute z-30 top-full left-0 mt-1 min-w-[11rem] py-1 rounded-xl bg-slate-900 border border-slate-700 shadow-xl shadow-black/40"
+                >
+                  <div className="px-2.5 py-1 text-[9px] uppercase tracking-wide text-slate-500">
+                    {t("card.addPaneChoose")}
+                  </div>
+                  {env?.agents.map((agent) => {
+                    const isRecommended = agent.id === recommendedAddAgentId;
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        role="menuitem"
+                        draggable={false}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowAddPaneMenu(false);
+                          onAddPane(session.name, agent.id);
+                        }}
+                        title={t("card.addPaneWith", {
+                          agent: translateName(agent.name),
+                        })}
+                        className={`w-full flex items-center justify-between space-x-2 text-left px-2.5 py-1 text-[10px] transition cursor-pointer hover:bg-white/10 ${
+                          isRecommended
+                            ? "text-cyan-300 bg-cyan-500/10"
+                            : "text-slate-300"
+                        }`}
+                      >
+                        <span className="truncate">
+                          {translateName(agent.name)}
+                        </span>
+                        {isRecommended && (
+                          <span className="shrink-0 px-1 py-px rounded bg-cyan-500/20 border border-cyan-500/30 text-[8px] uppercase tracking-wide text-cyan-300">
+                            {t("card.addPaneRecommended")}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
           {isAgentActive && (
             <span className="flex items-center space-x-1 text-cyan-400 text-[10px]">
               <Zap className="w-3 h-3" />
@@ -326,12 +399,15 @@ export function SessionCard({
         >
           {session.panes.map((pane, idx) => {
             const cmdName = pane.command || "shell";
-            const matchedAgent = env?.agents.find(
-              (a) =>
-                a.id !== "shell" &&
-                (cmdName.includes(a.id) || (a.path && cmdName.includes(a.path)))
-            );
-            const isAgent = Boolean(matchedAgent);
+            const paneAgentId = resolvePaneAgentId(pane, env?.agents ?? []);
+            const matchedAgent = paneAgentId
+              ? env?.agents.find((agent) => agent.id === paneAgentId)
+              : undefined;
+            // An Agent uninstalled since launch still labels its pane by id.
+            const paneAgentLabel = matchedAgent
+              ? translateName(matchedAgent.name)
+              : paneAgentId;
+            const isAgent = Boolean(paneAgentId);
             const hasContent = Boolean(
               pane.content && pane.content.trim().length > 0
             );
@@ -374,7 +450,7 @@ export function SessionCard({
                   <span className="font-mono text-[9px] text-slate-500 flex items-center space-x-1">
                     <span>
                       {pane.slot ? `Slot ${pane.slot}` : `#${idx + 1}`}
-                      {matchedAgent ? ` · ${translateName(matchedAgent.name)}` : ""}
+                      {paneAgentLabel ? ` · ${paneAgentLabel}` : ""}
                     </span>
                     {pane.attached !== undefined && (
                       <span
@@ -419,7 +495,7 @@ export function SessionCard({
                   </pre>
                 ) : (
                   <span className="font-mono truncate font-medium pointer-events-none select-none">
-                    {matchedAgent ? translateName(matchedAgent.name) : cmdName}
+                    {paneAgentLabel || cmdName}
                   </span>
                 )}
               </div>

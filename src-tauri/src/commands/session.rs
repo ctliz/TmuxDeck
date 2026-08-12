@@ -9,7 +9,9 @@ use crate::commands::native::{
     create_native_workspace, destroy_native_workspace, ghostty_native_available, list_native_slots,
     open_native_workspace, rename_native_workspace, TERMINAL_OPTION,
 };
-use crate::commands::utils::{append_identity_env_clears, isolated_agent_command, to_wsl_path};
+use crate::commands::utils::{
+    append_identity_env_clears, isolated_agent_command, shell_single_quote, to_wsl_path,
+};
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
 use crate::registry::{detect_environment, ToolInfo};
@@ -248,12 +250,62 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
     }
 }
 
-fn resolve_agent_command(agent_id: &str, agents: &[ToolInfo]) -> String {
+pub(crate) fn resolve_agent_command(agent_id: &str, agents: &[ToolInfo]) -> Result<String, String> {
     agents
         .iter()
         .find(|agent| agent.id == agent_id)
         .map(|agent| agent.path.clone())
-        .unwrap_or_else(|| agent_id.to_string())
+        .ok_or_else(|| format!("ERR_AGENT_NOT_FOUND|{}", agent_id))
+}
+
+fn resolve_pane_agents(
+    default_agent_id: &str,
+    pane_agent_ids: &[String],
+    count: usize,
+    agents: &[ToolInfo],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let ids = if pane_agent_ids.is_empty() {
+        vec![default_agent_id.to_string(); count]
+    } else {
+        if pane_agent_ids.len() != count {
+            return Err(format!(
+                "ERR_PANE_AGENT_COUNT|{}|{}",
+                count,
+                pane_agent_ids.len()
+            ));
+        }
+        pane_agent_ids.to_vec()
+    };
+    let commands = ids
+        .iter()
+        .map(|agent_id| resolve_agent_command(agent_id, agents))
+        .collect::<Result<_, _>>()?;
+    Ok((ids, commands))
+}
+
+fn is_cci_command(command: &str) -> bool {
+    std::path::Path::new(command.split_whitespace().next().unwrap_or(""))
+        .file_name()
+        .is_some_and(|name| name == "cci")
+}
+
+pub(crate) fn panel_agent_command(
+    agent_id: &str,
+    command: &str,
+    workspace: &str,
+    pane: usize,
+) -> String {
+    if agent_id != "claude" || !is_cci_command(command) {
+        return command.to_string();
+    }
+    let id = format!("tmuxdeck-{}-pane-{:02}", workspace, pane);
+    let name = format!("{} · Claude {:02}", workspace, pane);
+    format!(
+        "{} --tui --id {} --name {}",
+        command,
+        shell_single_quote(&id),
+        shell_single_quote(&name)
+    )
 }
 
 #[tauri::command]
@@ -264,8 +316,17 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     }
 
     let env_info = detect_environment();
+    let count = match opts.panes {
+        1 | 2 | 4 | 6 => opts.panes as usize,
+        _ => 4,
+    };
 
-    let agent_cmd = resolve_agent_command(&opts.agent_id, &env_info.agents);
+    let (pane_agent_ids, pane_agent_commands) = resolve_pane_agents(
+        &opts.agent_id,
+        &opts.pane_agent_ids,
+        count,
+        &env_info.agents,
+    )?;
 
     let work_dir_clean = opts
         .dir
@@ -280,13 +341,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             }
         });
 
-    let count = match opts.panes {
-        1 | 2 | 4 | 6 => opts.panes as usize,
-        _ => 4,
-    };
-
     if opts.terminal_id == "ghostty" && ghostty_native_available() {
-        let slots = create_native_workspace(&sanitized_name, count, &work_dir_clean, &agent_cmd)?;
+        let slots = create_native_workspace(
+            &sanitized_name,
+            count,
+            &work_dir_clean,
+            &pane_agent_commands,
+            &pane_agent_ids,
+        )?;
         if open_native_workspace(&sanitized_name, &slots, slots.len()).is_ok() {
             save_create_defaults(&opts);
             return Ok(());
@@ -296,7 +358,13 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         }
     }
 
-    let augmented_path = crate::commands::utils::build_augmented_path_for_command(&agent_cmd);
+    let first_agent_cmd = panel_agent_command(
+        &pane_agent_ids[0],
+        &pane_agent_commands[0],
+        &sanitized_name,
+        1,
+    );
+    let augmented_path = crate::commands::utils::build_augmented_path_for_command(&first_agent_cmd);
     let mut new_args = vec![
         "new-session".to_string(),
         "-d".to_string(),
@@ -308,7 +376,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
     }
-    new_args.push(isolated_agent_command(&agent_cmd));
+    new_args.push(isolated_agent_command(&first_agent_cmd));
     append_identity_env_clears(&mut new_args, &sanitized_name);
     new_args.extend([
         ";".to_string(),
@@ -329,16 +397,69 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         return Err(format!("ERR_CREATE_OUTPUT_ERR|{}", err_msg));
     }
 
-    for _ in 1..count {
-        let mut split_args = vec!["split-window", "-t", &sanitized_name];
+    let first_pane = run_tmux(&[
+        "list-panes",
+        "-t",
+        &sanitized_name,
+        "-F",
+        "#{pane_id}",
+    ])
+    .ok()
+    .filter(|result| result.status.success())
+    .and_then(|result| String::from_utf8(result.stdout).ok())
+    .and_then(|stdout| stdout.lines().next().map(String::from));
+    if let Some(first_pane) = first_pane {
+        let _ = run_tmux(&[
+            "set-option",
+            "-p",
+            "-t",
+            &first_pane,
+            "@tmuxdeck-agent",
+            &pane_agent_ids[0],
+        ]);
+    }
+
+    for pane in 2..=count {
+        let mut split_args = vec![
+            "split-window",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-t",
+            &sanitized_name,
+        ];
         if !work_dir_clean.is_empty() && work_dir_clean != "~" {
             split_args.push("-c");
             split_args.push(&work_dir_clean);
         }
-        let isolated_agent = isolated_agent_command(&agent_cmd);
+        let pane_agent_cmd =
+            panel_agent_command(
+                &pane_agent_ids[pane - 1],
+                &pane_agent_commands[pane - 1],
+                &sanitized_name,
+                pane,
+            );
+        let isolated_agent = isolated_agent_command(&pane_agent_cmd);
         split_args.push(&isolated_agent);
 
-        let _ = run_tmux(&split_args);
+        if let Ok(created) = run_tmux(&split_args) {
+            if created.status.success() {
+                if let Some(pane_id) = String::from_utf8_lossy(&created.stdout)
+                    .lines()
+                    .next()
+                    .filter(|value| value.starts_with('%'))
+                {
+                    let _ = run_tmux(&[
+                        "set-option",
+                        "-p",
+                        "-t",
+                        pane_id,
+                        "@tmuxdeck-agent",
+                        &pane_agent_ids[pane - 1],
+                    ]);
+                }
+            }
+        }
         let _ = run_tmux(&["select-layout", "-t", &sanitized_name, "tiled"]);
     }
 
@@ -579,11 +700,53 @@ mod tests {
                 icon_path: None,
             },
         ];
-        assert_eq!(resolve_agent_command("shell", &agents), "/bin/zsh");
-        assert_eq!(resolve_agent_command("pi", &agents), "/opt/bin/pi");
+        assert_eq!(resolve_agent_command("shell", &agents).unwrap(), "/bin/zsh");
+        assert_eq!(resolve_agent_command("pi", &agents).unwrap(), "/opt/bin/pi");
         assert_eq!(
             resolve_agent_command("unknown-agent", &agents),
-            "unknown-agent"
+            Err("ERR_AGENT_NOT_FOUND|unknown-agent".to_string())
+        );
+    }
+
+    #[test]
+    fn pane_agent_resolution_preserves_legacy_and_validates_mixed_lists() {
+        let agents = vec![
+            ToolInfo { id: "pi".into(), name: "Pi".into(), path: "/bin/pi".into(), icon_path: None },
+            ToolInfo { id: "shell".into(), name: "Shell".into(), path: "/bin/zsh".into(), icon_path: None },
+        ];
+        let (legacy_ids, legacy_commands) =
+            resolve_pane_agents("pi", &[], 2, &agents).unwrap();
+        assert_eq!(legacy_ids, ["pi", "pi"]);
+        assert_eq!(legacy_commands, ["/bin/pi", "/bin/pi"]);
+
+        let mixed = vec!["pi".to_string(), "shell".to_string()];
+        assert_eq!(
+            resolve_pane_agents("pi", &mixed, 2, &agents).unwrap().1,
+            ["/bin/pi", "/bin/zsh"]
+        );
+        assert_eq!(
+            resolve_pane_agents("pi", &mixed, 4, &agents),
+            Err("ERR_PANE_AGENT_COUNT|4|2".to_string())
+        );
+        assert_eq!(
+            resolve_pane_agents("pi", &["missing".to_string()], 1, &agents),
+            Err("ERR_AGENT_NOT_FOUND|missing".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_panel_uses_stable_cci_identity_with_plain_claude_fallback() {
+        assert_eq!(
+            panel_agent_command("claude", "/opt/bin/cci", "alpha", 1),
+            "/opt/bin/cci --tui --id 'tmuxdeck-alpha-pane-01' --name 'alpha · Claude 01'"
+        );
+        assert_eq!(
+            panel_agent_command("claude", "/opt/bin/claude", "alpha", 1),
+            "/opt/bin/claude"
+        );
+        assert_eq!(
+            panel_agent_command("custom", "cci --custom", "alpha", 1),
+            "cci --custom"
         );
     }
 

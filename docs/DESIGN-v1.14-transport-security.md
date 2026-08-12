@@ -1,6 +1,8 @@
 # v1.14 Transport + security design: how the phone connects and why it trusts us
 
-> PRD v1.12 defined the mobile protocol (event/command JSON), but **transport and security were left blank**. This fills them in: WebSocket server selection, listening surface, authentication, abuse prevention. Principles follow DECISIONS-v1.12: **don't invent your own security mechanisms**; if an existing trust boundary works, use it instead of building a wheel.
+> PRD v1.12 defined the mobile protocol (event/command JSON), but **transport and security were left blank**. This fills them in: WebSocket server selection, listening surface, authentication, abuse prevention.
+>
+> **2026-08 LAN decision:** v1.14 ships trusted-LAN access first; Tailscale/VPN remains a later transport option. LAN HTTP/WS is plaintext and must only be used on a network whose members are trusted.
 
 ---
 
@@ -9,26 +11,22 @@
 ### 1.1 WebSocket server
 
 - **Library:** `tokio-tungstenite` (Tauri 2 already ships a tokio runtime; no heavy new dependency).
-- **Port:** dynamically allocated (`127.0.0.1:0` grabs a free port), **avoids a fixed port that can be occupied or scanned**.
-- **Listen:** bound to `127.0.0.1` only by default (local access from the desktop); phone access goes through the §2 Tailscale tunnel, so the server **is never exposed as plaintext on the LAN**.
-- **Path:** `ws://127.0.0.1:<port>/v1/ws`, subprotocol fixed at `tmuxdeck.v1`.
+- **Port:** dynamically allocated (`0.0.0.0:0` grabs a free port), avoiding fixed-port conflicts.
+- **Listen:** bound to `0.0.0.0`; the accept loop only permits loopback, RFC1918/link-local LAN and reserved tailnet sources. Public source IPs are dropped. Host validation independently rejects public IPs and arbitrary domains.
+- **Paths:** `GET /v1/?token=<token>` serves the single-file mobile SPA; `ws://<LAN-IP>:<port>/v1/ws?token=<token>` is WebSocket, subprotocol fixed at `tmuxdeck.v1`.
 - **Lifecycle:** a background task started in Tauri `setup`; it keeps running with no connected clients (the conversation-table refresh still consumes intercom events); the phone client owns reconnection.
 
 ### 1.2 How the phone connects (key decision)
 
-**No `0.0.0.0` binding, no LAN plaintext HTTP** — DECISIONS-v1.12 item 1 already rejected that (token sniffable on the same subnet, poor iOS self-signed-cert experience). Instead:
+The desktop derives its primary LAN IPv4 through the system routing table and exposes a QR/copy URL:
 
 ```
-phone ── Tailscale (WireGuard, end-to-end encrypted) ──> Mac's tailnet IP:port
-        │                                               │
-        └── ws://100.x.y.z:<port>/v1/ws?token=… └── server binds only 127.0.0.1
+http://<LAN-IP>:<dynamic-port>/v1/?token=<per-launch-token>
 ```
 
-- The phone runs Tailscale (free on the App Store) and, once on the same tailnet, reaches the Mac's `100.x.y.z` directly.
-- **The WireGuard tunnel itself provides confidentiality** (E2E encryption) — that's the existing trust boundary; we don't invent a TLS/certificate scheme.
-- `ws://` + a plaintext HTTP page is safe inside the tailnet; serving the page over HTTPS (Tailscale's MagicDNS name `mac-name.tailnet-name.ts.net`) gets a CA certificate for free, further blocking man-in-the-middle within the tailnet (other devices on the same tailnet).
+This is the minimal discovery mechanism: no multicast daemon, fixed port or second service. The desktop pairing panel is the discovery surface. The page keeps the token in memory, immediately removes it from the address bar, loads no third-party resources, and opens the same-port WebSocket.
 
-**Security model:** Tailscale handles "who is on the network", the token handles "who this phone client is", and the two stack. Section 3 details this.
+**Security model and exposed surface:** every device on the trusted LAN can see the dynamically allocated TCP port and plaintext traffic; only holders of the 256-bit per-launch token can load the page or complete a WebSocket handshake. This prevents accidental/unauthorized use but does not provide confidentiality against a hostile LAN observer. Do not use it on guest, public, hotel or otherwise untrusted Wi-Fi. VPN/TLS can be layered later without changing the event protocol.
 
 ### 1.3 Phone UI shape
 
@@ -44,11 +42,11 @@ phone ── Tailscale (WireGuard, end-to-end encrypted) ──> Mac's tailnet I
 
 | Surface | Design | Rationale |
 |---|---|---|
-| Port | dynamically allocated, bound to loopback/Tailscale IP only | no fixed port to scan; never on the LAN |
-| HTTP service | same port, same process as WS | one surface to manage; only reachable via tailnet |
-| Phone entry | Tailscale tunnel, not the public internet | reuses existing identity and encryption; nothing self-built |
-| DNS rebinding | WS handshake validates the `Host` header | see §4.2 |
-| Plaintext | `ws://` only inside the tailnet; `https://` via MagicDNS | no listening surface outside the tailnet |
+| Port | dynamically allocated, bound to `0.0.0.0` | one LAN-visible TCP port; no fixed-port conflict |
+| Source IP | loopback, private/link-local LAN; tailnet ranges reserved | public sources dropped before HTTP/WS processing |
+| HTTP service | same port, only `GET /v1/` and `/v1` redirect | one embedded, self-contained SPA; no filesystem serving |
+| DNS rebinding | HTTP and WS both validate `Host` | arbitrary domains/public Hosts rejected |
+| Plaintext | `http://` + `ws://` | **trusted LAN only**; token authenticates but does not encrypt |
 
 ---
 
@@ -62,10 +60,10 @@ phone ── Tailscale (WireGuard, end-to-end encrypted) ──> Mac's tailnet I
 
 ### 3.2 Handshake and validation
 
-- Connection URL: `ws://host:port/v1/ws?token=<hex>`.
+- HTTP URL: `http://host:port/v1/?token=<hex>`; WebSocket URL: `ws://host:port/v1/ws?token=<hex>`.
 - On the server side, at handshake time:
-  1. validate the subprotocol = `tmuxdeck.v1`;
-  2. validate the `Host` header against the allow-list (`127.0.0.1` / `localhost` / tailnet IP / MagicDNS name), else reject — **prevents DNS rebinding**;
+  1. validate the subprotocol = `tmuxdeck.v1` (WebSocket only);
+  2. validate the HTTP/WS `Host` against loopback, private/link-local IP, reserved tailnet IP or MagicDNS; arbitrary domains/public IPs are rejected — **prevents DNS rebinding**;
   3. extract the `token` and compare in **constant time** (`ct_eq` from the `subtle` crate, to avoid a timing side channel);
   4. on failure, log one line and disconnect. **No distinction between "wrong token" and "no token"** — don't give attackers probing information.
 - At most 5 handshake attempts per IP per 10 seconds, silently dropped beyond that (`IpAddr` buckets).
@@ -92,11 +90,12 @@ One token allows multiple connections (e.g. two family phones); all share the sa
 - `say.id` / `key.id` / `forward.from|to` must pass `validate_pane_id` and **exist in the ConversationRegistry** — a pane that doesn't exist is always rejected.
 - `key.key` must hit the `ALLOWED_KEYS` allow-list (already in `tmux.rs`) — **the phone cannot send arbitrary key sequences**.
 - On forward, `from != to`.
-- Every command lands in the server log (time, source IP, pane, command type, text summary) for later auditing — **no "execute arbitrary command" interface at all**.
+- Every command lands in the server audit log (time, source IP, pane, command type, text byte length, outcome). **Message content is never recorded** — and there is no "execute arbitrary command" interface.
 
 ### 4.3 Desktop-side linkage
 
-- On phone connect/disconnect, the desktop shows a "phone connected" status (also handy for troubleshooting).
+- `bridge_pairing` returns `{ enabled, port, httpUrls, lanUrls, wsUrls, token, connectedClients, brokerConnected, trustedLanOnly }`.
+- On authenticated WebSocket connect/disconnect, state updates and Tauri emits `mobile-clients-changed` with `{ connectedClients }`.
 - `ClientCommand::Refresh` triggers a full registry rescan + full resend.
 
 ---
@@ -117,17 +116,14 @@ phone ◀──awaiting-human── WS server ◀── intercom Message(expects
 
 ## 6. Acceptance checklist
 
-- [ ] Server listens only on `127.0.0.1:<dynamic port>`; `lsof` confirms no `0.0.0.0` listener
-- [ ] No token / wrong token / wrong Host header are all rejected, without distinguishing the failure reason
-- [ ] After connecting, the full `conversations` list arrives; desktop shows the phone online
-- [ ] Phone sends `say` → the agent in the pane receives it; `key` outside the allow-list is rejected
-- [ ] Phone sends a non-existent pane id → rejected
-- [ ] Frame over 64 KiB / over rate / heartbeat missed → disconnected
-- [ ] Server stops transcript polling while the phone is offline (`has_clients` in effect)
+- [x] Automated: one dynamic `0.0.0.0` TCP port; public source/Host rejection; HTTP/WS token checks; fixed routes
+- [x] Automated: authenticated connect/disconnect count events; pane/key/forward/subscribe validation; initial refresh snapshot; pending `ask` reply routing
+- [x] Automated: frame/rate/heartbeat limits and offline subscription polling semantics remain covered
+- [ ] On-device: confirm OS firewall prompt/exposure and LAN reachability from a physical phone
 - [ ] An old token dies immediately after the app exits (re-scan required on restart)
 
 On-device verification:
 
-- [ ] iPhone + Tailscale on the same tailnet, scan to connect, multi-conversation send/receive in parallel
+- [ ] iPhone on the same trusted LAN, scan to connect, multi-conversation send/receive
 - [ ] Cross-pane forward A→B works and carries a source label
 - [ ] When an agent `ask`s, the phone receives an `awaiting-human` notification (with reply_to)

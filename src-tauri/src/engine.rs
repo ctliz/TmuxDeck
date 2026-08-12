@@ -14,19 +14,22 @@
 //!
 //! 轮询节奏（设计文档 §5）：手机在线才跑 transcript 轮询；
 //! 存在 `awaiting-human` / `thinking` 时加密到 500ms，否则 2s。
+use crate::audit::record_mobile_command;
 use crate::bridge::{
     deliver, forward, ClientCommand, ClientEvent, ConversationRegistry, ConversationStatus,
     TranscriptSource, Transport, Turn, TurnRole,
 };
 use crate::bridge_state::BridgeState;
 use crate::intercom::{broker_available, IntercomClient, IntercomEvent};
-use crate::tmux::{list_all_panes, send_key_name, validate_pane_id};
+use crate::tmux::{list_all_panes, send_key_name, validate_pane_id, ALLOWED_KEYS};
 use crate::transcript::CompositeTranscriptSource;
 use crate::transport::{InboundCommand, WsTransport};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::net::UdpSocket;
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tauri::Emitter;
 
 /// 常规轮询间隔；有对话在等人/思考时加密。
 pub const POLL_NORMAL: Duration = Duration::from_secs(2);
@@ -34,7 +37,29 @@ pub const POLL_FAST: Duration = Duration::from_millis(500);
 /// intercom 事件与手机指令的阻塞等待上限（保证周期刷新不被饿死）。
 pub const POLL_TICK: Duration = Duration::from_millis(200);
 
+/// 最小 LAN 发现：通过系统路由选择取得当前主 IPv4；无需 mDNS/额外端口。
+fn discover_lan_hosts() -> Vec<String> {
+    let mut hosts = Vec::new();
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("8.8.8.8:80").is_ok() {
+            if let Ok(addr) = socket.local_addr() {
+                if !addr.ip().is_loopback() {
+                    hosts.push(addr.ip().to_string());
+                }
+            }
+        }
+    }
+    hosts.push("127.0.0.1".to_string());
+    hosts
+}
+
 /// 引擎本体。单线程事件循环，持有所需的全部可变状态。
+#[derive(Debug, Clone)]
+struct PendingReply {
+    session_id: String,
+    reply_to: String,
+}
+
 pub struct BridgeEngine {
     intercom: Option<IntercomClient>,
     intercom_rx: Option<Receiver<IntercomEvent>>,
@@ -44,9 +69,12 @@ pub struct BridgeEngine {
     cmd_rx: tokio::sync::mpsc::UnboundedReceiver<InboundCommand>,
     /// pane → 上次已推送到手机端的轮次时间戳
     last_turn_ts: HashMap<String, i64>,
+    pending_replies: HashMap<String, PendingReply>,
     state: Arc<BridgeState>,
     last_refresh: Instant,
     fast_due: bool,
+    last_client_count: usize,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl BridgeEngine {
@@ -54,7 +82,7 @@ impl BridgeEngine {
     ///
     /// broker 不在时降级：仍起 WebSocket 服务与 pane 清单，
     /// 对话走 send-keys 投递、capture-pane 兜底。
-    pub fn run(state: Arc<BridgeState>) {
+    pub fn run(state: Arc<BridgeState>, app_handle: Option<tauri::AppHandle>) {
         // 1. 传输（不依赖 broker，先起，保证 UI 能拿到配对信息）
         let (transport, cmd_rx) = match tauri::async_runtime::block_on(WsTransport::bind()) {
             Ok(x) => x,
@@ -63,16 +91,23 @@ impl BridgeEngine {
                 return;
             }
         };
+        let (port, token) = transport.pairing();
+        let hosts = discover_lan_hosts();
         if let Ok(mut a) = state.ws_addr.lock() {
-            *a = Some(transport.pairing().0.to_string());
+            *a = hosts.first().map(|host| format!("{}:{}", host, port));
         }
         if let Ok(mut t) = state.ws_token.lock() {
-            *t = Some(transport.pairing().1.to_string());
+            *t = Some(token.to_string());
+        }
+        if let Ok(mut p) = state.port.lock() {
+            *p = Some(port);
+        }
+        if let Ok(mut h) = state.lan_hosts.lock() {
+            *h = hosts;
         }
         println!(
-            "[bridge] ws listening on {} (token {})",
-            transport.pairing().0,
-            transport.pairing().1
+            "[bridge] trusted-LAN mobile HTTP/WS listening on 0.0.0.0:{}",
+            port
         );
 
         // 2. intercom（可选）
@@ -83,7 +118,10 @@ impl BridgeEngine {
                     (Some(x.0), Some(x.1))
                 }
                 Err(e) => {
-                    eprintln!("[bridge] intercom connect failed (fallback send-keys): {}", e);
+                    eprintln!(
+                        "[bridge] intercom connect failed (fallback send-keys): {}",
+                        e
+                    );
                     (None, None)
                 }
             }
@@ -99,9 +137,12 @@ impl BridgeEngine {
             transport,
             cmd_rx,
             last_turn_ts: HashMap::new(),
+            pending_replies: HashMap::new(),
             state,
             last_refresh: Instant::now() - POLL_NORMAL,
             fast_due: false,
+            last_client_count: 0,
+            app_handle,
         };
 
         engine.run_loop();
@@ -128,7 +169,23 @@ impl BridgeEngine {
                 self.on_command(cmd);
             }
 
-            // 3) 周期刷新
+            // 3) 发布已认证手机连接数；桌面端轮询 pairing 即可取到实时值。
+            while let Some(client_count) = self.transport.try_client_count_change() {
+                if let Ok(mut count) = self.state.connected_clients.lock() {
+                    *count = client_count;
+                }
+                self.last_client_count = client_count;
+                if let Some(app) = &self.app_handle {
+                    let _ = app.emit(
+                        "mobile-clients-changed",
+                        serde_json::json!({
+                            "connectedClients": client_count
+                        }),
+                    );
+                }
+            }
+
+            // 4) 周期刷新
             let has_clients = self.transport.has_clients();
             self.fast_due = has_clients
                 && self.registry.list().iter().any(|c| {
@@ -139,7 +196,11 @@ impl BridgeEngine {
                             | ConversationStatus::RunningTool
                     )
                 });
-            let interval = if self.fast_due { POLL_FAST } else { POLL_NORMAL };
+            let interval = if self.fast_due {
+                POLL_FAST
+            } else {
+                POLL_NORMAL
+            };
             if self.last_refresh.elapsed() >= interval {
                 self.refresh_all();
             }
@@ -154,6 +215,8 @@ impl BridgeEngine {
 
         // 1) pane 骨架
         self.registry.refresh_panes(list_all_panes());
+        self.pending_replies
+            .retain(|pane_id, _| self.registry.get(pane_id).is_some());
 
         // 2) intercom 会话合并（若在线）
         if let Some(client) = &self.intercom {
@@ -166,13 +229,16 @@ impl BridgeEngine {
         let list = self.registry.list();
         if let Ok(mut convs) = self.state.conversations.lock() {
             let changed = convs.len() != list.len()
-                || convs.iter().zip(list.iter()).any(|(a, b)| {
-                    a.status != b.status || a.title != b.title || a.id != b.id
-                });
+                || convs
+                    .iter()
+                    .zip(list.iter())
+                    .any(|(a, b)| a.status != b.status || a.title != b.title || a.id != b.id);
             if changed {
                 let snapshot = list.clone();
                 *convs = snapshot;
-                let _ = self.transport.emit(&ClientEvent::Conversations { items: list.clone() });
+                let _ = self.transport.emit(&ClientEvent::Conversations {
+                    items: list.clone(),
+                });
             }
         }
 
@@ -248,6 +314,13 @@ impl BridgeEngine {
                 let self_id = self.intercom.as_ref().and_then(|c| c.session_id());
                 self.registry
                     .apply_intercom_sessions(&sessions, self_id.as_deref());
+                self.pending_replies.retain(|pane_id, pending| {
+                    self.registry.get(pane_id).is_some()
+                        && sessions
+                            .iter()
+                            .any(|session| session.id == pending.session_id)
+                });
+                self.restore_pending_statuses();
                 if let Ok(mut b) = self.state.broker_connected.lock() {
                     *b = true;
                 }
@@ -269,6 +342,13 @@ impl BridgeEngine {
                     };
                     let _ = self.transport.emit(&ClientEvent::Turn { turn });
                     if message.expects_reply() {
+                        self.pending_replies.insert(
+                            conv_id.clone(),
+                            PendingReply {
+                                session_id: from.id.clone(),
+                                reply_to: msg_id.clone(),
+                            },
+                        );
                         self.registry.mark_awaiting_human(&from.id);
                         let conv = self.registry.get(&conv_id);
                         let title = conv.map(|c| c.title.clone()).unwrap_or_default();
@@ -287,6 +367,7 @@ impl BridgeEngine {
             }
             IntercomEvent::PresenceUpdate { session } => {
                 self.registry.apply_presence(&session);
+                self.restore_pending_statuses();
                 if let Some(conv) = self.registry.by_intercom_id(&session.id) {
                     let _ = self.transport.emit(&ClientEvent::StatusChanged {
                         id: conv.id.clone(),
@@ -316,95 +397,227 @@ impl BridgeEngine {
 
     // ── 手机指令处理 ──
     fn on_command(&mut self, inbound: InboundCommand) {
-        let InboundCommand { conn_id, command } = inbound;
+        let InboundCommand {
+            conn_id,
+            peer_ip,
+            command,
+        } = inbound;
         match command {
             ClientCommand::Say { id, text } => {
                 let Some(conv) = self.registry.get(&id) else {
-                    let _ = self.transport.emit_to(
+                    self.reject(
                         conn_id,
-                        &ClientEvent::Error {
-                            message: format!("unknown pane {}", id),
-                        },
+                        peer_ip,
+                        "say",
+                        Some(&id),
+                        Some(&text),
+                        "unknown pane",
                     );
                     return;
                 };
-                match deliver(conv, &text, self.intercom.as_ref()) {
-                    Ok(route) => println!("[bridge] say {} → {} ({:?})", id, text, route),
-                    Err(e) => {
-                        let _ = self.transport.emit_to(
-                            conn_id,
-                            &ClientEvent::Error {
-                                message: format!("deliver failed: {}", e),
-                            },
-                        );
-                    }
-                }
-            }
-            ClientCommand::Key { id, key } => {
-                if !validate_pane_id(&id) {
-                    let _ = self.transport.emit_to(
+                if text.is_empty() {
+                    self.reject(
                         conn_id,
-                        &ClientEvent::Error {
-                            message: format!("invalid pane {}", id),
-                        },
+                        peer_ip,
+                        "say",
+                        Some(&id),
+                        Some(&text),
+                        "text must not be empty",
                     );
                     return;
                 }
-                match send_key_name(&id, &key) {
-                    Ok(()) => println!("[bridge] key {} → {}", id, key),
-                    Err(e) => {
-                        let _ = self.transport.emit_to(
-                            conn_id,
-                            &ClientEvent::Error {
-                                message: format!("key failed: {}", e),
-                            },
-                        );
+                if let (Some(pending), Some(intercom)) = (
+                    pending_reply_for_say(&self.pending_replies, &id),
+                    self.intercom.as_ref(),
+                ) {
+                    match intercom.reply(&pending.session_id, &text, &pending.reply_to) {
+                        Ok(_) => {
+                            self.pending_replies.remove(&id);
+                            self.registry.clear_pane_awaiting_human(&id);
+                            self.refresh_all();
+                            record_mobile_command(
+                                peer_ip,
+                                "reply",
+                                Some(&id),
+                                Some(&text),
+                                "accepted",
+                            );
+                            return;
+                        }
+                        Err(e) => {
+                            self.reject(
+                                conn_id,
+                                peer_ip,
+                                "reply",
+                                Some(&id),
+                                Some(&text),
+                                &format!("reply failed: {}", e),
+                            );
+                            return;
+                        }
                     }
+                }
+                match deliver(conv, &text, self.intercom.as_ref()) {
+                    Ok(route) => {
+                        record_mobile_command(peer_ip, "say", Some(&id), Some(&text), "accepted");
+                        println!("[bridge] say {} ({:?})", id, route);
+                    }
+                    Err(e) => self.reject(
+                        conn_id,
+                        peer_ip,
+                        "say",
+                        Some(&id),
+                        Some(&text),
+                        &format!("deliver failed: {}", e),
+                    ),
+                }
+            }
+            ClientCommand::Key { id, key } => {
+                if !validate_pane_id(&id) || self.registry.get(&id).is_none() {
+                    self.reject(conn_id, peer_ip, "key", Some(&id), None, "unknown pane");
+                    return;
+                }
+                if !ALLOWED_KEYS.contains(&key.as_str()) {
+                    self.reject(conn_id, peer_ip, "key", Some(&id), None, "key not allowed");
+                    return;
+                }
+                match send_key_name(&id, &key) {
+                    Ok(()) => record_mobile_command(peer_ip, "key", Some(&id), None, "accepted"),
+                    Err(e) => self.reject(
+                        conn_id,
+                        peer_ip,
+                        "key",
+                        Some(&id),
+                        None,
+                        &format!("key failed: {}", e),
+                    ),
                 }
             }
             ClientCommand::Forward { from, to, text } => {
-                let Some(f) = self.registry.get(&from) else {
-                    let _ = self.transport.emit_to(
+                if from == to || text.is_empty() {
+                    self.reject(
                         conn_id,
-                        &ClientEvent::Error {
-                            message: format!("unknown pane {}", from),
-                        },
+                        peer_ip,
+                        "forward",
+                        Some(&to),
+                        Some(&text),
+                        "forward requires different panes and non-empty text",
+                    );
+                    return;
+                }
+                let Some(f) = self.registry.get(&from) else {
+                    self.reject(
+                        conn_id,
+                        peer_ip,
+                        "forward",
+                        Some(&from),
+                        Some(&text),
+                        "unknown source pane",
                     );
                     return;
                 };
                 let Some(t) = self.registry.get(&to) else {
-                    let _ = self.transport.emit_to(
+                    self.reject(
                         conn_id,
-                        &ClientEvent::Error {
-                            message: format!("unknown pane {}", to),
-                        },
+                        peer_ip,
+                        "forward",
+                        Some(&to),
+                        Some(&text),
+                        "unknown target pane",
                     );
                     return;
                 };
                 match forward(f, t, &text, self.intercom.as_ref()) {
-                    Ok(route) => println!("[bridge] forward {} → {} ({:?})", from, to, route),
-                    Err(e) => {
-                        let _ = self.transport.emit_to(
-                            conn_id,
-                            &ClientEvent::Error {
-                                message: format!("forward failed: {}", e),
-                            },
+                    Ok(route) => {
+                        record_mobile_command(
+                            peer_ip,
+                            "forward",
+                            Some(&to),
+                            Some(&text),
+                            "accepted",
                         );
+                        println!("[bridge] forward {} → {} ({:?})", from, to, route);
                     }
+                    Err(e) => self.reject(
+                        conn_id,
+                        peer_ip,
+                        "forward",
+                        Some(&to),
+                        Some(&text),
+                        &format!("forward failed: {}", e),
+                    ),
                 }
             }
             ClientCommand::Refresh => {
+                record_mobile_command(peer_ip, "refresh", None, None, "accepted");
                 self.refresh_all();
+                let _ = self.transport.emit_to(
+                    conn_id,
+                    &ClientEvent::Conversations {
+                        items: self.registry.list(),
+                    },
+                );
             }
             ClientCommand::Subscribe { id } => {
-                // 单活跃订阅：新 subscribe 直接替换（emit 过滤已由 transport 就地更新）
+                if !validate_pane_id(&id) || self.registry.get(&id).is_none() {
+                    self.reject(
+                        conn_id,
+                        peer_ip,
+                        "subscribe",
+                        Some(&id),
+                        None,
+                        &format!("unknown pane {}", id),
+                    );
+                    return;
+                }
+                self.transport.set_subscription(conn_id, Some(id.clone()));
+                record_mobile_command(peer_ip, "subscribe", Some(&id), None, "accepted");
                 self.subscribe_snapshot(conn_id, &id);
             }
             ClientCommand::Unsubscribe => {
-                // 清空订阅：停止该对话轮询（last_turn_ts 保留，重新订阅时继续增量）
+                self.transport.set_subscription(conn_id, None);
+                record_mobile_command(peer_ip, "unsubscribe", None, None, "accepted");
             }
         }
     }
+
+    fn restore_pending_statuses(&mut self) {
+        restore_pending_statuses(&mut self.registry, &self.pending_replies);
+    }
+
+    fn reject(
+        &mut self,
+        conn_id: u64,
+        peer_ip: std::net::IpAddr,
+        command: &str,
+        pane: Option<&str>,
+        text: Option<&str>,
+        message: &str,
+    ) {
+        record_mobile_command(peer_ip, command, pane, text, "rejected");
+        let _ = self.transport.emit_to(
+            conn_id,
+            &ClientEvent::Error {
+                message: message.to_string(),
+            },
+        );
+    }
+}
+
+fn restore_pending_statuses(
+    registry: &mut ConversationRegistry,
+    pending_replies: &HashMap<String, PendingReply>,
+) {
+    for pane_id in pending_replies.keys() {
+        registry.mark_pane_awaiting_human(pane_id);
+    }
+}
+
+fn pending_reply_for_say(
+    pending_replies: &HashMap<String, PendingReply>,
+    pane_id: &str,
+) -> Option<PendingReply> {
+    pending_replies.get(pane_id).cloned()
 }
 
 /// 供 Tauri setup 调用：把引擎 spawn 到后台线程。
@@ -415,7 +628,6 @@ mod tests {
     use crate::tmux::PaneDetail;
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};
-    use std::net::SocketAddr;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::protocol::Message;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -423,10 +635,10 @@ mod tests {
     type TestSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
     async fn connect_client(
-        addr: SocketAddr,
+        port: u16,
         token: &str,
     ) -> (SplitSink<TestSocket, Message>, SplitStream<TestSocket>) {
-        let url = format!("ws://{}/v1/ws?token={}", addr, token);
+        let url = format!("ws://127.0.0.1:{}/v1/ws?token={}", port, token);
         let mut req = url.into_client_request().unwrap();
         req.headers_mut().insert(
             "sec-websocket-protocol",
@@ -434,7 +646,11 @@ mod tests {
                 crate::transport::WS_SUBPROTOCOL,
             ),
         );
-        tokio_tungstenite::connect_async(req).await.unwrap().0.split()
+        tokio_tungstenite::connect_async(req)
+            .await
+            .unwrap()
+            .0
+            .split()
     }
 
     async fn recv_text(stream: &mut SplitStream<TestSocket>) -> String {
@@ -457,6 +673,41 @@ mod tests {
     }
 
     #[test]
+    fn test_refresh_always_sends_initial_conversations_to_requester() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (transport, mut cmd_rx) = WsTransport::bind().await.unwrap();
+            let (port, token) = transport.pairing();
+            let (mut sink, mut stream) = connect_client(port, token).await;
+            sink.send(Message::Text(r#"{"type":"refresh"}"#.into()))
+                .await
+                .unwrap();
+            let refresh = cmd_rx.recv().await.unwrap();
+            let mut engine = BridgeEngine {
+                intercom: None,
+                intercom_rx: None,
+                registry: ConversationRegistry::new(),
+                transcript: CompositeTranscriptSource::new(),
+                transport,
+                cmd_rx,
+                last_turn_ts: HashMap::new(),
+                pending_replies: HashMap::new(),
+                state: Arc::new(BridgeState::default()),
+                last_refresh: Instant::now(),
+                fast_due: false,
+                last_client_count: 0,
+                app_handle: None,
+            };
+            engine.on_command(refresh);
+            let event = recv_text(&mut stream).await;
+            assert!(event.contains("\"type\":\"conversations\""));
+        });
+    }
+
+    #[test]
     fn test_two_connections_use_targeted_results_and_subscription_delivery() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -464,9 +715,9 @@ mod tests {
             .unwrap();
         runtime.block_on(async {
             let (transport, mut cmd_rx) = WsTransport::bind().await.unwrap();
-            let (addr, token) = transport.pairing();
-            let (mut sink_a, mut stream_a) = connect_client(addr, token).await;
-            let (mut sink_b, mut stream_b) = connect_client(addr, token).await;
+            let (port, token) = transport.pairing();
+            let (mut sink_a, mut stream_a) = connect_client(port, token).await;
+            let (mut sink_b, mut stream_b) = connect_client(port, token).await;
 
             sink_a
                 .send(Message::Text(
@@ -492,31 +743,54 @@ mod tests {
                 transport,
                 cmd_rx,
                 last_turn_ts: HashMap::new(),
+                pending_replies: HashMap::new(),
                 state: Arc::new(BridgeState::default()),
                 last_refresh: Instant::now(),
                 fast_due: false,
+                last_client_count: 0,
+                app_handle: None,
             };
 
             // A 的未知订阅错误只回 A。
             engine.on_command(unknown);
-            assert!(recv_text(&mut stream_a).await.contains("unknown pane %missing"));
+            assert!(recv_text(&mut stream_a)
+                .await
+                .contains("unknown pane %missing"));
             assert_no_text(&mut stream_b, "B 不应收到 A 的命令错误").await;
 
             // A/B 分别订阅不同对话；入站 envelope 保留各自连接 ID。
+            engine.registry.refresh_panes(vec![
+                PaneDetail {
+                    id: "%3".into(),
+                    agent_id: None,
+                    session: "a".into(),
+                    command: "pi".into(),
+                    cwd: "/tmp".into(),
+                    active: true,
+                },
+                PaneDetail {
+                    id: "%9".into(),
+                    agent_id: None,
+                    session: "b".into(),
+                    command: "pi".into(),
+                    cwd: "/tmp".into(),
+                    active: true,
+                },
+            ]);
             sink_a
-                .send(Message::Text(
-                    r#"{"type":"subscribe","id":"%3"}"#.into(),
-                ))
+                .send(Message::Text(r#"{"type":"subscribe","id":"%3"}"#.into()))
                 .await
                 .unwrap();
-            assert_eq!(engine.cmd_rx.recv().await.unwrap().conn_id, conn_a);
+            let sub_a = engine.cmd_rx.recv().await.unwrap();
+            assert_eq!(sub_a.conn_id, conn_a);
+            engine.transport.set_subscription(conn_a, Some("%3".into()));
             sink_b
-                .send(Message::Text(
-                    r#"{"type":"subscribe","id":"%9"}"#.into(),
-                ))
+                .send(Message::Text(r#"{"type":"subscribe","id":"%9"}"#.into()))
                 .await
                 .unwrap();
-            assert_eq!(engine.cmd_rx.recv().await.unwrap().conn_id, conn_b);
+            let sub_b = engine.cmd_rx.recv().await.unwrap();
+            assert_eq!(sub_b.conn_id, conn_b);
+            engine.transport.set_subscription(conn_b, Some("%9".into()));
 
             let snapshot = ClientEvent::Turn {
                 turn: Turn {
@@ -561,16 +835,49 @@ mod tests {
 
             // 同一对话允许多连接订阅，后续增量应各自收到。
             sink_b
-                .send(Message::Text(
-                    r#"{"type":"subscribe","id":"%3"}"#.into(),
-                ))
+                .send(Message::Text(r#"{"type":"subscribe","id":"%3"}"#.into()))
                 .await
                 .unwrap();
-            assert_eq!(engine.cmd_rx.recv().await.unwrap().conn_id, conn_b);
+            let sub_b = engine.cmd_rx.recv().await.unwrap();
+            assert_eq!(sub_b.conn_id, conn_b);
+            engine.transport.set_subscription(conn_b, Some("%3".into()));
             engine.transport.emit(&incremental).unwrap();
             assert!(recv_text(&mut stream_a).await.contains("incremental"));
             assert!(recv_text(&mut stream_b).await.contains("incremental"));
         });
+    }
+
+    #[test]
+    fn test_pending_reply_lookup_and_status_restore() {
+        let mut reg = ConversationRegistry::new();
+        reg.refresh_panes(vec![PaneDetail {
+            id: "%1".into(),
+            agent_id: None,
+            session: "s".into(),
+            command: "pi".into(),
+            cwd: "/tmp".into(),
+            active: true,
+        }]);
+        let pending = PendingReply {
+            session_id: "agent-1".into(),
+            reply_to: "message-1".into(),
+        };
+        let mut pending_replies = HashMap::new();
+        pending_replies.insert("%1".into(), pending.clone());
+        assert_eq!(
+            pending_reply_for_say(&pending_replies, "%1")
+                .unwrap()
+                .reply_to,
+            "message-1"
+        );
+        assert!(pending_reply_for_say(&pending_replies, "%2").is_none());
+        restore_pending_statuses(&mut reg, &pending_replies);
+        assert_eq!(
+            reg.get("%1").unwrap().status,
+            ConversationStatus::AwaitingHuman
+        );
+        pending_replies.remove("%1");
+        assert!(pending_reply_for_say(&pending_replies, "%1").is_none());
     }
 
     #[test]
@@ -579,6 +886,7 @@ mod tests {
         let mut reg = ConversationRegistry::new();
         reg.refresh_panes(vec![PaneDetail {
             id: "%1".into(),
+            agent_id: None,
             session: "s".into(),
             command: "pi".into(),
             cwd: "/tmp".into(),

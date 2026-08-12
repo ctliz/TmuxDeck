@@ -93,7 +93,7 @@ flowchart TB
 
 TmuxDeck 在该 Broker 上注册为名为 `me` 的会话。Agent 需要决策时，联系你与联系其他 Agent 完全一致 — 并且因为 Broker 实时跟踪谁在空闲、谁在思考、谁在等待回复，**「哪个 Agent 需要我」这个问题由数据直接回答，无需猜测**。
 
-> 状态：Intercom 客户端与安全 WebSocket 传输层已实现；完整移动端 UI 正在持续开发中。
+> 状态：可信局域网移动端 UI 与桌面二维码配对已可用（仅限可信局域网明文传输）；真机验收与关屏/后台推送仍待后续完成。
 
 ---
 
@@ -132,7 +132,7 @@ npm install -g opencode-ai
 | Agent | 适配器安装命令 | 激活 / MCP 注册 |
 | :--- | :--- | :--- |
 | **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | 启动自动加载（已有会话执行 `/reload`） |
-| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude` | `claude mcp add -s user claude-intercom -- claude-intercom-mcp` |
+| **Claude Code** | `npm install -g @dataforxyz/agent-intercom-claude`（提供 `cci`） | 普通 `claude`：`claude mcp add -s user claude-intercom -- claude-intercom-mcp`；TmuxDeck 优先使用交互式 `cci --tui` |
 | **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | 在 `opencode.json` 与 `tui.json` 中配置 `plugin.mjs` 和 `tui.mjs`；`tui.mjs` 提供 `/intercom`、`/intercom-name` 和 `/intercom-id` |
 
@@ -141,7 +141,7 @@ npm install -g opencode-ai
 在不同 Agent 会话间通过共享 Broker 通信：
 
 - **会话发现与消息路由：** 使用 `intercom_list`、`intercom_send`、`intercom_ask` 以及 `intercom_reply` 进行会话查找与消息交互。
-- **Claude Code 接入说明：** 通过 MCP 注册（`claude mcp add`）提供工具集成；Slash 命令需使用插件元数据注册。
+- **Claude Code 接入说明：** 适配器包提供支持 Intercom 的 Claude 包装器 `cci`。普通 `claude` 通过已注册的 MCP 工具接入；`cci --tui` 还提供可唤醒的交互身份与快捷操作。TmuxDeck 仅在运行时确认 `cci` 可执行且支持 `--tui`、`--id`、`--name` 后才选择它，并为每个 legacy pane 或 Ghostty native slot 注入稳定唯一身份；若 `cci` 缺失、不可执行或版本不兼容，会无报错回退到独立检测到的普通 `claude`。选择器会显示当前模式：**Claude Code · Intercom (cci)** 或 **Claude Code · Standard**。自定义 Agent 命令不会被改写。可用 `/claude-intercom:intercom-id` 或 Alt+I 查看当前身份；自行启动 `cci` 的高级用户可显式指定 `--id <稳定-id> --name <名称>`。
 - **OpenCode 接入说明：** 需要同时注册 `plugin.mjs`（服务端插件在 `opencode.json` 中）与 `tui.mjs`（TUI 插件在 `tui.json` 中）。
 - **重命名 OpenCode Intercom 会话：** 执行 `/intercom-name`，或在命令面板选择 **Rename intercom session**；弹窗标题为 **Rename this Intercom session**。模型也可以调用 `intercom_set_name({ name: "<新名称>" })`。该操作只修改其他 Agent 可见的名称，不改变稳定的 Intercom Session ID。
 

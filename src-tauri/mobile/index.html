@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>TmuxDeck Mobile</title>
+  <style>
+    :root {
+      --app-height: 100vh;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      background-color: #090d16;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      height: var(--app-height);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+    button, input, select, textarea { font: inherit; }
+    button, .conv-card, .status-badge { touch-action: manipulation; }
+    @supports (height: 100dvh) {
+      :root { --app-height: 100dvh; }
+    }
+    header {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 10px 14px;
+      padding: calc(10px + env(safe-area-inset-top, 0px)) calc(14px + env(safe-area-inset-right, 0px)) 10px calc(14px + env(safe-area-inset-left, 0px));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-weight: 600;
+      font-size: 14px;
+      color: #38bdf8;
+    }
+    .lan-badge {
+      font-size: 10px;
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      padding: 2px 6px;
+      border-radius: 9999px;
+      font-weight: 500;
+    }
+    .status-badge {
+      flex-shrink: 0;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+    }
+    .status-connected { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .status-connecting { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .status-disconnected { background: rgba(244, 63, 94, 0.15); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.3); cursor: pointer; }
+
+    main {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Conversation List */
+    .view-list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px;
+      padding: 12px calc(12px + env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .awaiting-section .section-title { color: #f59e0b; }
+
+    .conv-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 44px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .conv-card:active { transform: scale(0.98); background: #1e293b; }
+    .conv-card.awaiting {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+    .conv-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .conv-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .conv-id {
+      font-family: monospace;
+      font-size: 11px;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .badge-awaiting {
+      background: #f59e0b;
+      color: #0f172a;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 9999px;
+    }
+    .conv-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .conv-preview {
+      font-family: monospace;
+      font-size: 11px;
+      color: #cbd5e1;
+      background: #020617;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #1e293b;
+      max-height: 54px;
+      overflow: hidden;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Conversation Stream View */
+    .view-stream {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .stream-bar {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    .stream-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      font-family: monospace;
+      text-align: center;
+    }
+    .back-btn {
+      background: #1e293b;
+      border: none;
+      color: #e2e8f0;
+      padding: 8px 12px;
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .forward-btn {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 8px 12px;
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .turns-list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px;
+      padding: 12px calc(12px + env(safe-area-inset-right, 0px)) 12px calc(12px + env(safe-area-inset-left, 0px));
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: #020617;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .turn-bubble {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: 92%;
+    }
+    .turn-bubble.human { align-self: flex-end; }
+    .turn-bubble.agent, .turn-bubble.peer, .turn-bubble.system { align-self: flex-start; }
+    .turn-role {
+      font-size: 10px;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .human .turn-role { align-self: flex-end; }
+    .turn-content {
+      padding: 8px 12px;
+      border-radius: 10px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+    .human .turn-content { background: #0284c7; color: #ffffff; border-bottom-right-radius: 2px; }
+    .agent .turn-content { background: #1e293b; color: #e2e8f0; border-bottom-left-radius: 2px; border: 1px solid #334155; }
+    .peer .turn-content { background: #312e81; color: #e0e7ff; border: 1px solid #4338ca; }
+    .system .turn-content { background: #0f172a; color: #94a3b8; font-style: italic; border: 1px dashed #334155; }
+
+    /* Control Keys & Input Bar */
+    .controls-bar {
+      display: flex;
+      gap: 6px;
+      padding: 8px 12px;
+      padding: 8px calc(12px + env(safe-area-inset-right, 0px)) 8px calc(12px + env(safe-area-inset-left, 0px));
+      background: #0f172a;
+      border-top: 1px solid #1e293b;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+      white-space: nowrap;
+    }
+    .key-btn {
+      background: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid #334155;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+      min-height: 44px;
+    }
+    .key-btn:active { background: #0284c7; border-color: #38bdf8; }
+
+    .input-bar {
+      display: flex;
+      gap: 8px;
+      padding: 10px 12px;
+      padding: 10px calc(12px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
+      background: #0f172a;
+      flex-shrink: 0;
+      border-top: 1px solid #1e293b;
+    }
+    .input-field {
+      flex: 1;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #f8fafc;
+      font-family: monospace;
+      font-size: 16px;
+      min-width: 0;
+      min-height: 44px;
+      outline: none;
+    }
+    .input-field:focus { border-color: #0284c7; }
+    .send-btn {
+      background: #0284c7;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      min-height: 44px;
+      cursor: pointer;
+    }
+    .send-btn:active { background: #0369a1; }
+
+    /* Forward Modal */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.8);
+      -webkit-backdrop-filter: blur(4px);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 16px;
+      padding: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+      z-index: 100;
+    }
+    .modal-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+      width: 100%;
+      max-width: 360px;
+      max-height: calc(var(--app-height) - 32px);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .modal-title { font-size: 14px; font-weight: 600; color: #f8fafc; }
+    .modal-select, .modal-textarea {
+      width: 100%;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 8px;
+      color: #e2e8f0;
+      font-family: monospace;
+      font-size: 16px;
+      outline: none;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .btn-secondary { background: transparent; color: #94a3b8; border: none; padding: 10px 12px; min-height: 44px; font-size: 14px; cursor: pointer; }
+    .btn-primary { background: #0284c7; color: #fff; border: none; padding: 10px 14px; min-height: 44px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+    @media (max-width: 380px) {
+      .lan-badge { display: none; }
+      header { padding-left: calc(10px + env(safe-area-inset-left, 0px)); padding-right: calc(10px + env(safe-area-inset-right, 0px)); }
+      .stream-bar { padding-left: 8px; padding-right: 8px; }
+      .back-btn, .forward-btn { padding-left: 9px; padding-right: 9px; }
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 60px;
+      bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      background: #10b981;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 200;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>TmuxDeck</span>
+      <span class="lan-badge">仅可信局域网使用</span>
+    </div>
+    <div id="status-badge" class="status-badge status-connecting" onclick="app.reconnect()">
+      <span id="status-text">连接中...</span>
+    </div>
+  </header>
+
+  <main id="app-main">
+    <!-- Rendered via JS -->
+  </main>
+
+  <!-- Forward Modal Template -->
+  <div id="forward-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-title">转发内容至其他分屏</div>
+      <div>
+        <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">目标对话 / Pane</label>
+        <select id="forward-target-select" class="modal-select"></select>
+      </div>
+      <div>
+        <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">转发内容</label>
+        <textarea id="forward-text-input" rows="4" class="modal-textarea"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="app.closeForwardModal()">取消</button>
+        <button class="btn-primary" onclick="app.confirmForward()">确认转发</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" style="display: none;">已转发</div>
+
+  <script>
+    (function() {
+      // 1. Extract token from URL & clean query params for security
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token') || '';
+      let token = urlToken;
+      try {
+        if (urlToken) sessionStorage.setItem('tmuxdeck-token', urlToken);
+        else token = sessionStorage.getItem('tmuxdeck-token') || '';
+      } catch (e) {}
+      if (urlToken && window.history && window.history.replaceState) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      // Minimal self-contained i18n
+      const isZh = typeof navigator !== 'undefined' && navigator.language && navigator.language.startsWith('zh');
+      const dict = {
+        zh: {
+          trustedLanOnly: "仅可信局域网使用",
+          connecting: "连接中...",
+          connected: "已连接",
+          reconnecting: "重连中...",
+          disconnected: "断开 (点此重连)",
+          connError: "连接错误 (重试)",
+          connFail: "连接失败",
+          awaitingSection: "⚡ 等待人工响应",
+          allConversations: "全部对话",
+          noAgents: "暂无运行中的 Agent 对话",
+          noTurns: "暂无对话轮次输出",
+          back: "← 返回",
+          forward: "转发",
+          send: "发送",
+          placeholder: "输入指令或回复...",
+          forwardTitle: "转发内容至其他分屏",
+          targetLabel: "目标对话 / Pane",
+          forwardContentLabel: "转发内容",
+          cancel: "取消",
+          confirmForward: "确认转发",
+          toastForwarded: "已转发",
+          serverError: "服务报错: ",
+          unknownError: "未知错误"
+        },
+        en: {
+          trustedLanOnly: "Trusted LAN Only",
+          connecting: "Connecting...",
+          connected: "Connected",
+          reconnecting: "Reconnecting...",
+          disconnected: "Disconnected (Click to Reconnect)",
+          connError: "Connection Error (Retry)",
+          connFail: "Connection Failed",
+          awaitingSection: "⚡ Action Needed",
+          allConversations: "All Conversations",
+          noAgents: "No active Agent conversations",
+          noTurns: "No conversation turns captured yet",
+          back: "← Back",
+          forward: "Forward",
+          send: "Send",
+          placeholder: "Type command or message...",
+          forwardTitle: "Forward Content to Another Pane",
+          targetLabel: "Target Conversation / Pane",
+          forwardContentLabel: "Forward Content",
+          cancel: "Cancel",
+          confirmForward: "Confirm Forward",
+          toastForwarded: "Forwarded",
+          serverError: "Server Error: ",
+          unknownError: "Unknown Error"
+        }
+      };
+      const lang = isZh ? dict.zh : dict.en;
+      const t = function(key) { return lang[key] || key; };
+
+      // Allowed Keys mapping for Rust bridge
+      const ALLOWED_KEYS = [
+        { label: 'Ctrl+C', key: 'C-c' },
+        { label: 'Esc', key: 'Escape' },
+        { label: 'Enter', key: 'Enter' },
+        { label: 'Tab', key: 'Tab' },
+        { label: 'Bksp', key: 'BSpace' },
+        { label: '↑', key: 'Up' },
+        { label: '↓', key: 'Down' },
+        { label: 'Ctrl+D', key: 'C-d' }
+      ];
+
+      class App {
+        constructor() {
+          this.ws = null;
+          this.status = 'connecting';
+          this.conversations = [];
+          this.activeConvId = null;
+          this.turns = {}; // convId -> array of turns
+          this.token = token;
+          this.reconnectTimer = null;
+
+          this.mainEl = document.getElementById('app-main');
+          this.statusBadgeEl = document.getElementById('status-badge');
+          this.statusTextEl = document.getElementById('status-text');
+
+          this.initI18nDom();
+          this.initWs();
+        }
+
+        initI18nDom() {
+          const badgeEl = document.querySelector('.lan-badge');
+          if (badgeEl) badgeEl.textContent = t('trustedLanOnly');
+
+          const modalTitleEl = document.querySelector('.modal-title');
+          if (modalTitleEl) modalTitleEl.textContent = t('forwardTitle');
+
+          const labels = document.querySelectorAll('.modal-card label');
+          if (labels[0]) labels[0].textContent = t('targetLabel');
+          if (labels[1]) labels[1].textContent = t('forwardContentLabel');
+
+          const btnSec = document.querySelector('.btn-secondary');
+          if (btnSec) btnSec.textContent = t('cancel');
+
+          const btnPri = document.querySelector('.btn-primary');
+          if (btnPri) btnPri.textContent = t('confirmForward');
+
+          const toastEl = document.getElementById('toast');
+          if (toastEl) toastEl.textContent = t('toastForwarded');
+        }
+
+        initWs() {
+          if (this.ws) {
+            try { this.ws.close(); } catch(e) {}
+          }
+          this.updateStatus('connecting', t('connecting'));
+
+          const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${protocol}//${location.host}/v1/ws?token=${encodeURIComponent(this.token)}`;
+
+          try {
+            // Must specify subprotocol "tmuxdeck.v1"
+            this.ws = new WebSocket(wsUrl, ['tmuxdeck.v1']);
+
+            this.ws.onopen = () => {
+              this.updateStatus('connected', t('connected'));
+              this.sendCmd({ type: 'refresh' });
+              if (this.activeConvId) {
+                this.sendCmd({ type: 'subscribe', id: this.activeConvId });
+              }
+            };
+
+            this.ws.onmessage = (event) => {
+              try {
+                const msg = JSON.parse(event.data);
+                this.handleServerEvent(msg);
+              } catch (err) {
+                console.error("WS Parse error", err);
+              }
+            };
+
+            this.ws.onerror = () => {
+              this.updateStatus('disconnected', t('connError'));
+            };
+
+            this.ws.onclose = () => {
+              this.updateStatus('disconnected', t('disconnected'));
+              if (!this.reconnectTimer) {
+                this.reconnectTimer = setTimeout(() => {
+                  this.reconnectTimer = null;
+                  if (this.status === 'disconnected') this.initWs();
+                }, 4000);
+              }
+            };
+          } catch(err) {
+            this.updateStatus('disconnected', t('connFail'));
+          }
+        }
+
+        reconnect() {
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+          this.initWs();
+        }
+
+        updateStatus(state, text) {
+          this.status = state;
+          this.statusTextEl.textContent = text;
+          this.statusBadgeEl.className = `status-badge status-${state}`;
+        }
+
+        sendCmd(cmd) {
+          if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+          try {
+            this.ws.send(JSON.stringify(cmd));
+            return true;
+          } catch (e) {
+            this.updateStatus('disconnected', t('disconnected'));
+            return false;
+          }
+        }
+
+        handleServerEvent(msg) {
+          switch (msg.type) {
+            case 'conversations':
+              this.conversations = msg.items || [];
+              if (!this.activeConvId) this.render();
+              break;
+
+            case 'status-changed':
+              const item = this.conversations.find(c => c.id === msg.id);
+              if (item) {
+                item.status = msg.status;
+                if (!this.activeConvId) this.render();
+              }
+              break;
+
+            case 'turn':
+              if (msg.turn) {
+                const cid = msg.turn.conversationId || msg.turn.conversation_id || this.activeConvId;
+                if (cid) {
+                  if (!this.turns[cid]) this.turns[cid] = [];
+                  this.turns[cid].push(msg.turn);
+                  if (this.activeConvId === cid) {
+                    this.renderStreamTurns();
+                  }
+                }
+              }
+              break;
+
+            case 'awaiting-human':
+              const conv = this.conversations.find(c => c.id === msg.id);
+              if (conv) {
+                conv.status = 'awaiting-human';
+                if (msg.preview) conv.preview = msg.preview;
+                if (!this.activeConvId) this.render();
+              }
+              break;
+
+            case 'error':
+              alert(t('serverError') + (msg.message || t('unknownError')));
+              break;
+          }
+        }
+
+        selectConv(id) {
+          this.activeConvId = id;
+          this.sendCmd({ type: 'subscribe', id });
+          this.render();
+        }
+
+        backToList() {
+          if (this.activeConvId) {
+            this.sendCmd({ type: 'unsubscribe' });
+            this.activeConvId = null;
+          }
+          this.render();
+        }
+
+        sendSay(quickText) {
+          const input = document.getElementById('say-input');
+          const text = (quickText !== undefined && quickText !== null ? quickText : (input ? input.value : '')).trim();
+          if (!text || !this.activeConvId) return;
+          const sent = this.sendCmd({ type: 'say', id: this.activeConvId, text });
+          if (sent && !quickText && input) {
+            input.value = '';
+          }
+        }
+
+        sendKey(keyName) {
+          if (!this.activeConvId) return;
+          this.sendCmd({ type: 'key', id: this.activeConvId, key: keyName });
+        }
+
+        openForwardModal() {
+          const select = document.getElementById('forward-target-select');
+          select.innerHTML = '';
+          this.conversations.forEach(c => {
+            if (c.id !== this.activeConvId) {
+              const opt = document.createElement('option');
+              opt.value = c.id;
+              opt.textContent = `${c.title} (${c.id})`;
+              select.appendChild(opt);
+            }
+          });
+
+          const lastTurn = (this.turns[this.activeConvId] || []).slice(-1)[0];
+          document.getElementById('forward-text-input').value = lastTurn ? lastTurn.text : '';
+          document.getElementById('forward-modal').style.display = 'flex';
+        }
+
+        closeForwardModal() {
+          document.getElementById('forward-modal').style.display = 'none';
+        }
+
+        confirmForward() {
+          const targetId = document.getElementById('forward-target-select').value;
+          const text = document.getElementById('forward-text-input').value;
+          if (!targetId || !text.trim()) return;
+
+          const sent = this.sendCmd({
+            type: 'forward',
+            from: this.activeConvId,
+            to: targetId,
+            text: text
+          });
+          if (!sent) return;
+
+          this.closeForwardModal();
+          const toast = document.getElementById('toast');
+          toast.style.display = 'block';
+          setTimeout(() => { toast.style.display = 'none'; }, 2000);
+        }
+
+        render() {
+          if (this.activeConvId) {
+            this.renderStreamView();
+          } else {
+            this.renderListView();
+          }
+        }
+
+        renderListView() {
+          const awaiting = this.conversations.filter(c => c.status === 'awaiting-human');
+          const others = this.conversations.filter(c => c.status !== 'awaiting-human');
+
+          let html = '<div class="view-list">';
+
+          if (awaiting.length > 0) {
+            html += `<div class="awaiting-section">
+              <div class="section-title">${t('awaitingSection')} (${awaiting.length})</div>`;
+            awaiting.forEach(c => {
+              html += `<div class="conv-card awaiting" onclick="app.selectConv('${c.id}')">
+                <div class="conv-header">
+                  <div class="conv-title">${this.escapeHtml(c.title)} <span class="conv-id">${c.id}</span></div>
+                  <span class="badge-awaiting">ACTION NEEDED</span>
+                </div>
+                <div class="conv-meta">
+                  <span>Kind: ${c.kind || 'unknown'}</span>
+                  <span>Session: ${c.session || ''}</span>
+                </div>
+                ${c.preview ? `<div class="conv-preview">${this.escapeHtml(c.preview)}</div>` : ''}
+              </div>`;
+            });
+            html += '</div>';
+          }
+
+          html += `<div>
+            <div class="section-title">${t('allConversations')} (${this.conversations.length})</div>`;
+          if (this.conversations.length === 0) {
+            html += `<div style="font-size:12px; color:#64748b; text-align:center; padding: 24px;">${t('noAgents')}</div>`;
+          } else {
+            others.forEach(c => {
+              html += `<div class="conv-card" onclick="app.selectConv('${c.id}')">
+                <div class="conv-header">
+                  <div class="conv-title">${this.escapeHtml(c.title)} <span class="conv-id">${c.id}</span></div>
+                  <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:#1e293b; color:#94a3b8;">${c.status}</span>
+                </div>
+                <div class="conv-meta">
+                  <span>Kind: ${c.kind || 'unknown'}</span>
+                  <span>Session: ${c.session || ''}</span>
+                </div>
+              </div>`;
+            });
+          }
+          html += '</div></div>';
+
+          this.mainEl.innerHTML = html;
+        }
+
+        renderStreamView() {
+          const conv = this.conversations.find(c => c.id === this.activeConvId);
+          const title = conv ? conv.title : this.activeConvId;
+
+          let html = `<div class="view-stream">
+            <div class="stream-bar">
+              <button class="back-btn" onclick="app.backToList()">${t('back')}</button>
+              <div class="stream-title">${this.escapeHtml(title)} <span style="color:#38bdf8;">(${this.activeConvId})</span></div>
+              <button class="forward-btn" onclick="app.openForwardModal()">${t('forward')}</button>
+            </div>
+            <div id="turns-list" class="turns-list"></div>
+            <div class="controls-bar">`;
+
+          ALLOWED_KEYS.forEach(k => {
+            html += `<button class="key-btn" onclick="app.sendKey('${k.key}')">${k.label}</button>`;
+          });
+          html += `<button class="key-btn" onclick="app.sendSay('y')">Y</button>`;
+          html += `<button class="key-btn" onclick="app.sendSay('n')">N</button>`;
+
+          html += `</div>
+            <div class="input-bar">
+              <input id="say-input" type="text" class="input-field" placeholder="${t('placeholder')}" enterkeyhint="send" autocomplete="off" autocapitalize="off" onkeydown="if(event.key==='Enter') app.sendSay()">
+              <button class="send-btn" onclick="app.sendSay()">${t('send')}</button>
+            </div>
+          </div>`;
+
+          this.mainEl.innerHTML = html;
+          this.renderStreamTurns();
+          const input = document.getElementById('say-input');
+          if (input) input.addEventListener('focus', function() {
+            setTimeout(function() {
+              updateViewportHeight();
+              try { input.scrollIntoView({ block: 'nearest' }); }
+              catch (e) { input.scrollIntoView(false); }
+            }, 50);
+          });
+        }
+
+        renderStreamTurns() {
+          const listEl = document.getElementById('turns-list');
+          if (!listEl) return;
+
+          const currentTurns = this.turns[this.activeConvId] || [];
+          if (currentTurns.length === 0) {
+            listEl.innerHTML = `<div style="color:#64748b; text-align:center; margin-auto:auto; font-size:12px;">${t('noTurns')}</div>`;
+            return;
+          }
+
+          let html = '';
+          currentTurns.forEach(t => {
+            const role = t.role || 'agent';
+            html += `<div class="turn-bubble ${role}">
+              <div class="turn-role">${role.toUpperCase()}</div>
+              <div class="turn-content">${this.escapeHtml(t.text || t.content || '')}</div>
+            </div>`;
+          });
+          listEl.innerHTML = html;
+          listEl.scrollTop = listEl.scrollHeight;
+        }
+
+        escapeHtml(str) {
+          if (!str) return '';
+          return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+      }
+
+      function updateViewportHeight() {
+        const viewport = window.visualViewport;
+        const height = viewport ? viewport.height : window.innerHeight;
+        if (height) document.documentElement.style.setProperty('--app-height', Math.round(height) + 'px');
+      }
+      updateViewportHeight();
+      window.addEventListener('resize', updateViewportHeight);
+      window.addEventListener('orientationchange', updateViewportHeight);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateViewportHeight);
+        window.visualViewport.addEventListener('scroll', updateViewportHeight);
+      }
+
+      window.app = new App();
+    })();
+  </script>
+</body>
+</html>

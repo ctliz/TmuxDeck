@@ -46,7 +46,7 @@ pub fn run() {
                 use tauri::Manager;
 
                 // v1.14：启动桥接引擎（WebSocket 传输 + intercom 接入 + 对话表维护）
-                let bridge_state = crate::bridge_state::spawn_bridge();
+                let bridge_state = crate::bridge_state::spawn_bridge(app.handle().clone());
                 app.manage(bridge_state);
 
                 let handle = app.handle().clone();
@@ -69,9 +69,19 @@ pub fn run() {
                                     "ghostty".to_string()
                                 };
                                 let _ = open_session(session_name.to_string(), term);
+                            } else if event_id.starts_with("addpane-agent:") {
+                                let mut parts = event_id.splitn(3, ':');
+                                if let (Some("addpane-agent"), Some(session_name), Some(agent_id)) =
+                                    (parts.next(), parts.next(), parts.next())
+                                {
+                                    let _ = add_pane(
+                                        session_name.to_string(),
+                                        Some(agent_id.to_string()),
+                                    );
+                                }
                             } else if event_id.starts_with("addpane:") {
                                 let session_name = &event_id[8..];
-                                let _ = add_pane(session_name.to_string());
+                                let _ = add_pane(session_name.to_string(), None);
                             } else if event_id == "new-workspace" || event_id == "show-main" {
                                 if let Some(window) = app.get_webview_window("main") {
                                     let _ = window.show();

@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { Search, QrCode } from "lucide-react";
 import { t } from "../i18n";
 
 interface SearchHeaderProps {
@@ -6,6 +6,7 @@ interface SearchHeaderProps {
   onSearchChange: (value: string) => void;
   totalSessions: number;
   runningSessions: number;
+  onOpenMobilePairing?: () => void;
 }
 
 export function SearchHeader({
@@ -13,10 +14,11 @@ export function SearchHeader({
   onSearchChange,
   totalSessions,
   runningSessions,
+  onOpenMobilePairing,
 }: SearchHeaderProps) {
   return (
-    <div className="flex items-center justify-center pt-6 pb-2 px-6 shrink-0">
-      <div className="relative group w-full max-w-xs transition-all duration-300 focus-within:max-w-sm">
+    <div className="flex items-center justify-between pt-6 pb-2 px-6 shrink-0 max-w-7xl mx-auto w-full">
+      <div className="flex-1 max-w-xs transition-all duration-300 focus-within:max-w-sm relative group">
         <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-white/40 group-focus-within:text-cyan-400 transition" />
         <input
           type="text"
@@ -30,6 +32,17 @@ export function SearchHeader({
           })}
         />
       </div>
+
+      {onOpenMobilePairing && (
+        <button
+          onClick={onOpenMobilePairing}
+          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-cyan-600/20 border border-cyan-500/40 hover:bg-cyan-600/30 text-cyan-300 rounded-full transition shadow-sm ml-3"
+          title={t("mobile.openPairing")}
+        >
+          <QrCode className="w-3.5 h-3.5" />
+          <span>{t("mobile.openPairing")}</span>
+        </button>
+      )}
     </div>
   );
 }

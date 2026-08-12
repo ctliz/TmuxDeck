@@ -1,5 +1,6 @@
 use crate::commands::get_tmux_sessions;
 use crate::config::load_config;
+use crate::registry::detect_environment;
 
 pub fn is_zh_locale() -> bool {
     sys_locale::get_locale()
@@ -18,9 +19,65 @@ pub fn tr(key: &str) -> String {
         "Quit TmuxDeck" => "退出 TmuxDeck".to_string(),
         "Open ({})" => "打开 ({})".to_string(),
         "Add Pane" => "新增分屏".to_string(),
+        "Add Pane with Agent" => "使用 Agent 新增分屏".to_string(),
+        "{} (Recommended)" => "{}（推荐）".to_string(),
+        "agent.shell" => "纯 Shell".to_string(),
+        "agent.custom" => "自定义 Agent".to_string(),
         "View All ({} total)..." => "查看全部（共 {} 个）...".to_string(),
         _ => key.to_string(),
     }
+}
+
+fn add_pane_agent_menu_id(workspace: &str, agent_id: &str) -> String {
+    format!("addpane-agent:{}:{}", workspace, agent_id)
+}
+
+fn agent_display_name(name: &str) -> String {
+    match name {
+        "agent.shell" => {
+            if is_zh_locale() { "纯 Shell".to_string() } else { "Plain Shell".to_string() }
+        }
+        "agent.custom" => {
+            if is_zh_locale() { "自定义 Agent".to_string() } else { "Custom Agent".to_string() }
+        }
+        _ => name.to_string(),
+    }
+}
+
+fn resolve_pane_agent_id(
+    pane: &crate::tmux::TmuxPane,
+    agents: &[crate::registry::ToolInfo],
+) -> Option<String> {
+    if let Some(declared) = pane.agent_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        return (declared != "shell").then(|| declared.to_string());
+    }
+    agents.iter().find_map(|agent| {
+        (agent.id != "shell"
+            && (pane.command.contains(&agent.id)
+                || (!agent.path.is_empty() && pane.command.contains(&agent.path))))
+        .then(|| agent.id.clone())
+    })
+}
+
+fn dominant_agent_id(
+    panes: &[crate::tmux::TmuxPane],
+    agents: &[crate::registry::ToolInfo],
+) -> Option<String> {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for pane in panes {
+        let Some(agent_id) = resolve_pane_agent_id(pane, agents) else {
+            continue;
+        };
+        if let Some((_, count)) = counts.iter_mut().find(|(id, _)| id == &agent_id) {
+            *count += 1;
+        } else {
+            counts.push((agent_id, 1));
+        }
+    }
+    counts
+        .into_iter()
+        .reduce(|best, item| if item.1 > best.1 { item } else { best })
+        .map(|(id, _)| id)
 }
 
 pub fn build_tray_menu<R: tauri::Runtime>(
@@ -75,11 +132,29 @@ pub fn build_tray_menu<R: tauri::Runtime>(
         tr("Open ({})").replace("{}", &default_terminal),
     )
     .build(app)?;
-    let active_add_pane = MenuItemBuilder::with_id(format!("addpane:{}", primary.name), tr("Add Pane")).build(app)?;
+    let environment = detect_environment();
+    let recommended = dominant_agent_id(&primary.panes, &environment.agents);
+    let mut add_pane_menu = SubmenuBuilder::new(app, tr("Add Pane with Agent"));
+    for agent in &environment.agents {
+        let display_name = agent_display_name(&agent.name);
+        let title = if recommended.as_deref() == Some(agent.id.as_str()) {
+            tr("{} (Recommended)").replace("{}", &display_name)
+        } else {
+            display_name
+        };
+        add_pane_menu = add_pane_menu.item(
+            &MenuItemBuilder::with_id(
+                add_pane_agent_menu_id(&primary.name, &agent.id),
+                title,
+            )
+            .build(app)?,
+        );
+    }
+    let add_pane_menu = add_pane_menu.build()?;
 
     let active_submenu = SubmenuBuilder::new(app, active_header_title)
         .item(&active_open)
-        .item(&active_add_pane)
+        .item(&add_pane_menu)
         .build()?;
 
     let mut menu = menu.item(&active_submenu).separator();
@@ -111,4 +186,53 @@ pub fn build_tray_menu<R: tauri::Runtime>(
         .item(&quit_item);
 
     Ok(menu.build()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(agent_id: Option<&str>, command: &str) -> crate::tmux::TmuxPane {
+        crate::tmux::TmuxPane {
+            id: "%1".into(),
+            command: command.into(),
+            agent_id: agent_id.map(String::from),
+            active: false,
+            session_target: "workspace".into(),
+            slot: None,
+            attached: false,
+        }
+    }
+
+    fn agents() -> Vec<crate::registry::ToolInfo> {
+        vec![
+            crate::registry::ToolInfo { id: "pi".into(), name: "Pi".into(), path: "/bin/pi".into(), icon_path: None },
+            crate::registry::ToolInfo { id: "claude".into(), name: "Claude Code".into(), path: "/bin/claude".into(), icon_path: None },
+            crate::registry::ToolInfo { id: "shell".into(), name: "agent.shell".into(), path: "/bin/zsh".into(), icon_path: None },
+        ]
+    }
+
+    #[test]
+    fn dominant_agent_prefers_metadata_and_first_seen_tie() {
+        let panes = vec![
+            pane(Some("claude"), "0.10.0"),
+            pane(Some("pi"), "bash"),
+            pane(None, "/bin/pi"),
+            pane(Some("shell"), "zsh"),
+        ];
+        assert_eq!(dominant_agent_id(&panes, &agents()), Some("pi".into()));
+        assert_eq!(
+            dominant_agent_id(&[pane(Some("claude"), "x"), pane(Some("pi"), "x")], &agents()),
+            Some("claude".into())
+        );
+        assert_eq!(dominant_agent_id(&[pane(Some("shell"), "zsh")], &agents()), None);
+    }
+
+    #[test]
+    fn add_pane_agent_menu_id_encodes_workspace_and_agent() {
+        assert_eq!(
+            add_pane_agent_menu_id("project-alpha", "claude"),
+            "addpane-agent:project-alpha:claude"
+        );
+    }
 }

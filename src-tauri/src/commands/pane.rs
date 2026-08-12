@@ -3,7 +3,9 @@ use crate::commands::native::{
     create_native_slot, kill_native_slot, list_native_slots, rebuild_native_workspace,
     swap_native_slots as swap_native_slot_targets, visible_native_slot_numbers,
 };
+use crate::commands::session::{panel_agent_command, resolve_agent_command};
 use crate::commands::utils::isolated_agent_command;
+use crate::registry::detect_environment;
 use crate::tmux::{
     check_tmux_installed, get_session_first_pane_dir, is_no_server_err, run_tmux,
     sanitize_session_name, strip_ansi, validate_pane_id,
@@ -45,7 +47,7 @@ pub fn swap_native_slots(session_target_a: String, session_target_b: String) -> 
 }
 
 #[tauri::command]
-pub fn add_pane(session_name: String) -> Result<(), String> {
+pub fn add_pane(session_name: String, agent_id: Option<String>) -> Result<(), String> {
     let sanitized = sanitize_session_name(&session_name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
@@ -57,7 +59,8 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
         .map(|slot| slot.target.as_str())
         .unwrap_or(sanitized.as_str());
     let work_dir = get_session_first_pane_dir(work_dir_target).unwrap_or_else(|| "~".to_string());
-    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    let agent_id = agent_id.unwrap_or_else(|| "shell".to_string());
+    let agent_cmd = resolve_agent_command(&agent_id, &detect_environment().agents)?;
 
     if !native_slots.is_empty() {
         // 先记录当前可见 slots；关闭的 surface 不在目标集，tmux slot session 继续后台运行。
@@ -68,7 +71,13 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
             .max()
             .unwrap_or(0)
             + 1;
-        let created = create_native_slot(&sanitized, next_slot, &work_dir, &shell_path)?;
+        let created = create_native_slot(
+            &sanitized,
+            next_slot,
+            &work_dir,
+            &agent_cmd,
+            &agent_id,
+        )?;
         target_numbers.push(next_slot);
         target_numbers.sort_unstable();
         target_numbers.dedup();
@@ -95,8 +104,11 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
         split_args.push("-c");
         split_args.push(&work_dir);
     }
-    let isolated_shell = isolated_agent_command(&shell_path);
-    split_args.push(&isolated_shell);
+    split_args.extend(["-P", "-F", "#{pane_id}"]);
+    let pane_number = crate::tmux::get_session_panes(&sanitized, false, None).len() + 1;
+    let pane_agent_cmd = panel_agent_command(&agent_id, &agent_cmd, &sanitized, pane_number);
+    let isolated_agent = isolated_agent_command(&pane_agent_cmd);
+    split_args.push(&isolated_agent);
 
     let output = run_tmux(&split_args).map_err(|e| format!("ERR_ADD_PANE_FAILED|{}", e))?;
     if !output.status.success() {
@@ -107,6 +119,20 @@ pub fn add_pane(session_name: String) -> Result<(), String> {
         return Err(format!("ERR_ADD_PANE_OUTPUT_ERR|{}", err_msg));
     }
 
+    if let Some(pane_id) = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .filter(|value| value.starts_with('%'))
+    {
+        let _ = run_tmux(&[
+            "set-option",
+            "-p",
+            "-t",
+            pane_id,
+            "@tmuxdeck-agent",
+            &agent_id,
+        ]);
+    }
     let _ = run_tmux(&["select-layout", "-t", &sanitized, "tiled"]);
     Ok(())
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use crate::config::load_config;
 use crate::tmux::check_tmux_installed;
 
@@ -16,6 +18,19 @@ pub struct Environment {
     pub tmux: Option<String>,
     pub terminals: Vec<ToolInfo>,
     pub agents: Vec<ToolInfo>,
+}
+
+const ENVIRONMENT_CACHE_TTL: Duration = Duration::from_secs(60);
+static ENVIRONMENT_CACHE: OnceLock<Mutex<Option<(Instant, Environment)>>> = OnceLock::new();
+
+fn environment_cache() -> &'static Mutex<Option<(Instant, Environment)>> {
+    ENVIRONMENT_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+pub fn invalidate_environment_cache() {
+    if let Ok(mut cache) = environment_cache().lock() {
+        *cache = None;
+    }
 }
 
 pub fn find_app_icon(app_path_str: &str) -> Option<String> {
@@ -123,8 +138,83 @@ pub fn find_agent_binary(bin: &str) -> Option<String> {
     None
 }
 
+fn cci_supports_panel_mode(path: &str) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return false;
+        };
+        if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+            return false;
+        }
+    }
+
+    // cci is a script entry point. Inspecting its installed source avoids
+    // launching the worker/daemon during UI environment discovery.
+    #[cfg(target_os = "windows")]
+    let help = {
+        let output = Command::new("wsl.exe")
+            .args(["--", "cat", path])
+            .output();
+        match output {
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).into_owned(),
+            _ => return false,
+        }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let help = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(_) => return false,
+    };
+    ["--tui", "--id", "--name"]
+        .iter()
+        .all(|flag| help.contains(flag))
+}
+
+fn select_claude_entry<F>(
+    cci: Option<String>,
+    claude: Option<String>,
+    supports_panel_mode: F,
+) -> Option<ToolInfo>
+where
+    F: FnOnce(&str) -> bool,
+{
+    if let Some(path) = cci {
+        if supports_panel_mode(&path) {
+            return Some(ToolInfo {
+                id: "claude".to_string(),
+                name: "Claude Code · Intercom (cci)".to_string(),
+                path,
+                icon_path: None,
+            });
+        }
+    }
+    claude.map(|path| ToolInfo {
+        id: "claude".to_string(),
+        name: "Claude Code · Standard".to_string(),
+        path,
+        icon_path: None,
+    })
+}
+
 #[tauri::command]
 pub fn detect_environment() -> Environment {
+    if let Ok(cache) = environment_cache().lock() {
+        if let Some((cached_at, environment)) = cache.as_ref() {
+            if cached_at.elapsed() < ENVIRONMENT_CACHE_TTL {
+                return environment.clone();
+            }
+        }
+    }
+    let environment = detect_environment_uncached();
+    if let Ok(mut cache) = environment_cache().lock() {
+        *cache = Some((Instant::now(), environment.clone()));
+    }
+    environment
+}
+
+fn detect_environment_uncached() -> Environment {
     let tmux = check_tmux_installed();
 
     let mut installed_terminals = Vec::new();
@@ -192,7 +282,6 @@ pub fn detect_environment() -> Environment {
     // Agent Registry
     let known_agents = vec![
         ("pi", "Pi", "pi"),
-        ("claude", "Claude Code", "claude"),
         ("codex", "Codex", "codex"),
         ("opencode", "OpenCode", "opencode"),
         ("gemini", "Gemini CLI", "gemini"),
@@ -200,6 +289,16 @@ pub fn detect_environment() -> Environment {
     ];
 
     let mut installed_agents = Vec::new();
+    // Only select cci after runtime verification that it is executable and
+    // supports the identity flags used by the panel. Otherwise fall back to
+    // the independently detected ordinary Claude binary without an error.
+    if let Some(agent) = select_claude_entry(
+        find_agent_binary("cci"),
+        find_agent_binary("claude"),
+        cci_supports_panel_mode,
+    ) {
+        installed_agents.push(agent);
+    }
     for (id, name, bin) in known_agents {
         if let Some(p) = find_agent_binary(bin) {
             installed_agents.push(ToolInfo {
@@ -237,5 +336,78 @@ pub fn detect_environment() -> Environment {
         tmux,
         terminals: installed_terminals,
         agents: installed_agents,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn environment_cache_returns_recent_value() {
+        let sample = Environment {
+            tmux: Some("tmux".into()),
+            terminals: Vec::new(),
+            agents: vec![ToolInfo {
+                id: "shell".into(),
+                name: "Shell".into(),
+                path: "/bin/sh".into(),
+                icon_path: None,
+            }],
+        };
+        *environment_cache().lock().unwrap() = Some((Instant::now(), sample.clone()));
+        let cached = detect_environment();
+        assert_eq!(cached.tmux, sample.tmux);
+        assert_eq!(cached.agents[0].id, "shell");
+        *environment_cache().lock().unwrap() = None;
+    }
+
+    #[test]
+    fn environment_cache_can_be_invalidated_after_config_save() {
+        let stale = Environment {
+            tmux: None,
+            terminals: Vec::new(),
+            agents: vec![ToolInfo {
+                id: "shell".into(),
+                name: "agent.shell".into(),
+                path: "/bin/sh".into(),
+                icon_path: None,
+            }],
+        };
+        *environment_cache().lock().unwrap() = Some((Instant::now(), stale));
+        invalidate_environment_cache();
+        assert!(environment_cache().lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn claude_entry_uses_verified_cci_when_installed() {
+        let entry = select_claude_entry(
+            Some("/opt/bin/cci".to_string()),
+            Some("/opt/bin/claude".to_string()),
+            |path| path == "/opt/bin/cci",
+        )
+        .unwrap();
+        assert_eq!(entry.path, "/opt/bin/cci");
+        assert!(entry.name.contains("Intercom (cci)"));
+    }
+
+    #[test]
+    fn claude_entry_falls_back_when_cci_is_missing_or_incompatible() {
+        let missing = select_claude_entry(
+            None,
+            Some("/opt/bin/claude".to_string()),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        assert_eq!(missing.path, "/opt/bin/claude");
+
+        let incompatible = select_claude_entry(
+            Some("/old/bin/cci".to_string()),
+            Some("/opt/bin/claude".to_string()),
+            |_| false,
+        )
+        .unwrap();
+        assert_eq!(incompatible.path, "/opt/bin/claude");
+        assert!(incompatible.name.contains("Standard"));
     }
 }

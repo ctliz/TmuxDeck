@@ -5,9 +5,9 @@
 
 ## Current status
 
-- **Latest release:** v1.8.0 (2026-08-11) — conversation-bridge backend and secure WebSocket transport, pane/card drag reordering, new icon system, targeted-communication fixes
+- **Latest release:** v1.10.0 — trusted-LAN mobile control, per-pane Agent selection, Claude Intercom integration, and performance improvements
 - **Trunk:** direct pushes to main, CI (macOS + Windows build + frontend/backend tests) all green
-- **Test suite:** 43 backend tests passing (plus 1 on-device test ignored) + 3 frontend tests + CI test step
+- **Test suite:** 93 backend tests (92 passing + 1 on-device ignored) + 25 frontend tests; mobile LAN real-device acceptance pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 
 ## Planning queue
@@ -30,11 +30,14 @@ Progress:
 - [x] `cargo test` passes (27 items, 2026-08-10)
 - [x] `TranscriptSource`: structured session-log reading for Pi / Claude Code, `capture-pane` fallback
 - [x] WebSocket transport: token auth, subscription filtering, heartbeat and connection-level targeted replies
-- [ ] Full mobile UI and push entry point
+- [x] Trusted-LAN single-port HTTP+WS code: dynamic LAN pairing URLs, token/Host/source validation, embedded mobile SPA entry, client-count events, command audit
+- [x] Mobile SPA code (single embedded HTML entry)
+- [ ] Physical-phone LAN acceptance: pairing, reconnect, multi-conversation, ask/reply, forward, firewall behavior (automated coverage complete; final real-device sign-off pending)
+- [ ] External push entry point (works while the browser is suspended/closed)
 
-**Unresolved:** the full mobile UI is not yet delivered; the secure WebSocket transport and conversation protocol are in place.
+**Security boundary:** LAN mode is plaintext and intended only for a trusted local network. Token authentication remains mandatory; VPN/TLS is a reserved extension.
 
-**External dependency:** this machine runs the original `nicobailon/pi-intercom` (pi-only); Claude Code / Codex are still islands. Going cross-harness requires an overall migration to the `dataforxyz` family, and it **must be all-or-nothing** (mixing old and new splits the broker). This is a user decision item.
+**External dependency:** cross-harness operation uses the `@dataforxyz/agent-intercom-*` adapter family. Claude `cci --tui` automatic inbox injection currently depends on the upstream packaging fix tracked in [agent-intercom-claude#6](https://github.com/dataforxyz/agent-intercom-claude/issues/6); TmuxDeck falls back to ordinary Claude when a compatible `cci` is unavailable.
 
 ### P1 · Windows on-device verification (deferred, schedule TBD)
 
@@ -48,7 +51,6 @@ Progress:
 
 | Candidate | Value | Effort estimate | Notes |
 |---|---|---|---|
-| Per-pane agent mixing | run different agent orchestrations in a single workspace | medium | v1.1 PRD explicitly ruled this out; demand not yet validated |
 | Workspace templates / layout presets | reuse common layouts in one click | low-medium | same |
 | macOS signing + auto-update | remove Gatekeeper warning, users auto-upgrade | medium-high | needs Apple developer account + tauri-updater |
 | Split App.tsx | pay down tech debt, refactor before features grow | medium | single 987-line file; `lib.rs` already split on 2026-08-10 |

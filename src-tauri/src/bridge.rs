@@ -214,7 +214,11 @@ impl ConversationRegistry {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         for p in panes {
             seen.insert(p.id.clone());
-            let kind = AgentKind::from_command(&p.command);
+            let kind = p
+                .agent_id
+                .as_deref()
+                .map(AgentKind::from_command)
+                .unwrap_or_else(|| AgentKind::from_command(&p.command));
             let entry = self.conversations.entry(p.id.clone()).or_insert_with(|| Conversation {
                 id: p.id.clone(),
                 session: p.session.clone(),
@@ -286,6 +290,20 @@ impl ConversationRegistry {
 
     pub fn get(&self, pane_id: &str) -> Option<&Conversation> {
         self.conversations.get(pane_id)
+    }
+
+    pub fn mark_pane_awaiting_human(&mut self, pane_id: &str) {
+        if let Some(conv) = self.conversations.get_mut(pane_id) {
+            conv.status = ConversationStatus::AwaitingHuman;
+        }
+    }
+
+    pub fn clear_pane_awaiting_human(&mut self, pane_id: &str) {
+        if let Some(conv) = self.conversations.get_mut(pane_id) {
+            if conv.status == ConversationStatus::AwaitingHuman {
+                conv.status = ConversationStatus::Idle;
+            }
+        }
     }
 
     pub fn by_intercom_id(&self, session_id: &str) -> Option<&Conversation> {
@@ -510,6 +528,7 @@ mod tests {
         PaneDetail {
             id: id.to_string(),
             session: session.to_string(),
+            agent_id: None,
             command: cmd.to_string(),
             cwd: "/tmp/proj".to_string(),
             active: true,
