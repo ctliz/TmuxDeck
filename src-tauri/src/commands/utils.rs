@@ -137,18 +137,26 @@ pub(crate) fn build_augmented_path_for_command(command: &str) -> String {
     base_path
 }
 
-pub(crate) fn isolated_agent_command(command: &str) -> String {
+pub(crate) fn isolated_agent_command(command: &str, return_to_shell: bool) -> String {
     let unset = AGENT_IDENTITY_ENV_VARS
         .iter()
         .map(|name| format!("-u {}", name))
         .collect::<Vec<_>>()
         .join(" ");
     let path = build_augmented_path_for_command(command);
+    let pane_command = if return_to_shell {
+        format!(
+            "{}; exit_code=$?; if [ \"$exit_code\" -eq 0 ] || [ \"$exit_code\" -eq 130 ]; then tmux set-option -p -t \"$TMUX_PANE\" @tmuxdeck-agent shell 2>/dev/null || true; exec \"${{SHELL:-/bin/sh}}\"; else exit \"$exit_code\"; fi",
+            command
+        )
+    } else {
+        command.to_string()
+    };
     format!(
         "env {} PATH={} /bin/sh -c {}",
         unset,
         shell_single_quote(&path),
-        shell_single_quote(command)
+        shell_single_quote(&pane_command)
     )
 }
 
@@ -216,7 +224,7 @@ mod tests {
 
     #[test]
     fn isolated_command_clears_known_identity_but_keeps_broker_dir() {
-        let command = isolated_agent_command("pi --model test");
+        let command = isolated_agent_command("pi --model test", false);
         assert!(command.contains("env -u PI_SESSION_ID"));
         assert!(command.contains("-u PI_INTERCOM_SESSION_ID"));
         assert!(command.contains("PATH="));
@@ -244,16 +252,27 @@ mod tests {
     #[test]
     fn test_isolated_command_prepends_absolute_nvm_agent_parent_bin_dir() {
         let nvm_cmd = "/home/dev/.nvm/versions/node/v24.14.0/bin/pi --name test-session";
-        let command = isolated_agent_command(nvm_cmd);
+        let command = isolated_agent_command(nvm_cmd, false);
         assert!(command.contains("PATH='/home/dev/.nvm/versions/node/v24.14.0/bin:"));
         assert!(command.contains("/bin/sh -c '/home/dev/.nvm/versions/node/v24.14.0/bin/pi --name test-session'"));
     }
 
     #[test]
     fn isolated_command_preserves_custom_shell_command() {
-        let command = isolated_agent_command("custom-agent --name 'A B' && echo done");
+        let command = isolated_agent_command("custom-agent --name 'A B' && echo done", false);
         assert!(command.ends_with(
             "/bin/sh -c 'custom-agent --name '\\''A B'\\'' && echo done'"
         ));
+    }
+
+    #[test]
+    fn agent_command_returns_to_shell_after_normal_exit_or_ctrl_c() {
+        let command = isolated_agent_command("pi", true);
+        assert!(command.contains("exit_code=$?"));
+        assert!(command.contains(r#"[ "$exit_code" -eq 0 ]"#));
+        assert!(command.contains(r#"[ "$exit_code" -eq 130 ]"#));
+        assert!(command.contains("@tmuxdeck-agent shell"));
+        assert!(command.contains(r#"exec "${SHELL:-/bin/sh}""#));
+        assert!(command.contains(r#"else exit "$exit_code""#));
     }
 }

@@ -107,7 +107,7 @@ pub fn add_pane(session_name: String, agent_id: Option<String>) -> Result<(), St
     split_args.extend(["-P", "-F", "#{pane_id}"]);
     let pane_number = crate::tmux::get_session_panes(&sanitized, false, None).len() + 1;
     let pane_agent_cmd = panel_agent_command(&agent_id, &agent_cmd, &sanitized, pane_number);
-    let isolated_agent = isolated_agent_command(&pane_agent_cmd);
+    let isolated_agent = isolated_agent_command(&pane_agent_cmd, agent_id != "shell");
     split_args.push(&isolated_agent);
 
     let output = run_tmux(&split_args).map_err(|e| format!("ERR_ADD_PANE_FAILED|{}", e))?;

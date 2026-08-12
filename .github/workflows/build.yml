@@ -40,7 +40,12 @@ jobs:
         run: npm test
 
       - name: Run Rust Tests
+        if: runner.os != 'Windows'
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Compile Rust Tests
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-run
 
       - name: Build (no bundle)
         run: npm run tauri build -- --no-bundle

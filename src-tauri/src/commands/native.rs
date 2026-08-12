@@ -174,7 +174,7 @@ fn native_slot_command_args(
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
     }
-    args.push(isolated_agent_command(&agent_cmd));
+    args.push(isolated_agent_command(&agent_cmd, agent_id != "shell"));
     args.extend([
         ";".to_string(),
         "set-option".to_string(),

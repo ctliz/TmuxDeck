@@ -376,7 +376,10 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
     }
-    new_args.push(isolated_agent_command(&first_agent_cmd));
+    new_args.push(isolated_agent_command(
+        &first_agent_cmd,
+        pane_agent_ids[0] != "shell",
+    ));
     append_identity_env_clears(&mut new_args, &sanitized_name);
     new_args.extend([
         ";".to_string(),
@@ -439,7 +442,8 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
                 &sanitized_name,
                 pane,
             );
-        let isolated_agent = isolated_agent_command(&pane_agent_cmd);
+        let isolated_agent =
+            isolated_agent_command(&pane_agent_cmd, pane_agent_ids[pane - 1] != "shell");
         split_args.push(&isolated_agent);
 
         if let Ok(created) = run_tmux(&split_args) {
