@@ -5,9 +5,8 @@
 
 ## Current status
 
-- **Latest release:** v1.11.1 — fixes Claude Code and OpenCode detection for native installer paths
-- **Release candidate:** v1.12.0 — Managed Claude fallback, atomic batch panes, and workspace-aware mobile conversations; not released yet
-- **Trunk:** direct pushes to main; the v1.12.0 release-candidate tree passes local macOS frontend/backend verification, while Windows target verification remains pending
+- **Latest release:** v1.12.0 (2026-08-13) — Managed Claude fallback, atomic batch panes, and workspace-aware mobile conversations
+- **Trunk:** direct pushes to main; v1.12.0 passes local macOS frontend/backend verification and macOS/Windows CI builds, while Windows on-device verification remains pending
 - **Test suite:** 124 backend tests passing + 2 environment/on-device ignored, and 40 frontend tests passing; physical-phone LAN acceptance remains pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 

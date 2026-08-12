@@ -8,7 +8,9 @@ TmuxDeck 是专为多 AI Coding Agent 打造的并行工作区控制台。每个
 
 基于 [Tauri](https://tauri.app/) 构建。macOS 为首要支持平台；Windows 支持通过 WSL 运行。
 
-![TmuxDeck 仪表盘界面](docs/assets/dashboard-zh.png)
+![包含三个多 Agent 工作区的 TmuxDeck 主面板](docs/images/v1.12/desktop-hero-zh.webp)
+
+<p align="center"><em>一屏掌握所有工作区，立即找到正在等待你的 Agent。</em></p>
 
 ---
 
@@ -22,6 +24,39 @@ TmuxDeck 是专为多 AI Coding Agent 打造的并行工作区控制台。每个
 - **常驻系统菜单栏。** 关闭主窗口后继续后台运行 — 状态监测、预览与控制随时一键拉起。
 - **Agent 跨平台通信。** 自动注册至 Agent Intercom 消息总线，实现跨 Harness 发现、实时状态同步与定向消息交互。
 - **macOS 优先，WSL 随时就绪。** 基于 Tauri 研发，Windows 环境支持在 WSL 中原生运行。
+
+---
+
+## 从工作区到回复
+
+### 组织工作区
+
+![新建工作区与批量新增分屏控件](docs/images/v1.12/desktop-workspace-actions-zh.webp)
+
+按需创建工作区，并可一次新增 **1、2 或 4 个分屏**。所选 Agent 会应用到本批次的全部新分屏；若创建失败，本批次会自动回退。
+
+<details>
+<summary><strong>更多桌面界面：Claude 通信与 Tray</strong></summary>
+
+![Claude 通信方式菜单与 TmuxDeck Tray](docs/images/v1.12/desktop-claude-tray-zh.webp)
+
+在 macOS 上，Claude 的托管通信健康时不会额外占用界面空间；只有主动打开菜单时，才显示标准版与通信增强之间的切换。关闭主窗口后，Tray 仍让工作区状态与快捷操作保持一键可达。
+
+*Tray 使用生产 UI 与隔离演示数据展示；详见[截图来源说明](docs/images/v1.12/SOURCE-MANIFEST.md)。*
+
+</details>
+
+### 把待处理队列带在身边
+
+<p align="center">
+  <img src="docs/images/v1.12/mobile-workspaces-zh.webp" width="390" alt="按工作区分组的 TmuxDeck 移动端对话">
+</p>
+
+移动端按工作区组织对话，并将等待你处理的工作区置顶。
+
+![移动端 Markdown 对话、待回复状态与更多控制](docs/images/v1.12/mobile-chat-zh.webp)
+
+舒适阅读 Markdown 与代码，用一个 **发送** 完成回复，终端控制统一收进 **更多**。配对使用桌面端生成的私有配对 token；移动页面仅面向**可信局域网**，浏览器关闭后不提供离线推送。
 
 ---
 
@@ -55,7 +90,7 @@ TmuxDeck 是专为多 AI Coding Agent 打造的并行工作区控制台。每个
 ```mermaid
 flowchart LR
     A["<b>感知 (See)</b><br/>哪个需要我？<br/><i>已发布</i>"]
-    B["<b>交互 (Speak)</b><br/>一行代码直接回复<br/><i>v1.12 开发中</i>"]
+    B["<b>交互 (Speak)</b><br/>一行代码直接回复<br/><i>v1.12 已发布</i>"]
     C["<b>无处不在 (Anywhere)</b><br/>离开桌面也能处理<br/><i>规划中</i>"]
     A --> B --> C
 ```
@@ -173,8 +208,6 @@ xattr -cr /Applications/TmuxDeck.app
 2. 点击 **新建工作区 (New Workspace)**。
 3. 输入名称、选择目录、Agent、分屏数和终端。
 4. 点击 **创建并启动 (Create & Start)**。
-
-![新建工作区配置](docs/assets/create-workspace-zh.png)
 
 终端打开并自动附着至新会话。关闭终端窗口不会销毁工作区 — 会话依然在后台运行，可随时重新打开。只有点击卡片上的删除按钮才会彻底销毁会话。
 
