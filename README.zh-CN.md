@@ -219,6 +219,11 @@ xattr -cr /Applications/TmuxDeck.app
 
 参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发配置与代码规范，参见 [docs/](docs/README.md) 了解架构设计、协议参考与决策记录。
 
+## 贡献者
+
+- [@ctliz](https://github.com/ctliz) — 作者与维护者
+- [Claude](https://claude.com/claude-code) — 通过 Claude Code 参与实现
+
 ## 开源协议
 
 [MIT](LICENSE)

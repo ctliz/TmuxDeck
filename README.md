@@ -223,6 +223,11 @@ Linux is not supported yet. Windows works through WSL and ships the same install
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and code conventions, and [docs/](docs/README.md) for architecture, protocol reference, and decision records.
 
+## Contributors
+
+- [@ctliz](https://github.com/ctliz) — author and maintainer
+- [Claude](https://claude.com/claude-code) — implementation via Claude Code
+
 ## License
 
 [MIT](LICENSE)
