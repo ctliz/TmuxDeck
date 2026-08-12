@@ -344,7 +344,7 @@ export function SessionCard({
                 />
                 <div
                   role="menu"
-                  className="absolute z-30 top-full left-0 mt-1 min-w-[11rem] py-1 rounded-xl bg-slate-900 border border-slate-700 shadow-xl shadow-black/40"
+                  className="absolute z-30 top-full left-0 mt-1 min-w-[11rem] py-1 rounded-xl bg-slate-900/90 backdrop-blur-xl border border-white/15 shadow-xl shadow-black/40"
                 >
                   <div className="px-2.5 py-1 text-[9px] uppercase tracking-wide text-slate-500">
                     {t("card.addPaneChoose")}
@@ -395,7 +395,7 @@ export function SessionCard({
           )}
         </div>
         <div
-          className={`grid ${gridCols} gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800/80 h-[11.5rem] overflow-y-auto`}
+          className={`grid ${gridCols} gap-2 p-2 rounded-xl bg-black/30 border border-white/10 h-[11.5rem] overflow-y-auto`}
         >
           {session.panes.map((pane, idx) => {
             const cmdName = pane.command || "shell";
@@ -440,10 +440,10 @@ export function SessionCard({
                     : isThisPaneDragOver
                     ? "border-cyan-400 bg-cyan-500/30 shadow-sm shadow-cyan-500/30 scale-[1.03]"
                     : hasContent
-                    ? "bg-slate-950/90 border-slate-700/80 text-slate-200"
+                    ? "bg-black/40 border-white/15 text-slate-200"
                     : isAgent
                     ? "bg-cyan-950/30 border-cyan-800/40 text-cyan-300"
-                    : "bg-slate-900/60 border-slate-800 text-slate-400"
+                    : "bg-black/20 border-white/10 text-slate-400"
                 }`}
               >
                 <div className="flex items-center justify-between mb-1 select-none pointer-events-none">

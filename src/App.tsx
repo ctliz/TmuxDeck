@@ -403,7 +403,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/60 text-slate-100 font-sans select-none overflow-hidden">
+    <div className="td-canvas flex flex-col h-screen text-slate-100 font-sans select-none overflow-hidden">
       <SearchHeader
         search={search}
         onSearchChange={setSearch}

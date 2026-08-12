@@ -1,10 +1,15 @@
 @import "tailwindcss";
+@import "./theme.css";
 
 @layer base {
   body {
-    @apply bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/60 text-slate-100 font-sans antialiased select-none overflow-hidden min-h-screen;
+    @apply text-slate-100 font-sans antialiased select-none overflow-hidden min-h-screen;
     margin: 0;
     padding: 0;
+  }
+  /* 底色统一走 .td-canvas（见 theme.css），与托盘面板同源。 */
+  body {
+    background-color: #020617;
   }
 }
 

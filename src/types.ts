@@ -59,6 +59,27 @@ export interface TmuxSession {
   terminal_id?: string;
 }
 
+/** Mirrors `AgentUsage` in src-tauri/src/usage.rs (serde camelCase). */
+export interface AgentUsage {
+  agentId: string;
+  displayName: string;
+  todayTokens: number;
+  tokens30d: number;
+  sessions30d: number;
+  lastActiveTs: number | null;
+  /** False when the agent's local logs aren't present — render an empty state, not a zero. */
+  available: boolean;
+}
+
+/** Mirrors `UsageSnapshot` in src-tauri/src/usage.rs. `updatedAt === 0` means the first collection is still running. */
+export interface UsageSnapshot {
+  agents: AgentUsage[];
+  totalToday: number;
+  total30d: number;
+  updatedAt: number;
+  elapsedMs: number;
+}
+
 export interface BridgePairingStatus {
   enabled: boolean;
   port: number;

@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "1.10.0"
+version = "1.11.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -18,7 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# macos-private-api 是 transparent 窗口在 macOS 上生效的前提（托盘面板需要）。
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

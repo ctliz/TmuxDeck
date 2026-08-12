@@ -16,8 +16,18 @@ export function SearchHeader({
   runningSessions,
   onOpenMobilePairing,
 }: SearchHeaderProps) {
+  const isMac = navigator.userAgent.includes("Macintosh");
+
   return (
-    <div className="flex items-center justify-between pt-6 pb-2 px-6 shrink-0 max-w-7xl mx-auto w-full">
+    // 标题栏改成 Overlay 后：红绿灯浮在 webview 左上角，所以 pl-24 给搜索框让位；
+    // 同时原生标题栏没了，窗口失去拖拽区，靠 data-tauri-drag-region 补回来
+    // （点在 input/button 上时事件目标不是本元素，不会误触发拖拽）。
+    <div
+      data-tauri-drag-region
+      className={`flex items-center justify-between pt-4 pb-2 pr-6 shrink-0 max-w-7xl mx-auto w-full ${
+        isMac ? "pl-24" : "pl-6"
+      }`}
+    >
       <div className="flex-1 max-w-xs transition-all duration-300 focus-within:max-w-sm relative group">
         <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-white/40 group-focus-within:text-cyan-400 transition" />
         <input
