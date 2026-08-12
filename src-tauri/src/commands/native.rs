@@ -642,7 +642,10 @@ fn config_script(var: &str, workspace: &str, slot: &NativeSlot, tmux: &str) -> S
 }
 
 fn native_slot_script_path(workspace: &str, slot: &str) -> String {
-    format!("/tmp/tmuxdeck-{}-slot-{}.sh", workspace, slot)
+    std::env::temp_dir()
+        .join(format!("tmuxdeck-{}-slot-{}.sh", workspace, slot))
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn title(workspace: &str, slot: &str) -> String {
@@ -906,6 +909,7 @@ mod tests {
         assert!(script.contains("set t4 to split t2 direction down"));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_config_uses_workspace_without_parsing_target() {
         let workspace = "alpha__td_slot_inside";
