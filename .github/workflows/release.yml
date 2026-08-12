@@ -190,6 +190,29 @@ jobs:
         env:
           EXPECTED_SOURCE_SHA: ${{ needs.create-release.outputs.source_sha }}
         run: |
+          function Assert-ReleaseSource([string] $stage) {
+            $head = (git rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $head -ne $env:EXPECTED_SOURCE_SHA) {
+              throw "Release source changed $stage"
+            }
+            git diff --quiet
+            if ($LASTEXITCODE -ne 0) {
+              throw "Tracked worktree changed $stage"
+            }
+            git diff --cached --quiet
+            if ($LASTEXITCODE -ne 0) {
+              throw "Tracked index changed $stage"
+            }
+            $status = @(git status --porcelain=v1 --untracked-files=normal)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not inspect source state $stage"
+            }
+            $untracked = @($status | Where-Object { $_.StartsWith('?? ') })
+            if ($untracked.Count -ne 0) {
+              throw "Non-ignored untracked source exists $stage`: $($untracked -join ', ')"
+            }
+          }
+
           $lastExit = 1
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             if ($attempt -gt 1) {
@@ -198,30 +221,38 @@ jobs:
               Start-Sleep -Seconds $delay
             }
 
-            $head = (git rev-parse HEAD).Trim()
-            if ($LASTEXITCODE -ne 0 -or $head -ne $env:EXPECTED_SOURCE_SHA) {
-              throw "Release source changed before build attempt $attempt"
-            }
-            $dirty = @(git status --porcelain=v1 --untracked-files=no)
-            if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) {
-              throw "Tracked source changed before build attempt $attempt"
-            }
-
+            Assert-ReleaseSource "before build attempt $attempt"
             Write-Host "Tauri tools cache: $env:LOCALAPPDATA\tauri"
             npm run tauri build
             $lastExit = $LASTEXITCODE
+
+            $status = @(git status --short)
+            $changed = @(git diff --name-only)
+            $staged = @(git diff --cached --name-only)
+            $trackedChanged = @(($changed + $staged) | Sort-Object -Unique)
+            if ($lastExit -ne 0) {
+              Add-Content $env:GITHUB_STEP_SUMMARY "### Windows build attempt $attempt failed"
+              Add-Content $env:GITHUB_STEP_SUMMARY '```text'
+              Add-Content $env:GITHUB_STEP_SUMMARY "git status --short:"
+              Add-Content $env:GITHUB_STEP_SUMMARY $(if ($status.Count) { $status -join "`n" } else { '(clean)' })
+              Add-Content $env:GITHUB_STEP_SUMMARY "tracked changed paths:"
+              Add-Content $env:GITHUB_STEP_SUMMARY $(if ($trackedChanged.Count) { $trackedChanged -join "`n" } else { '(none)' })
+              Add-Content $env:GITHUB_STEP_SUMMARY '```'
+              Write-Warning "Tauri build attempt $attempt failed with exit $lastExit"
+            }
+
+            if ($changed.Count -ne 0) {
+              Write-Warning "Restoring tracked worktree files changed by build attempt $attempt`: $($changed -join ', ')"
+              git restore --worktree -- .
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to restore tracked worktree after build attempt $attempt"
+              }
+            }
+            Assert-ReleaseSource "after build attempt $attempt"
+
             if ($lastExit -eq 0) {
               Write-Host "Tauri build succeeded on attempt $attempt"
               exit 0
-            }
-            Write-Warning "Tauri build attempt $attempt failed with exit $lastExit"
-            $changed = @(git diff --name-only)
-            if ($changed.Count -ne 0) {
-              Write-Warning "Restoring tracked files changed by the failed build: $($changed -join ', ')"
-              git restore --worktree -- .
-              if ($LASTEXITCODE -ne 0) {
-                throw "Failed to restore tracked source after build attempt $attempt"
-              }
             }
           }
           exit $lastExit
