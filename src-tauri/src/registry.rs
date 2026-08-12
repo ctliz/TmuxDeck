@@ -105,17 +105,23 @@ pub fn find_agent_binary(bin: &str) -> Option<String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn find_agent_binary(bin: &str) -> Option<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidate_paths = [
+fn agent_candidate_paths(home: &str, bin: &str) -> Vec<String> {
+    vec![
         format!("/opt/homebrew/bin/{}", bin),
         format!("/usr/local/bin/{}", bin),
         format!("/usr/bin/{}", bin),
         format!("{}/.cargo/bin/{}", home, bin),
-    ];
-    for p in &candidate_paths {
-        if std::path::Path::new(p).exists() {
-            return Some(p.clone());
+        format!("{}/.local/bin/{}", home, bin),
+        format!("{}/.opencode/bin/{}", home, bin),
+    ]
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn find_agent_binary(bin: &str) -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    for p in agent_candidate_paths(&home, bin) {
+        if std::path::Path::new(&p).exists() {
+            return Some(p);
         }
     }
     let nvm_dir = format!("{}/.nvm/versions/node", home);
@@ -377,6 +383,16 @@ mod tests {
         *environment_cache().lock().unwrap() = Some((Instant::now(), stale));
         invalidate_environment_cache();
         assert!(environment_cache().lock().unwrap().is_none());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn agent_candidates_include_native_claude_and_opencode_installs() {
+        let claude = agent_candidate_paths("/Users/test", "claude");
+        assert!(claude.contains(&"/Users/test/.local/bin/claude".to_string()));
+
+        let opencode = agent_candidate_paths("/Users/test", "opencode");
+        assert!(opencode.contains(&"/Users/test/.opencode/bin/opencode".to_string()));
     }
 
     #[test]

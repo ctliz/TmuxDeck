@@ -5,9 +5,9 @@
 
 ## Current status
 
-- **Latest release:** v1.11.0 — macOS tray panel, local Agent token summaries, visual refresh, and post-Agent shell handoff
+- **Latest release:** v1.11.1 — fixes Claude Code and OpenCode detection for native installer paths
 - **Trunk:** direct pushes to main, CI (macOS + Windows build + frontend/backend tests) all green
-- **Test suite:** 107 backend tests (105 passing + 2 environment/on-device ignored) + 25 frontend tests; mobile LAN real-device acceptance pending
+- **Test suite:** 108 backend tests (106 passing + 2 environment/on-device ignored) + 25 frontend tests; mobile LAN real-device acceptance pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 
 ## Planning queue
