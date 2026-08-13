@@ -1,6 +1,6 @@
 # pi-intercom wire protocol reference
 
-> This document was originally reconstructed from `nicobailon/pi-intercom`, and is now updated against `@dataforxyz/agent-intercom-*` protocol v3's `types.ts`, `broker.ts`, and `broker/framing.ts` on this machine. **Written down so we never have to re-derive it.**
+> This document was originally reconstructed from `nicobailon/pi-intercom`, and is now updated against Agent Intercom protocol v3's `types.ts`, `broker.ts`, and `broker/framing.ts`, including the Pi maintenance release `v0.10.1-tmuxdeck.1`. **Written down so we never have to re-derive it.**
 >
 > Implementation lives in `src-tauri/src/intercom.rs`; the verification script is `scripts/intercom-probe.mjs`.
 
@@ -161,7 +161,11 @@ Impact on the phone: TmuxDeck must hold a single persistent connection and alway
 
 ## Differences between the two branches
 
-This machine is now uniformly installed with **`@dataforxyz/agent-intercom-*` 0.10.0 cross-harness adapters**, covering Pi / Codex / Claude Code / OpenCode. The table below keeps the historical differences from the original `nicobailon/pi-intercom` (pi-only), for troubleshooting older environments:
+The current verified Pi adapter on this machine is the GitHub-only maintenance release **`@dataforxyz/agent-intercom-pi` `0.10.1-tmuxdeck.1`**, tag [`v0.10.1-tmuxdeck.1`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1), commit `452b63f11d50dcdbbcf8485eb04d19928bbbfb13`. It is based on upstream Pi `v0.10.0` (`85c118453a15b3631b2a1eb289b66a65d1ac6ab2`) and tracks the fixes upstream in [agent-intercom-pi#20](https://github.com/dataforxyz/agent-intercom-pi/issues/20).
+
+No global Codex, Claude, or OpenCode adapter package was detected in the same verification, so do not infer that all harness adapters are installed or share one package version. TmuxDeck's optional Managed Claude adapter is separately pinned and installed under TmuxDeck's config directory on macOS; Standard Claude, Codex, and OpenCode adapters remain independently managed. All participants that share a broker must still speak compatible protocol v3.
+
+The table below keeps the historical differences from the original `nicobailon/pi-intercom` (pi-only), for troubleshooting older environments:
 
 | | Original | Cross-harness |
 |---|---|---|
@@ -172,7 +176,9 @@ This machine is now uniformly installed with **`@dataforxyz/agent-intercom-*` 0.
 | Tool shape | single `intercom({action})` | split into `intercom_send` / `_ask` / `_reply` / … |
 | License | MIT | AGPL-3.0-or-later |
 
-**Migration is all-or-nothing**: upstream explicitly warns that mixing old and new adapters splits into mutually invisible broker "islands"; you must upgrade everything and `/reload` every session.
+**Protocol migration is all-or-nothing**: mixing incompatible protocol generations splits clients into mutually invisible broker "islands". For a protocol-v3 maintenance update, run `/reload` in every Pi session and restart companion adapters so the shared broker can restart cleanly. Package version strings do not have to be identical when the adapters are independently verified as protocol-v3 compatible.
+
+The Pi maintenance adapter defaults discovery and name/ID-prefix routing to the canonical current workspace, supports explicit `scope: "machine"`, and accepts an exact full session ID as the intentional cross-workspace route. These are client-side filtering and fail-closed routing semantics. They are **not** wire authorization, broker isolation, credentials, or a new security boundary; the protocol-v3 broker remains machine-global for the same OS user, and other adapters may still present a machine-global roster.
 
 > For the phone scenario the cross-harness version is clearly the better fit: when you're away from the desk, a hard 10-minute blocking `ask` is a bad semantic.
 
@@ -186,3 +192,4 @@ Implementing a client yourself against the wire protocol **does not constitute a
 
 - [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom) (MIT, pi-only)
 - [dataforxyz/agent-intercom-pi](https://github.com/dataforxyz/agent-intercom-pi) (AGPL, cross-harness)
+- [ctliz/agent-intercom-pi v0.10.1-tmuxdeck.1](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1) (GitHub-only Pi maintenance release based on upstream v0.10.0)

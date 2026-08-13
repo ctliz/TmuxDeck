@@ -105,7 +105,7 @@ flowchart LR
 
 ## Agents already talk to each other. You were the missing participant.
 
-Coding agents are growing their own coordination layer — [Agent Intercom](https://github.com/dataforxyz/agent-intercom-pi) gives Pi, Codex, Claude Code, and OpenCode sessions a shared local broker so they can find and message each other.
+Coding agents are growing their own coordination layer — [Agent Intercom](https://github.com/dataforxyz/agent-intercom-pi) gives Pi, Codex, Claude Code, and OpenCode sessions a shared local broker so they can find and message each other. For Pi, TmuxDeck recommends its [GitHub-only maintenance fork](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1), based on upstream `v0.10.0`.
 
 What that bus has no adapter for is **the human**.
 
@@ -171,7 +171,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 
 | Agent | Adapter Installation | Registration / Activation |
 | :--- | :--- | :--- |
-| **Pi** | `pi install npm:@dataforxyz/agent-intercom-pi` | Automatic on start (`/reload` in open sessions) |
+| **Pi** | `pi install git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1` | Automatic on start; run `/reload` in every open Pi session after install/update. This is a GitHub-only TmuxDeck maintenance fork based on upstream `v0.10.0`. |
 | **Claude Code** | On macOS, install TmuxDeck's pinned Managed Adapter from the Create Workspace modal; global npm is not changed. | Choose **Use Managed** or persistently switch to **Standard Claude**. A global `cci` is left untouched and may still be used as a custom command. |
 | **Codex** | `npm install -g @dataforxyz/agent-intercom-codex` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @dataforxyz/agent-intercom-opencode` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json`; `tui.mjs` adds `/intercom`, `/intercom-name`, and `/intercom-id` |
@@ -180,7 +180,8 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 
 Communicate across agent sessions using the shared broker:
 
-- **Session discovery & messaging:** Use `intercom_list`, `intercom_send`, `intercom_ask`, and `intercom_reply` to discover and exchange messages.
+- **Session discovery & messaging:** Pi's maintained adapter makes `intercom_list({})` current-workspace scoped by default. Use `intercom_list({ scope: "machine" })` for an intentional machine-wide view. Names and ID prefixes follow the selected scope; an exact full session ID is the explicit cross-workspace route. This is client-side discovery and fail-closed routing, not a wire-level security boundary; Claude, Codex, and OpenCode adapters may still expose machine-global discovery.
+- **Reply batches:** Pi preserves reply context across provider/tool loops. Same-sender ordinary batches reply to the latest message; batches from multiple senders require the exact sender name or full session ID in `intercom_reply({ to, message })`.
 - **Claude Code integration:** On macOS, TmuxDeck can install or repair its offline, pinned **Managed Claude Intercom** adapter from the Create Workspace modal. The installer verifies the bundled SHA-256, rejects unsafe archive entries, validates the Claude plugin → Monitor → runtime chain, and never modifies global npm. Each newly created managed pane or Ghostty native slot starts Claude in explicit safe permission mode and gets a cryptographically random Intercom ID that remains attached to that pane/slot for its lifetime, plus a readable workspace/pane name. This ID is routing metadata, not an authentication credential. **Use Standard Claude** is persistent; installing/repairing or choosing **Use Managed** switches back. Windows/WSL keeps Standard Claude behavior. Existing global `cci` installations are not selected as Managed, changed, or removed; use a custom Agent command if you intentionally want one. Custom commands are never rewritten.
 - **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
 - **Rename an OpenCode Intercom session:** Run `/intercom-name`, or choose **Rename intercom session** in the command palette; the prompt is titled **Rename this Intercom session**. The model can also call `intercom_set_name({ name: "<new-name>" })`. This changes only the discoverable name, not the stable Intercom session ID.

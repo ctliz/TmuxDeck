@@ -14,7 +14,7 @@
 | Doc | Contents |
 |---|---|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Module map, data flows, two easy-to-miss key implementations |
-| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide for Pi / OpenCode / Codex / Claude Code |
+| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide, including the fixed-tag Pi maintenance adapter and workspace-scoped Pi discovery |
 | [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom wire protocol (reconstructed from upstream source, to avoid re-deriving it) |
 | [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | Conversation content source design (Claude Code JSONL preferred + fallback) |
 | [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | Mobile transport and security design |

@@ -29,23 +29,26 @@ It contains `broker.sock`, `broker.pid`, `broker.owner`, `broker-asks.json`, `in
 
 ## 2. Version and installation principles
 
-All four sides should use the same generation of the `@dataforxyz/agent-intercom-*` adapters, and must not be mixed with the older pi-only `nicobailon/pi-intercom`. Mixing adapter or protocol versions across old and new can form broker "islands" that cannot see each other.
+All four sides must use protocol-v3-compatible `agent-intercom-*` adapters, and must not be mixed with the older pi-only `nicobailon/pi-intercom`. Mixing incompatible protocol versions can form broker "islands" that cannot see each other. The adapters do not need to have the same package version: the Pi maintenance release below is `v0.10.1-tmuxdeck.1`, while companion adapters may remain on their separately verified protocol-v3 versions.
 
-After installing or upgrading any adapter, have **all still-open sessions** do a reload/restart.
+After installing or upgrading any adapter, run `/reload` in **every still-open Pi session** and restart every companion Claude, Codex, and OpenCode adapter. This lets the old protocol-v3 broker exit after its final client disconnects and allows one restarted compatible client to start the shared broker cleanly.
 
 ### 2.1 Pi
 
-Install:
+Recommended install and update command:
 
 ```bash
-pi install npm:@dataforxyz/agent-intercom-pi
+pi install git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1
 ```
 
-Update:
+Re-run the same fixed-tag command when repairing or reconciling the install. Do not use `npm update` for this maintenance version: it is GitHub-only and is not published as an official npm update.
 
-```bash
-pi update --extension npm:@dataforxyz/agent-intercom-pi
-```
+Provenance:
+
+- Maintenance release: <https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1>
+- Maintenance commit: [`452b63f11d50dcdbbcf8485eb04d19928bbbfb13`](https://github.com/ctliz/agent-intercom-pi/commit/452b63f11d50dcdbbcf8485eb04d19928bbbfb13)
+- Upstream base: [`v0.10.0`](https://github.com/dataforxyz/agent-intercom-pi/releases/tag/v0.10.0), commit `85c118453a15b3631b2a1eb289b66a65d1ac6ab2`
+- Upstream tracking issue: [dataforxyz/agent-intercom-pi#20](https://github.com/dataforxyz/agent-intercom-pi/issues/20)
 
 After install or update, run this in every open Pi session:
 
@@ -53,7 +56,7 @@ After install or update, run this in every open Pi session:
 /reload
 ```
 
-Alternatively, quit and restart Pi.
+Alternatively, quit and restart Pi. Also restart the companion Claude, Codex, and OpenCode adapters so all clients reconnect through a clean protocol-v3 broker lifecycle.
 
 ### 2.2 OpenCode
 
@@ -93,7 +96,7 @@ Notes:
 - `dist/tui.mjs` belongs only in `tui.json`.
 - After config or package changes, fully quit and restart OpenCode; the TUI plugin cannot be hot-reloaded the way Pi's `/reload` does.
 - Plain workers need no wrapper; run `opencode` directly.
-- The locally patched `tui.mjs` supports using `/intercom`, `/intercom-name`, or `/intercom-id` directly when OpenCode has just started and has no active session (i.e. the home page): the plugin automatically creates an empty session, enters it, then continues the original operation. When an active session already exists, the current session is always reused and none is created additionally.
+- Some separately maintained OpenCode installs include a `tui.mjs` patch that lets `/intercom`, `/intercom-name`, or `/intercom-id` create an empty session when OpenCode is on its home page. This behavior is not provided by the Pi maintenance tag and must be verified independently in the installed OpenCode package.
 
 Update:
 
@@ -281,7 +284,7 @@ ccim --name <name> --id <stable-id> --cwd /path/to/project
 
 Headless `cci` / `ccim` have no interactive console and cannot type slash commands like `/name`; they can only be named via the `--name` launch argument. Ordinary Claude MCP sessions use `intercom_set_name` to rename.
 
-> The unified rename entry in this section comes from a local `0.10.0` package patch and does not yet match every same-version install on the npm registry. Running `npm update` or reinstalling may overwrite the patch; until upstream releases it, re-check after an upgrade that the slash commands and the `intercom_set_name` tool still exist.
+> The OpenCode/Codex/Claude rename entries in this section depend on their independently installed adapters and may not exist in every same-version registry package. Re-check those host-specific commands and `intercom_set_name` after changing a companion adapter; the Pi maintenance tag does not install or upgrade them.
 
 ## 5. Shortcuts and command entries
 
@@ -305,7 +308,7 @@ The content copied by `/intercom-id` or Alt+I is cross-harness: it uses the name
 
 ## 6. Agent tools: set name / list / send / ask / reply
 
-`list`, `send`, `ask`, and `reply` mean the same thing across all four adapters. The runtime rename tool is currently provided by the locally patched OpenCode, Codex ordinary MCP, and Claude Code ordinary MCP sessions; Pi uses the native `/name`.
+`list`, `send`, `ask`, and `reply` use the same protocol concepts across all four adapters. Pi uses the native `/name`; OpenCode, Codex ordinary MCP, and Claude Code ordinary MCP expose `intercom_set_name` only when their independently installed adapter version provides it.
 
 ### 6.1 Set the current human-readable name
 
@@ -333,13 +336,21 @@ intercom_status({})
 
 Confirms the current session ID, broker connection, and pending messages.
 
-### 6.3 List all peers
+### 6.3 List peers in the current workspace or machine
+
+Pi's maintenance adapter defaults to the current workspace: the canonical Git root, or the canonical cwd outside Git.
 
 ```typescript
 intercom_list({})
 ```
 
-Returns the current session and all connected Pi, OpenCode, Codex, and Claude Code sessions, including short ID, cwd, model, and live status.
+For an intentional machine-wide view:
+
+```typescript
+intercom_list({ scope: "machine" })
+```
+
+Both forms return the current session and matching connected sessions with short ID, cwd, model, and live status. Names and ID prefixes resolve within the selected scope. An exact full session ID is checked against the machine roster first and is the explicit cross-workspace route. This filtering is Pi client behavior, not broker authorization or a protocol security boundary; the protocol-v3 broker and other harness adapters may remain machine-global.
 
 If the current worker is managed by an orchestrator, prefer viewing the team under the same manager:
 
@@ -390,7 +401,7 @@ intercom_reply({
 })
 ```
 
-`to` is the sender's name or stable ID, not a message/thread ID. Do not hand-construct `replyTo`.
+`to` is the sender's name or stable ID, not a message/thread ID. Do not hand-construct `replyTo`. The Pi maintenance adapter preserves the active ordinary-message batch across provider/tool loops: for one sender it replies to that sender's latest message; for multiple senders, use the exact sender name or full session ID. Failed selection or delivery does not discard the batch context.
 
 ## 7. `PI_CODING_AGENT_DIR`
 
@@ -430,14 +441,14 @@ These two sessions can see each other but not the sessions under the default `~/
 
 | Scenario | Action |
 |---|---|
-| Pi extension install/update | run `/reload` in every open Pi session, or restart Pi |
+| Pi extension install/update | re-run the fixed-tag `pi install` command, then run `/reload` in every open Pi session or restart Pi |
 | OpenCode plugin/config update | fully quit and restart OpenCode |
 | Codex MCP/package update | restart ordinary Codex sessions; restart `coi` workers reusing their original `--id` |
 | Claude MCP/package update | restart ordinary Claude sessions; restart `cci` / `ccim` reusing their original `--id` |
 | `PI_CODING_AGENT_DIR` change | reload/restart all four sides |
 | Broker auto-restart | clients reconnect automatically; usually no manual action needed |
 
-Upgrade across protocol versions by updating all four sides at once. Do not delete `broker.sock`, `broker.owner`, inbox/outbox, or ask state files still in use by active sessions.
+Upgrade across protocol versions by updating all four sides at once. For this protocol-v3 maintenance update, reload every Pi session and restart all companion adapters so the previous broker exits naturally and the shared protocol-v3 broker restarts. Do not delete `broker.sock`, `broker.owner`, inbox/outbox, or ask state files still in use by active sessions.
 
 Recommended troubleshooting order:
 
@@ -446,9 +457,11 @@ Recommended troubleshooting order:
 3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers.
 4. On OpenCode home, `/intercom`, `/intercom-name`, or `/intercom-id` should auto-create and enter an empty session; if it still asks to open a session first, fully quit and restart OpenCode and confirm `tui.json` points at the patched `dist/tui.mjs`.
 5. For the Codex wrapper, first run `coi --version`; it should print the Codex version and exit. If there's no output or it unexpectedly enters a worker, check that npm's `coi` entry executes `node .../dist/coi.mjs "$@"`, then reinstall or fix the wrapper.
-6. Run `/reload` on Pi; fully restart the other harnesses.
-7. Run `intercom_list({})` again.
-8. Only when all clients are confirmed exited should leftover runtime files be considered for cleanup; never delete the socket during active sessions.
+6. Confirm Pi is installed from `git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1`; re-run that fixed `pi install` command if repair is needed.
+7. Run `/reload` in every open Pi session; fully restart Claude, Codex, and OpenCode companion adapters so the protocol-v3 broker can restart cleanly.
+8. Run `intercom_list({})` for the current workspace, then `intercom_list({ scope: "machine" })` if the expected peer is in another workspace. Use the exact full ID for intentional cross-workspace routing.
+9. If a reply batch is ambiguous, use `intercom_pending({})` and reply with the exact sender name or full session ID; do not pass a message/thread ID as `to`.
+10. Only when all clients are confirmed exited should leftover runtime files be considered for cleanup; never delete the socket during active sessions.
 
 ## 9. Stable session ID notes
 
@@ -462,32 +475,26 @@ Recommended troubleshooting order:
 
 ## 10. Local environment verification
 
-At the time of writing, the four adapters were installed locally at the same version:
+Verified on this machine at the time of writing:
 
 ```text
-@dataforxyz/agent-intercom-pi       0.10.0
-@dataforxyz/agent-intercom-opencode 0.10.0
-@dataforxyz/agent-intercom-codex    0.10.0
-@dataforxyz/agent-intercom-claude   0.10.0
+Pi package source: git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1
+Pi package version: @dataforxyz/agent-intercom-pi 0.10.1-tmuxdeck.1
+Pi checkout:        452b63f11d50dcdbbcf8485eb04d19928bbbfb13
+Protocol:           v3
 ```
 
-Confirmed base configuration:
+Pi settings load the fixed Git tag from `~/.pi/agent/git/github.com/ctliz/agent-intercom-pi`. No global Codex, Claude, or OpenCode adapter package was detected during this verification, so this document does not claim that those adapters were locally upgraded or version-unified. TmuxDeck's optional Managed Claude path is a separate pinned macOS installation described in section 2.4; Standard Claude, Codex, and OpenCode remain independently installed and must be checked in their actual host configuration.
 
-- Pi settings have loaded `npm:@dataforxyz/agent-intercom-pi`.
-- OpenCode `opencode.json` has loaded `dist/plugin.mjs`.
-- OpenCode `tui.json` has loaded `dist/tui.mjs`.
-- `codex-intercom` is enabled in the Codex MCP.
-- `claude-intercom` is connected in the Claude MCP.
+After any adapter change, trust the actual Pi settings/package checkout, `codex mcp list`, `claude mcp list`, OpenCode plugin paths/package metadata, and `intercom_status({})`. Do not infer protocol compatibility from matching package version strings alone.
 
-After a version upgrade, trust the actual `package.json`, `codex mcp list`, `claude mcp list`, and `intercom_status({})`, and do not rely on this document's version numbers long-term.
-
-OpenCode's home auto-create-empty-session capability is likewise part of the local `0.10.0` patch for now. `npm update @dataforxyz/agent-intercom-opencode` or a reinstall may overwrite it; until upstream releases it, re-check after an upgrade and fully restart OpenCode so the correct `tui.mjs` takes effect.
+The Pi maintenance fork changes only Pi's discovery/routing and reply-batch behavior. Other adapters may still expose their existing machine-global discovery behavior. OpenCode-specific local patches, if present on another machine, must be verified independently after an OpenCode package update or reinstall.
 
 ## 11. Recommended workflow
 
 ```text
 1. Launch and set a unique human-readable name
-2. intercom_list or intercom_team to confirm the target
+2. intercom_list for the current workspace, intercom_list with machine scope when intentional, or intercom_team for managed coworkers
 3. Dispatch tasks with send
 4. Only use ask when the next step depends on the answer
 5. Reply with reply from the session that received the ask
