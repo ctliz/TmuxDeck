@@ -10,6 +10,8 @@ pub(crate) const NATIVE_OPTION: &str = "@tmuxdeck-native-split";
 pub(crate) const WORKSPACE_OPTION: &str = "@tmuxdeck-workspace";
 pub(crate) const SLOT_OPTION: &str = "@tmuxdeck-slot";
 pub(crate) const TERMINAL_OPTION: &str = "@tmuxdeck-terminal";
+pub(crate) const NATIVE_SESSION_FORMAT: &str =
+    "#{session_name}|#{session_attached}|#{@tmuxdeck-native-split}|#{@tmuxdeck-workspace}|#{@tmuxdeck-slot}";
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeSlot {
@@ -63,12 +65,8 @@ pub(crate) fn ghostty_native_available() -> bool {
 
 pub(crate) fn list_native_slots(workspace: &str) -> Result<Vec<NativeSlot>, String> {
     let workspace = sanitize_session_name(workspace)?;
-    let output = run_tmux(&[
-        "list-sessions",
-        "-F",
-        "#{session_name}|#{session_attached}|#{@tmuxdeck-native-split}|#{@tmuxdeck-workspace}|#{@tmuxdeck-slot}",
-    ])
-    .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
+    let output = run_tmux(&["list-sessions", "-F", NATIVE_SESSION_FORMAT])
+        .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
         if is_no_server_err(&error) {
@@ -96,6 +94,7 @@ pub(crate) fn create_native_workspace(
     work_dir: &str,
     agent_commands: &[String],
     agent_ids: &[String],
+    scope_id: &str,
 ) -> Result<Vec<NativeSlot>, String> {
     if agent_commands.len() != count || agent_ids.len() != count {
         return Err("ERR_PANE_AGENT_COUNT".to_string());
@@ -114,6 +113,7 @@ pub(crate) fn create_native_workspace(
             work_dir,
             &agent_commands[slot - 1],
             &agent_ids[slot - 1],
+            scope_id,
         ) {
             Ok(info) => created.push(info),
             Err(error) => {
@@ -160,6 +160,7 @@ fn native_slot_command_args(
     work_dir: &str,
     agent_cmd: &str,
     agent_id: &str,
+    scope_id: &str,
 ) -> Result<Vec<String>, String> {
     let target = slot_target(workspace, slot);
     let slot_value = slot.to_string();
@@ -176,6 +177,8 @@ fn native_slot_command_args(
         format!("TMUXDECK_WORKSPACE={}", workspace),
         "-e".to_string(),
         format!("TMUXDECK_SLOT={}", slot_value),
+        "-e".to_string(),
+        format!("AGENT_INTERCOM_SCOPE_ID={}", scope_id),
     ];
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
@@ -267,11 +270,12 @@ pub(crate) fn create_native_slot(
     work_dir: &str,
     agent_cmd: &str,
     agent_id: &str,
+    scope_id: &str,
 ) -> Result<NativeSlot, String> {
     let workspace = sanitize_session_name(workspace)?;
     let target = slot_target(&workspace, slot);
     let slot_value = slot.to_string();
-    let args = native_slot_command_args(&workspace, slot, work_dir, agent_cmd, agent_id)?;
+    let args = native_slot_command_args(&workspace, slot, work_dir, agent_cmd, agent_id, scope_id)?;
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let output = run_tmux(&refs).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
     if !output.status.success() {
@@ -954,7 +958,7 @@ mod tests {
     #[test]
     fn test_native_workspace_validates_per_slot_agents() {
         assert!(matches!(
-            create_native_workspace("workspace", 2, "/tmp", &["/bin/pi".into()], &["pi".into()]),
+            create_native_workspace("workspace", 2, "/tmp", &["/bin/pi".into()], &["pi".into()], "Scope_WorkspaceA123"),
             Err(error) if error == "ERR_PANE_AGENT_COUNT"
         ));
     }
@@ -992,6 +996,7 @@ mod tests {
             "/tmp/project",
             "custom-agent --model 'A B'",
             "custom",
+            "Scope_WorkspaceA123",
         )
         .unwrap();
         assert_eq!(args.iter().filter(|arg| *arg == "new-session").count(), 1);
@@ -1000,6 +1005,10 @@ mod tests {
             args.iter().filter(|arg| *arg == "set-environment").count(),
             crate::commands::utils::AGENT_IDENTITY_ENV_VARS.len()
         );
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-e", "AGENT_INTERCOM_SCOPE_ID=Scope_WorkspaceA123"]));
+        assert!(!args.iter().any(|arg| arg == "@tmuxdeck-scope"));
         let agent_index = args
             .iter()
             .position(|arg| arg.contains("env -u PI_SESSION_ID"))
@@ -1018,6 +1027,13 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == [TERMINAL_OPTION, "ghostty"]));
+    }
+
+    #[test]
+    fn test_list_native_slots_format_does_not_leak_scope_or_options() {
+        assert!(!NATIVE_SESSION_FORMAT.contains("scope"));
+        assert!(!NATIVE_SESSION_FORMAT.contains("AGENT_INTERCOM_SCOPE_ID"));
+        assert!(!NATIVE_SESSION_FORMAT.contains("@tmuxdeck-scope"));
     }
 
     #[test]

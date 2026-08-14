@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 
 use crate::config::get_config_dir;
 
-pub const MANAGED_CLAUDE_VERSION: &str = "0.10.1-tmuxdeck.1";
-pub const MANAGED_CLAUDE_RESOURCE: &str = "agent-intercom-claude-0.10.1-tmuxdeck.1.tgz";
+pub const MANAGED_CLAUDE_VERSION: &str = "0.12.0-connect.3";
+pub const MANAGED_CLAUDE_RESOURCE: &str = "agent-intercom-claude-0.12.0-connect.3.tgz";
 pub const MANAGED_CLAUDE_SHA256: &str =
-    "a167218db5361a967fff15c750b53d82f567dc033c1691ba1265908db491ceb0";
-pub const MANAGED_ADAPTER_MARKER: &str = "0.10.1-tmuxdeck.1";
+    "f246fe19c43f2a2a487e9d86620c20e7d5686e11adb7fc632281f390c87049ad";
+pub const MANAGED_ADAPTER_MARKER: &str = "0.12.0-connect.3";
 
 const REQUIRED_FILES: &[&str] = &[
     ".claude-plugin/plugin.json",

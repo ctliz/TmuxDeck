@@ -2,7 +2,7 @@
 
 > Scope: Pi, OpenCode, Codex, and Claude Code on the same machine, under the same OS user.
 >
-> The four adapters share Agent Intercom protocol v3, the local broker, and the runtime directory, so they can perform targeted `list` / `send` / `ask` / `reply` across harnesses. It is not a public-internet messaging service, nor a broadcast chat room.
+> The four adapters share Agent Intercom protocol v4, the local broker, and the runtime directory, so they can perform targeted `list` / `send` / `ask` / `reply` across harnesses. It is not a public-internet messaging service, nor a broadcast chat room.
 
 ## 1. Core model
 
@@ -18,6 +18,12 @@ Claude Code ──┘
 - macOS / Linux use a Unix socket; Windows uses a named pipe by default.
 - Only sessions that are installed, loaded, and successfully registered appear in listings.
 - Session names are for human-readable addressing, but duplicates are allowed; the trustworthy addressing key is the **stable session ID**.
+- **Broker-enforced workspace scoping (v4):** The local broker enforces workspace scope boundaries. Discovery (`intercom_list`), peer names, and short ID prefixes resolve strictly within the caller's active workspace scope.
+- **Cross-scope routing:** Communicating across workspace scopes requires providing the **exact full session ID**.
+- **Scope is same-OS-user isolation, not a security principal:** Workspace scoping partitions discovery and routing to avoid accidental cross-workspace interference; it is an operational routing boundary, not a cryptographic authentication or authorization boundary. The trust boundary remains the local OS user.
+- **Zero raw scope exposure for frontend & mobile:** TmuxDeck desktop UI and mobile clients maintain zero raw scope exposure (零原值暴露); the backend manages an independent scoped human client per workspace and aggregates conversations into the unified view.
+- **Legacy workspaces fail closed:** Workspaces created without v4 scoping metadata fail closed on pane add or rename operations and should be recreated.
+- **Orchestrator deployment:** Orchestrator is an optional Linux/systemd lifecycle product, outside the Broker compatibility set; omitted on macOS.
 
 Default shared directory:
 
@@ -29,26 +35,28 @@ It contains `broker.sock`, `broker.pid`, `broker.owner`, `broker-asks.json`, `in
 
 ## 2. Version and installation principles
 
-All four sides must use protocol-v3-compatible `agent-intercom-*` adapters, and must not be mixed with the older pi-only `nicobailon/pi-intercom`. Mixing incompatible protocol versions can form broker "islands" that cannot see each other. The adapters do not need to have the same package version: the Pi maintenance release below is `v0.10.1-tmuxdeck.1`, while companion adapters may remain on their separately verified protocol-v3 versions.
+All active sides must use protocol-v4-compatible `agent-intercom-*` adapters (`ctliz` ecosystem, with `@dataforxyz` provenance). Mixing incompatible protocol versions can form broker "islands" that cannot see each other.
 
-After installing or upgrading any adapter, run `/reload` in **every still-open Pi session** and restart every companion Claude, Codex, and OpenCode adapter. This lets the old protocol-v3 broker exit after its final client disconnects and allows one restarted compatible client to start the shared broker cleanly.
+**Installed adapters only:** Coordinated upgrades apply only to the adapters currently installed and in use on your machine. You do not need to install adapters for uninstalled harnesses.
+
+The v4 ecosystem packages are published under the `@ctliz` npm scope (with internal core `@ctliz/agent-intercom-core@0.1.0`). Canonical and recommended installation commands specify the `@connect` dist-tag (e.g. `@ctliz/agent-intercom-codex@connect`) or exact package versions. Future GA releases will advance the `latest` dist-tag.
+
+After installing or upgrading any adapter, run `/reload` in **every still-open Pi session** and restart every companion Claude, Codex, and OpenCode adapter. This lets the old broker exit after its final client disconnects and allows one restarted compatible client to start the shared protocol-v4 broker cleanly.
 
 ### 2.1 Pi
 
 Recommended install and update command:
 
 ```bash
-pi install git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1
+pi install git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2
 ```
 
-Re-run the same fixed-tag command when repairing or reconciling the install. Do not use `npm update` for this maintenance version: it is GitHub-only and is not published as an official npm update.
+The Git fixed-tag install is recommended for Pi. The official npm package `@ctliz/agent-intercom-pi@connect` (`0.11.0-connect.2`) is also published.
 
 Provenance:
 
-- Maintenance release: <https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1>
-- Maintenance commit: [`452b63f11d50dcdbbcf8485eb04d19928bbbfb13`](https://github.com/ctliz/agent-intercom-pi/commit/452b63f11d50dcdbbcf8485eb04d19928bbbfb13)
-- Upstream base: [`v0.10.0`](https://github.com/dataforxyz/agent-intercom-pi/releases/tag/v0.10.0), commit `85c118453a15b3631b2a1eb289b66a65d1ac6ab2`
-- Upstream tracking issue: [dataforxyz/agent-intercom-pi#20](https://github.com/dataforxyz/agent-intercom-pi/issues/20)
+- Release tag: [`v0.11.0-connect.2`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.11.0-connect.2)
+- Upstream base: `@dataforxyz/agent-intercom-pi` provenance
 
 After install or update, run this in every open Pi session:
 
@@ -56,7 +64,7 @@ After install or update, run this in every open Pi session:
 /reload
 ```
 
-Alternatively, quit and restart Pi. Also restart the companion Claude, Codex, and OpenCode adapters so all clients reconnect through a clean protocol-v3 broker lifecycle.
+Alternatively, quit and restart Pi. Also restart companion Claude, Codex, and OpenCode adapters so all clients reconnect through a clean protocol-v4 broker lifecycle.
 
 ### 2.2 OpenCode
 
@@ -65,7 +73,7 @@ Install the server plugin:
 ```bash
 mkdir -p ~/.config/opencode
 cd ~/.config/opencode
-npm install @dataforxyz/agent-intercom-opencode
+npm install @ctliz/agent-intercom-opencode@connect
 ```
 
 Register the server plugin in `~/.config/opencode/opencode.json`. Do not use `~` in the JSON; the absolute path is required:
@@ -74,7 +82,7 @@ Register the server plugin in `~/.config/opencode/opencode.json`. Do not use `~`
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "/Users/you/.config/opencode/node_modules/@dataforxyz/agent-intercom-opencode/dist/plugin.mjs"
+    "/Users/you/.config/opencode/node_modules/@ctliz/agent-intercom-opencode/dist/plugin.mjs"
   ]
 }
 ```
@@ -85,7 +93,7 @@ Register the TUI plugin in `~/.config/opencode/tui.json` to provide `/intercom`,
 {
   "$schema": "https://opencode.ai/tui.json",
   "plugin": [
-    "/Users/you/.config/opencode/node_modules/@dataforxyz/agent-intercom-opencode/dist/tui.mjs"
+    "/Users/you/.config/opencode/node_modules/@ctliz/agent-intercom-opencode/dist/tui.mjs"
   ]
 }
 ```
@@ -96,21 +104,13 @@ Notes:
 - `dist/tui.mjs` belongs only in `tui.json`.
 - After config or package changes, fully quit and restart OpenCode; the TUI plugin cannot be hot-reloaded the way Pi's `/reload` does.
 - Plain workers need no wrapper; run `opencode` directly.
-- Some separately maintained OpenCode installs include a `tui.mjs` patch that lets `/intercom`, `/intercom-name`, or `/intercom-id` create an empty session when OpenCode is on its home page. This behavior is not provided by the Pi maintenance tag and must be verified independently in the installed OpenCode package.
-
-Update:
-
-```bash
-cd ~/.config/opencode
-npm update @dataforxyz/agent-intercom-opencode
-```
 
 ### 2.3 Codex
 
 Install the global adapter:
 
 ```bash
-npm install -g @dataforxyz/agent-intercom-codex
+npm install -g @ctliz/agent-intercom-codex@connect
 ```
 
 Register the MCP server for ordinary Codex sessions:
@@ -131,21 +131,17 @@ The package also provides:
 - `coi`: a Codex wrapper that can be woken by messages, with Alt+M / Alt+I.
 - `codex-intercom-bridge`: advanced use for publishing multiple background Codex workers.
 
-After updating, restart ordinary Codex sessions and all `coi` workers:
-
-```bash
-npm update -g @dataforxyz/agent-intercom-codex
-```
+After updating, restart ordinary Codex sessions and all `coi` workers.
 
 ### 2.4 Claude Code
 
 On macOS, select Claude Code in TmuxDeck's **Create Workspace** modal and choose **Install Managed Adapter**. TmuxDeck installs its pinned adapter from the app bundle without contacting npm or changing any global npm package. The same control becomes **Repair Managed Adapter** if health verification fails.
 
-The managed resource is `@dataforxyz/agent-intercom-claude` `0.10.1-tmuxdeck.1`, built from fork commit `afcb3fe3f889c2baab784a15d2aecf7c5676c827` and published with source at <https://github.com/ctliz/agent-intercom-claude/releases/tag/v0.10.1-tmuxdeck.1>. It is based on upstream `v0.10.0` with only the Monitor packaging fix. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
+The managed resource corresponds to `@ctliz/agent-intercom-claude@connect` (`0.12.0-connect.3`), bundled as `agent-intercom-claude-0.12.0-connect.3.tgz` and published with source at <https://github.com/ctliz/agent-intercom-claude/releases/tag/v0.12.0-connect.3>, retaining original `@dataforxyz/agent-intercom-claude` provenance. It packages the Claude Monitor files required for `cci --tui --safe`. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
 
 Installation verifies the pinned SHA-256, rejects links, devices, absolute paths and `..`, stages the replacement, validates the Claude plugin → Monitor → MCP/runtime chain, and rolls back if validation or config persistence fails. A healthy existing version remains in place after a failed repair.
 
-Each newly created managed tmux pane or Ghostty native slot explicitly passes `--safe` to Claude and receives a cryptographically random ID such as `tmuxdeck-<random-uuid-shape>` and a readable name such as `<workspace> · Claude 01`. The ID is persisted in the existing pane/slot's tmux metadata for that worker incarnation. Recreating a worker produces a new ID. It is routing metadata and consistency evidence, not an authentication credential.
+Each newly created managed tmux pane or Ghostty native slot explicitly passes `--safe` to Claude (running `cci --tui --safe`) and receives a cryptographically random ID such as `tmuxdeck-<random-uuid-shape>` and a readable name such as `<workspace> · Claude 01`. The ID is persisted in the existing pane/slot's tmux metadata for that worker incarnation. Recreating a worker produces a new ID. It is routing metadata and consistency evidence, not an authentication credential.
 
 **Use Standard Claude** persists the preference and launches the independently detected `claude` binary. **Use Managed Claude** switches back without reinstalling when the managed adapter is healthy. Installing or repairing also switches back to Managed. Windows/WSL continues to use Standard Claude and does not show managed actions.
 
@@ -230,6 +226,8 @@ Start wakeable workers with `cci` or `ccim`:
 
 ```bash
 cci \
+  --tui \
+  --safe \
   --name <name> \
   --id <stable-id> \
   --cwd /path/to/project
@@ -247,7 +245,7 @@ ccim \
 - Reusing the same `--id` reuses that worker's persistent state and Claude conversation.
 - The Claude conversation ID can be viewed separately with `claude --resume <session-id>`; it differs from the intercom `--id`.
 - `ccim`'s woken turns use safe mode: it can still receive work and auto-reply, but cannot actively call the MCP intercom tools to contact other peers within a turn.
-- For a truly interactive Claude TUI to be woken in place, use `cci --tui --name ... --id ...`.
+- For a truly interactive Claude TUI to be woken in place, use `cci --tui --safe --name ... --id ...`.
 
 Ordinary MCP sessions can pin their identity:
 
@@ -278,13 +276,11 @@ Runtime renames for OpenCode, Codex, and Claude Code only affect the current pro
 
 ```bash
 coi --name <name> --id <stable-id> --cwd /path/to/project
-cci --name <name> --id <stable-id> --cwd /path/to/project
+cci --tui --safe --name <name> --id <stable-id> --cwd /path/to/project
 ccim --name <name> --id <stable-id> --cwd /path/to/project
 ```
 
 Headless `cci` / `ccim` have no interactive console and cannot type slash commands like `/name`; they can only be named via the `--name` launch argument. Ordinary Claude MCP sessions use `intercom_set_name` to rename.
-
-> The OpenCode/Codex/Claude rename entries in this section depend on their independently installed adapters and may not exist in every same-version registry package. Re-check those host-specific commands and `intercom_set_name` after changing a companion adapter; the Pi maintenance tag does not install or upgrade them.
 
 ## 5. Shortcuts and command entries
 
@@ -302,13 +298,11 @@ If Alt+M / Alt+I do nothing, first check whether the terminal passes Option/Alt 
 
 Claude's `/claude-intercom:intercom` and `/claude-intercom:intercom-id` require the Claude plugin to be installed or loaded per session; an ordinary session that only ran `claude mcp add` still has the Intercom tools but lacks these two plugin slash commands.
 
-In OpenCode with an existing session, `/intercom`, `/intercom-name`, and `/intercom-id` act on the current session; on home/just-started with no active session, the local patch first auto-creates and enters an empty session, then continues. If you still see `Open a session before using Intercom.`, the new `tui.mjs` is not loaded or the local patch was overwritten — fully restart OpenCode and check the `tui.json` path.
-
-The content copied by `/intercom-id` or Alt+I is cross-harness: it uses the name when unique, and falls back to the stable ID when names are duplicated.
+The content copied by `/intercom-id` or Alt+I is cross-harness: it uses the name when unique within the workspace scope, and falls back to the stable ID when names are duplicated or when addressing cross-scope.
 
 ## 6. Agent tools: set name / list / send / ask / reply
 
-`list`, `send`, `ask`, and `reply` use the same protocol concepts across all four adapters. Pi uses the native `/name`; OpenCode, Codex ordinary MCP, and Claude Code ordinary MCP expose `intercom_set_name` only when their independently installed adapter version provides it.
+`list`, `send`, `ask`, and `reply` use the same protocol concepts across all four adapters. Pi uses the native `/name`; OpenCode, Codex ordinary MCP, and Claude Code ordinary MCP expose `intercom_set_name` when supported.
 
 ### 6.1 Set the current human-readable name
 
@@ -320,7 +314,7 @@ intercom_set_name({
 })
 ```
 
-It only updates the human-readable name; it does not change the stable session ID returned by `intercom_status({})`. Persistence rules are in [Unified rename capability](#4-unified-rename-capability).
+It only updates the human-readable name; it does not change the stable session ID returned by `intercom_status({})`.
 
 Pi uses:
 
@@ -336,21 +330,15 @@ intercom_status({})
 
 Confirms the current session ID, broker connection, and pending messages.
 
-### 6.3 List peers in the current workspace or machine
+### 6.3 List peers in the current workspace
 
-Pi's maintenance adapter defaults to the current workspace: the canonical Git root, or the canonical cwd outside Git.
+In Agent Intercom protocol v4, `intercom_list({})` is scoped to the current workspace by default and enforced by the broker:
 
 ```typescript
 intercom_list({})
 ```
 
-For an intentional machine-wide view:
-
-```typescript
-intercom_list({ scope: "machine" })
-```
-
-Both forms return the current session and matching connected sessions with short ID, cwd, model, and live status. Names and ID prefixes resolve within the selected scope. An exact full session ID is checked against the machine roster first and is the explicit cross-workspace route. This filtering is Pi client behavior, not broker authorization or a protocol security boundary; the protocol-v3 broker and other harness adapters may remain machine-global.
+Returns the current session and connected peer sessions in the same workspace with short ID, cwd, model, and live status. Names and ID prefixes resolve within the active workspace scope. An exact full session ID is required for cross-workspace routing.
 
 If the current worker is managed by an orchestrator, prefer viewing the team under the same manager:
 
@@ -401,7 +389,7 @@ intercom_reply({
 })
 ```
 
-`to` is the sender's name or stable ID, not a message/thread ID. Do not hand-construct `replyTo`. The Pi maintenance adapter preserves the active ordinary-message batch across provider/tool loops: for one sender it replies to that sender's latest message; for multiple senders, use the exact sender name or full session ID. Failed selection or delivery does not discard the batch context.
+`to` is the sender's name or stable ID, not a message/thread ID. The active ordinary-message batch context is preserved across provider/tool loops.
 
 ## 7. `PI_CODING_AGENT_DIR`
 
@@ -425,18 +413,6 @@ Rules:
 4. After changing this variable, reload/restart all existing sessions.
 5. Keep it consistent across shell aliases, tmux/Ghostty launch commands, LaunchAgents, and IDE launch environments.
 
-Temporary isolation example:
-
-```bash
-PI_CODING_AGENT_DIR="$HOME/.pi/agent-lab" pi --name agent-a
-PI_CODING_AGENT_DIR="$HOME/.pi/agent-lab" \
-  OPENCODE_INTERCOM_NAME=agent-b \
-  OPENCODE_INTERCOM_SESSION_ID=<stable-id> \
-  opencode /path/to/project
-```
-
-These two sessions can see each other but not the sessions under the default `~/.pi/agent/intercom`.
-
 ## 8. Reload, restart, and upgrades
 
 | Scenario | Action |
@@ -445,65 +421,62 @@ These two sessions can see each other but not the sessions under the default `~/
 | OpenCode plugin/config update | fully quit and restart OpenCode |
 | Codex MCP/package update | restart ordinary Codex sessions; restart `coi` workers reusing their original `--id` |
 | Claude MCP/package update | restart ordinary Claude sessions; restart `cci` / `ccim` reusing their original `--id` |
-| `PI_CODING_AGENT_DIR` change | reload/restart all four sides |
+| `PI_CODING_AGENT_DIR` change | reload/restart all installed sides |
 | Broker auto-restart | clients reconnect automatically; usually no manual action needed |
 
-Upgrade across protocol versions by updating all four sides at once. For this protocol-v3 maintenance update, reload every Pi session and restart all companion adapters so the previous broker exits naturally and the shared protocol-v3 broker restarts. Do not delete `broker.sock`, `broker.owner`, inbox/outbox, or ask state files still in use by active sessions.
+**Coordinated upgrades apply to installed adapters only:** When updating protocol versions, only upgrade the adapters currently installed and configured on your machine. Reload every open Pi session with `/reload` and restart active companion adapters. Uninstalled adapters do not need to be installed.
 
 Recommended troubleshooting order:
 
 1. Run `intercom_status({})` on the current side.
 2. Confirm all sides use the same `PI_CODING_AGENT_DIR`.
 3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers.
-4. On OpenCode home, `/intercom`, `/intercom-name`, or `/intercom-id` should auto-create and enter an empty session; if it still asks to open a session first, fully quit and restart OpenCode and confirm `tui.json` points at the patched `dist/tui.mjs`.
-5. For the Codex wrapper, first run `coi --version`; it should print the Codex version and exit. If there's no output or it unexpectedly enters a worker, check that npm's `coi` entry executes `node .../dist/coi.mjs "$@"`, then reinstall or fix the wrapper.
-6. Confirm Pi is installed from `git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1`; re-run that fixed `pi install` command if repair is needed.
-7. Run `/reload` in every open Pi session; fully restart Claude, Codex, and OpenCode companion adapters so the protocol-v3 broker can restart cleanly.
-8. Run `intercom_list({})` for the current workspace, then `intercom_list({ scope: "machine" })` if the expected peer is in another workspace. Use the exact full ID for intentional cross-workspace routing.
-9. If a reply batch is ambiguous, use `intercom_pending({})` and reply with the exact sender name or full session ID; do not pass a message/thread ID as `to`.
-10. Only when all clients are confirmed exited should leftover runtime files be considered for cleanup; never delete the socket during active sessions.
+4. Confirm Pi is installed from `git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2`; re-run that fixed `pi install` command if repair is needed.
+5. Run `/reload` in every open Pi session; fully restart Claude (`cci`), Codex (`coi`), and OpenCode companion adapters so the protocol-v4 broker can restart cleanly.
+6. Run `intercom_list({})` for the current workspace. Use the exact full ID for intentional cross-workspace routing.
+7. If an existing workspace fails closed on add/rename, recreate the workspace under v4.
+8. Only when all clients are confirmed exited should leftover runtime files be considered for cleanup; never delete the socket during active sessions.
 
 ## 9. Stable session ID notes
 
-1. **A name is not an identity.** Duplicate names are allowed; sending to a duplicated name fails, so use the stable ID.
+1. **A name is not an identity.** Duplicate names are allowed within a scope; sending to a duplicated name fails, so use the stable ID.
 2. **Don't reuse an ID concurrently.** One stable ID should be registered by only one process at a time.
 3. **Restore the same identity.** Pi resumes the original session; OpenCode reuses `OPENCODE_INTERCOM_SESSION_ID`; Codex/Claude wrappers reuse `--id`.
 4. **A harness conversation ID is not the intercom ID.** OpenCode `--session`, Codex thread ID, and Claude `--resume` are each harness-specific conversation identifiers.
 5. **Pending asks depend on identity.** If the intercom ID changes after a restart, the reply authorization for old asks does not automatically transfer to the new identity.
 6. **Copy exact targets.** Prefer Alt+I or `/intercom-id` to get a pasteable cross-harness contact.
-7. **Use IDs for security/high-value flows.** Names are fine for daily collaboration; releases, destructive-operation approvals, and cross-project coordination should use the stable ID directly.
+7. **Cross-scope messaging.** Always use the exact full session ID when messaging across different workspace scopes.
 
 ## 10. Local environment verification
 
-Verified on this machine at the time of writing:
+Verified on this machine for v1.13.0:
 
 ```text
-Pi package source: git:github.com/ctliz/agent-intercom-pi@v0.10.1-tmuxdeck.1
-Pi package version: @dataforxyz/agent-intercom-pi 0.10.1-tmuxdeck.1
-Pi checkout:        452b63f11d50dcdbbcf8485eb04d19928bbbfb13
-Protocol:           v3
+Pi package source: git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2 (or @ctliz/agent-intercom-pi@connect)
+Pi package version: @ctliz/agent-intercom-pi 0.11.0-connect.2
+Claude package:     @ctliz/agent-intercom-claude@connect (0.12.0-connect.3, --tui --safe)
+Codex package:      @ctliz/agent-intercom-codex@connect (0.11.0-connect.2)
+OpenCode package:   @ctliz/agent-intercom-opencode@connect (0.11.0-connect.2)
+Core internal:      @ctliz/agent-intercom-core@0.1.0
+Protocol:           v4 (broker-enforced workspace scoping)
 ```
 
-Pi settings load the fixed Git tag from `~/.pi/agent/git/github.com/ctliz/agent-intercom-pi`. No global Codex, Claude, or OpenCode adapter package was detected during this verification, so this document does not claim that those adapters were locally upgraded or version-unified. TmuxDeck's optional Managed Claude path is a separate pinned macOS installation described in section 2.4; Standard Claude, Codex, and OpenCode remain independently installed and must be checked in their actual host configuration.
-
-After any adapter change, trust the actual Pi settings/package checkout, `codex mcp list`, `claude mcp list`, OpenCode plugin paths/package metadata, and `intercom_status({})`. Do not infer protocol compatibility from matching package version strings alone.
-
-The Pi maintenance fork changes only Pi's discovery/routing and reply-batch behavior. Other adapters may still expose their existing machine-global discovery behavior. OpenCode-specific local patches, if present on another machine, must be verified independently after an OpenCode package update or reinstall.
+Attribution and provenance to original upstream `@dataforxyz/agent-intercom-*` are preserved. Official npm packages are published under the `@ctliz` scope.
 
 ## 11. Recommended workflow
 
 ```text
-1. Launch and set a unique human-readable name
-2. intercom_list for the current workspace, intercom_list with machine scope when intentional, or intercom_team for managed coworkers
+1. Launch and set a unique human-readable name in your workspace
+2. intercom_list for current workspace peers, or intercom_team for managed coworkers
 3. Dispatch tasks with send
 4. Only use ask when the next step depends on the answer
 5. Reply with reply from the session that received the ask
-6. Use stable IDs for high-risk operations, not ambiguous names
-7. After updating adapters, reload/restart all four sides together
+6. Use exact full session IDs for cross-workspace or high-risk operations
+7. After updating installed adapters, reload/restart active sessions together
 ```
 
 Related docs:
 
 - [Intercom wire protocol reference](./REFERENCE-intercom-protocol.md)
-- [v1.12 conversation bridge PRD](./PRD-v1.12-conversation-bridge.md)
-- [v1.12 decision log](./DECISIONS-v1.12.md)
+- [Architecture](./ARCHITECTURE.md)
+- [Roadmap](./ROADMAP.md)

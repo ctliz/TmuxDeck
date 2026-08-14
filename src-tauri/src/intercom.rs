@@ -7,13 +7,13 @@
 //! 这一层替代了「轮询 capture-pane + 静默启发式猜状态」的全部工作：
 //! broker 本身就持有会话注册表与实时状态（idle / thinking / tool:<name>）。
 //!
-//! 协议（对齐 @dataforxyz/agent-intercom-* protocol v3）：
+//! 协议（对齐 Agent Intercom protocol v4 / @ctliz connect.2）：
 //!   传输：Unix domain socket，`~/.pi/agent/intercom/broker.sock`
 //!         （若设置了 `PI_CODING_AGENT_DIR`，则为 `$PI_CODING_AGENT_DIR/intercom/`）
 //!   分帧：4 字节大端长度前缀 + UTF-8 JSON，单帧上限 1 MiB
 //!
 //! 刻意的设计取舍：入站帧用 `serde_json::Value` 手工分派，而不是内部标记枚举。
-//! 协议在演进（dataforxyz 的跨 harness 分支已到 v3，新增了若干帧类型），
+//! 协议在演进（Agent Intercom protocol v4 / @ctliz connect.2 新增了顶层 scopeId 与对应帧结构），
 //! 手工分派遇到未知类型时忽略即可，不会整条连接反序列化失败。
 
 use serde::{Deserialize, Serialize};
@@ -122,19 +122,38 @@ impl IntercomMessage {
 /// 从 broker 收到的事件。上层（会话桥 / 手机端传输层）消费这些事件。
 #[derive(Debug, Clone)]
 pub enum IntercomEvent {
-    Registered { session_id: String, features: Vec<String> },
-    Sessions { request_id: String, sessions: Vec<SessionInfo> },
+    Registered {
+        session_id: String,
+        features: Vec<String>,
+    },
+    Sessions {
+        request_id: String,
+        sessions: Vec<SessionInfo>,
+    },
     Message {
         from: SessionInfo,
         message: IntercomMessage,
         delivery_id: String,
     },
-    PresenceUpdate { session: SessionInfo },
-    SessionJoined { session: SessionInfo },
-    SessionLeft { session_id: String },
-    Delivered { message_id: String },
-    DeliveryFailed { message_id: String, reason: String },
-    BrokerError { error: String },
+    PresenceUpdate {
+        session: SessionInfo,
+    },
+    SessionJoined {
+        session: SessionInfo,
+    },
+    SessionLeft {
+        session_id: String,
+    },
+    Delivered {
+        message_id: String,
+    },
+    DeliveryFailed {
+        message_id: String,
+        reason: String,
+    },
+    BrokerError {
+        error: String,
+    },
     Disconnected,
 }
 
@@ -209,11 +228,12 @@ fn new_id() -> String {
     format!("tmuxdeck-{}-{}", std::process::id(), now_ms())
 }
 
-fn registration_frame(name: &str, cwd: String, pid: u32, now: i64) -> Value {
+fn registration_frame(name: &str, cwd: String, pid: u32, now: i64, scope_id: &str) -> Value {
     json!({
         "type": "register",
         "protocol": "pi-intercom",
-        "version": 3,
+        "version": 4,
+        "scopeId": scope_id,
         "session": {
             "name": name,
             "cwd": cwd,
@@ -243,14 +263,14 @@ impl IntercomClient {
     /// 不会自动拉起 broker——broker 的生命周期归 pi 管，我们只搭便车。
     /// broker 不在时返回 Err，调用方应降级到 send-keys 通道。
     #[cfg(unix)]
-    pub fn connect(name: &str) -> Result<(Self, Receiver<IntercomEvent>), String> {
+    pub fn connect(name: &str, scope_id: &str) -> Result<(Self, Receiver<IntercomEvent>), String> {
+        crate::scope::validate_scope_id(scope_id)?;
         let path = socket_path().ok_or("ERR_NO_HOME_DIR")?;
         if !path.exists() {
             return Err("ERR_BROKER_NOT_RUNNING".to_string());
         }
 
-        let stream = UnixStream::connect(&path)
-            .map_err(|e| format!("ERR_BROKER_CONNECT|{}", e))?;
+        let stream = UnixStream::connect(&path).map_err(|e| format!("ERR_BROKER_CONNECT|{}", e))?;
         let reader_stream = stream
             .try_clone()
             .map_err(|e| format!("ERR_SOCKET_CLONE|{}", e))?;
@@ -270,6 +290,7 @@ impl IntercomClient {
                 .unwrap_or_default(),
             std::process::id(),
             now,
+            scope_id,
         );
         {
             let mut w = writer.lock().map_err(|_| "ERR_LOCK_POISONED")?;
@@ -279,13 +300,20 @@ impl IntercomClient {
         spawn_reader(reader_stream, tx, session_id.clone(), connected.clone());
 
         Ok((
-            Self { writer, session_id, connected },
+            Self {
+                writer,
+                session_id,
+                connected,
+            },
             rx,
         ))
     }
 
     #[cfg(not(unix))]
-    pub fn connect(_name: &str) -> Result<(Self, Receiver<IntercomEvent>), String> {
+    pub fn connect(
+        _name: &str,
+        _scope_id: &str,
+    ) -> Result<(Self, Receiver<IntercomEvent>), String> {
         // Windows 下 broker 用命名管道，需要单独实现。
         Err("ERR_INTERCOM_UNSUPPORTED_PLATFORM".to_string())
     }
@@ -353,7 +381,7 @@ impl IntercomClient {
         Ok(message_id)
     }
 
-    /// v3 回执：确认 broker 分配的 deliveryId 已被我们收到。
+    /// 回执：确认 broker 分配的 deliveryId 已被我们收到。
     pub fn acknowledge(&self, delivery_id: &str) -> Result<(), String> {
         self.send_frame(json!({
             "type": "message_received",
@@ -421,9 +449,16 @@ fn parse_broker_frame(v: &Value, session_id: &Arc<Mutex<Option<String>>>) -> Opt
             let features = v
                 .get("features")
                 .and_then(|f| f.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
-            Some(IntercomEvent::Registered { session_id: id, features })
+            Some(IntercomEvent::Registered {
+                session_id: id,
+                features,
+            })
         }
         "sessions" => Some(IntercomEvent::Sessions {
             request_id: v.get("requestId")?.as_str()?.to_string(),
@@ -448,7 +483,11 @@ fn parse_broker_frame(v: &Value, session_id: &Arc<Mutex<Option<String>>>) -> Opt
         }),
         "delivery_failed" => Some(IntercomEvent::DeliveryFailed {
             message_id: v.get("messageId")?.as_str()?.to_string(),
-            reason: v.get("reason").and_then(|r| r.as_str()).unwrap_or("unknown").to_string(),
+            reason: v
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
         }),
         "error" => Some(IntercomEvent::BrokerError {
             error: v.get("error")?.as_str()?.to_string(),
@@ -479,12 +518,24 @@ mod tests {
     }
 
     #[test]
-    fn test_registration_uses_protocol_v3() {
-        let frame = registration_frame("me", "/tmp".to_string(), 42, 1000);
+    fn test_registration_uses_protocol_v4_with_top_level_scope() {
+        let scope = "Scope_WorkspaceA123";
+        let frame = registration_frame("me", "/tmp".to_string(), 42, 1000, scope);
         assert_eq!(frame["type"], "register");
         assert_eq!(frame["protocol"], "pi-intercom");
-        assert_eq!(frame["version"], 3);
+        assert_eq!(frame["version"], 4);
+        assert_eq!(frame["scopeId"], scope);
         assert_eq!(frame["session"]["name"], "me");
+        assert!(frame["session"].get("scopeId").is_none());
+        assert!(frame["session"].get("scope").is_none());
+    }
+
+    #[test]
+    fn test_connect_validates_scope_id_fails_closed() {
+        let invalid_scopes = ["", "too_short", "has space 123456", "invalid@char!123456"];
+        for invalid in invalid_scopes {
+            assert!(IntercomClient::connect("me", invalid).is_err());
+        }
     }
 
     #[test]
@@ -511,9 +562,13 @@ mod tests {
     #[test]
     fn test_parse_registered_sets_session_id() {
         let sid = Arc::new(Mutex::new(None));
-        let v = json!({ "type": "registered", "sessionId": "s-1", "features": ["extension-bus-v1"] });
+        let v =
+            json!({ "type": "registered", "sessionId": "s-1", "features": ["extension-bus-v1"] });
         match parse_broker_frame(&v, &sid) {
-            Some(IntercomEvent::Registered { session_id, features }) => {
+            Some(IntercomEvent::Registered {
+                session_id,
+                features,
+            }) => {
                 assert_eq!(session_id, "s-1");
                 assert_eq!(features, vec!["extension-bus-v1".to_string()]);
             }
@@ -546,13 +601,16 @@ mod tests {
         }
 
         let mut missing_delivery = v;
-        missing_delivery.as_object_mut().unwrap().remove("deliveryId");
+        missing_delivery
+            .as_object_mut()
+            .unwrap()
+            .remove("deliveryId");
         assert!(parse_broker_frame(&missing_delivery, &sid).is_none());
     }
 
     #[cfg(unix)]
     #[test]
-    fn test_acknowledge_uses_delivery_id_v3_frame() {
+    fn test_acknowledge_uses_delivery_id_frame() {
         let (stream, mut peer) = UnixStream::pair().unwrap();
         let client = IntercomClient {
             writer: Arc::new(Mutex::new(stream)),

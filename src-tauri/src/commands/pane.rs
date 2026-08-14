@@ -57,11 +57,18 @@ fn native_slot_numbers(slots: &[crate::commands::native::NativeSlot], count: usi
     (first..first + count).collect()
 }
 
-fn standard_split_args(session: &str, work_dir: &str, command: &str) -> Vec<String> {
+fn standard_split_args(
+    session: &str,
+    work_dir: &str,
+    command: &str,
+    scope_id: &str,
+) -> Vec<String> {
     let mut args = vec![
         "split-window".to_string(),
         "-t".to_string(),
         session.to_string(),
+        "-e".to_string(),
+        format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
     ];
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
@@ -169,6 +176,7 @@ fn add_native_panes(
     agent_cmd: &str,
     agent_id: &str,
     count: usize,
+    scope_id: &str,
 ) -> Result<usize, String> {
     let visible = visible_native_slot_numbers(workspace)?;
     let original_layout: Vec<_> = visible
@@ -185,7 +193,7 @@ fn add_native_panes(
     let mut created = Vec::new();
     for number in numbers {
         attempted_targets.push(crate::commands::native::slot_target(workspace, number));
-        match create_native_slot(workspace, number, work_dir, agent_cmd, agent_id) {
+        match create_native_slot(workspace, number, work_dir, agent_cmd, agent_id, scope_id) {
             Ok(slot) => created.push(slot),
             Err(error) => {
                 return Err(rollback_error(
@@ -228,6 +236,7 @@ fn add_standard_panes(
     agent_cmd: &str,
     agent_id: &str,
     count: usize,
+    scope_id: &str,
 ) -> Result<usize, String> {
     let first_pane_number = crate::tmux::get_session_panes(session, false, None).len() + 1;
     let mut created = Vec::new();
@@ -243,7 +252,7 @@ fn add_standard_panes(
                 }
             };
         let isolated_agent = isolated_agent_command(&pane_agent_cmd, agent_id != "shell");
-        let split_args = standard_split_args(session, work_dir, &isolated_agent);
+        let split_args = standard_split_args(session, work_dir, &isolated_agent, scope_id);
         let refs: Vec<&str> = split_args.iter().map(String::as_str).collect();
         let output = match run_tmux(&refs) {
             Ok(output) => output,
@@ -335,6 +344,15 @@ pub fn add_panes(
         .lock()
         .map_err(|_| "ERR_ADD_PANE_FAILED|lock".to_string())?;
     let native_slots = list_native_slots(&sanitized)?;
+    let scope_id = if native_slots.is_empty() {
+        crate::scope::read_targets_scope(&[&sanitized])?
+    } else {
+        let targets: Vec<&str> = native_slots
+            .iter()
+            .map(|slot| slot.target.as_str())
+            .collect();
+        crate::scope::read_targets_scope(&targets)?
+    };
     let work_dir_target = native_slots
         .first()
         .map(|slot| slot.target.as_str())
@@ -343,7 +361,14 @@ pub fn add_panes(
     let agent_id = agent_id.unwrap_or_else(|| "shell".to_string());
     let agent_cmd = resolve_agent_command(&agent_id, &detect_environment().agents)?;
     if native_slots.is_empty() {
-        add_standard_panes(&sanitized, &work_dir, &agent_cmd, &agent_id, count as usize)
+        add_standard_panes(
+            &sanitized,
+            &work_dir,
+            &agent_cmd,
+            &agent_id,
+            count as usize,
+            &scope_id,
+        )
     } else {
         add_native_panes(
             &sanitized,
@@ -352,6 +377,7 @@ pub fn add_panes(
             &agent_cmd,
             &agent_id,
             count as usize,
+            &scope_id,
         )
     }
 }
@@ -547,11 +573,18 @@ mod tests {
     #[test]
     fn standard_batch_split_command_preserves_target_workdir_and_output_id() {
         assert_eq!(
-            standard_split_args("deck", "/tmp/project", "agent --flag"),
+            standard_split_args(
+                "deck",
+                "/tmp/project",
+                "agent --flag",
+                "Scope_WorkspaceA123"
+            ),
             [
                 "split-window",
                 "-t",
                 "deck",
+                "-e",
+                "AGENT_INTERCOM_SCOPE_ID=Scope_WorkspaceA123",
                 "-c",
                 "/tmp/project",
                 "-P",
@@ -560,9 +593,11 @@ mod tests {
                 "agent --flag",
             ]
         );
-        assert!(!standard_split_args("deck", "~", "shell")
-            .iter()
-            .any(|arg| arg == "-c"));
+        assert!(
+            !standard_split_args("deck", "~", "shell", "Scope_WorkspaceA123")
+                .iter()
+                .any(|arg| arg == "-c")
+        );
     }
 
     #[test]

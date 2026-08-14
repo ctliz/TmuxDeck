@@ -338,6 +338,8 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             }
         });
 
+    let scope_id = crate::scope::generate_workspace_scope_id()?;
+
     if opts.terminal_id == "ghostty" && ghostty_native_available() {
         let slots = create_native_workspace(
             &sanitized_name,
@@ -345,6 +347,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             &work_dir_clean,
             &pane_agent_commands,
             &pane_agent_ids,
+            &scope_id,
         )?;
         if open_native_workspace(&sanitized_name, &slots, slots.len()).is_ok() {
             save_create_defaults(&opts);
@@ -369,6 +372,8 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         sanitized_name.clone(),
         "-e".to_string(),
         format!("PATH={}", augmented_path),
+        "-e".to_string(),
+        format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
     ];
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
@@ -432,16 +437,18 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
 
     for pane in 2..=count {
         let mut split_args = vec![
-            "split-window",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "-t",
-            &sanitized_name,
+            "split-window".to_string(),
+            "-P".to_string(),
+            "-F".to_string(),
+            "#{pane_id}".to_string(),
+            "-t".to_string(),
+            sanitized_name.clone(),
+            "-e".to_string(),
+            format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
         ];
         if !work_dir_clean.is_empty() && work_dir_clean != "~" {
-            split_args.push("-c");
-            split_args.push(&work_dir_clean);
+            split_args.push("-c".to_string());
+            split_args.push(work_dir_clean.clone());
         }
         let (pane_agent_cmd, intercom_id) = panel_agent_command(
             &pane_agent_ids[pane - 1],
@@ -451,9 +458,10 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         )?;
         let isolated_agent =
             isolated_agent_command(&pane_agent_cmd, pane_agent_ids[pane - 1] != "shell");
-        split_args.push(&isolated_agent);
+        split_args.push(isolated_agent);
 
-        if let Ok(created) = run_tmux(&split_args) {
+        let split_refs: Vec<&str> = split_args.iter().map(String::as_str).collect();
+        if let Ok(created) = run_tmux(&split_refs) {
             if created.status.success() {
                 if let Some(pane_id) = String::from_utf8_lossy(&created.stdout)
                     .lines()
@@ -691,9 +699,24 @@ pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> 
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
-    if rename_native_workspace(&sanitized_old, &sanitized_new)? {
+
+    let old_native_slots = list_native_slots(&sanitized_old)?;
+    if !old_native_slots.is_empty() {
+        let old_targets: Vec<&str> = old_native_slots.iter().map(|s| s.target.as_str()).collect();
+        let old_scope = crate::scope::read_targets_scope(&old_targets)?;
+        rename_native_workspace(&sanitized_old, &sanitized_new)?;
+        let new_native_slots = list_native_slots(&sanitized_new)?;
+        let new_targets: Vec<&str> = new_native_slots.iter().map(|s| s.target.as_str()).collect();
+        let new_scope = crate::scope::read_targets_scope(&new_targets)
+            .map_err(|_| "ERR_SCOPE_REATTACH".to_string())?;
+        if new_scope != old_scope {
+            return Err("ERR_SCOPE_REATTACH".to_string());
+        }
         return Ok(());
     }
+
+    let old_scope = crate::scope::read_session_scope(&sanitized_old)?
+        .ok_or_else(|| "ERR_SCOPE_UNAVAILABLE".to_string())?;
 
     let output = run_tmux(&["rename-session", "-t", &sanitized_old, &sanitized_new])
         .map_err(|e| format!("ERR_RENAME_FAILED|{}", e))?;
@@ -705,6 +728,15 @@ pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> 
         }
         return Err(format!("ERR_RENAME_OUTPUT_ERR|{}", err_msg));
     }
+
+    let new_scope = crate::scope::read_session_scope(&sanitized_new)
+        .map_err(|_| "ERR_SCOPE_REATTACH".to_string())?
+        .ok_or_else(|| "ERR_SCOPE_REATTACH".to_string())?;
+
+    if new_scope != old_scope {
+        return Err("ERR_SCOPE_REATTACH".to_string());
+    }
+
     Ok(())
 }
 

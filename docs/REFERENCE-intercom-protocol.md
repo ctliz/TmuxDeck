@@ -1,6 +1,6 @@
 # pi-intercom wire protocol reference
 
-> This document was originally reconstructed from `nicobailon/pi-intercom`, and is now updated against Agent Intercom protocol v3's `types.ts`, `broker.ts`, and `broker/framing.ts`, including the Pi maintenance release `v0.10.1-tmuxdeck.1`. **Written down so we never have to re-derive it.**
+> This document is updated against Agent Intercom protocol v4 (`types.ts`, `broker.ts`, and `broker/framing.ts` in the `ctliz` ecosystem with `@dataforxyz` provenance), covering Pi `v0.11.0-connect.2` and Managed Claude `0.12.0-connect.3`. **Written down so we never have to re-derive it.**
 >
 > Implementation lives in `src-tauri/src/intercom.rs`; the verification script is `scripts/intercom-probe.mjs`.
 
@@ -11,7 +11,7 @@
 | Platform | Transport |
 |---|---|
 | macOS / Linux | Unix domain socket |
-| Windows | named pipe (TmuxDeck does not implement it yet) |
+| Windows | named pipe (TmuxDeck degrades gracefully to send-keys) |
 
 Socket path:
 
@@ -20,19 +20,19 @@ $PI_CODING_AGENT_DIR/intercom/broker.sock   (when that env var is set)
 ~/.pi/agent/intercom/broker.sock            (default)
 ```
 
-**The broker's lifecycle is not ours to manage**: it is launched automatically by the first intercom session and exits on its own 5 seconds after the last session disconnects. So "socket doesn't exist" is the norm, not an error — callers should degrade to the `send-keys` channel rather than trying to start the broker.
+**The broker's lifecycle is not ours to manage**: it is launched automatically by the first intercom session and exits on its own 5 seconds after the last session disconnects. Callers should degrade gracefully if the socket is absent rather than attempting to force broker creation.
 
 ---
 
 ## Framing
 
 ```
-┌────────────────┬─────────────────────────┐
-│ 4-byte big-endian length │ UTF-8 JSON (length applies to this segment) │
-└────────────────┴─────────────────────────┘
+┌───────────────────────────┬──────────────────────────────────────────────┐
+│ 4-byte big-endian length  │ UTF-8 JSON (length applies to this segment)  │
+└───────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-Single-frame cap is **1 MiB**; the side exceeding it should error and disconnect. Note that TCP/UDS split and coalesce packets, so the reader must reassemble — both `intercom-probe.mjs` and `intercom.rs` implement this.
+Single-frame cap is **1 MiB**; exceeding it triggers an immediate connection drop. The reader must handle TCP/UDS packet splitting and coalescing.
 
 ---
 
@@ -40,31 +40,33 @@ Single-frame cap is **1 MiB**; the side exceeding it should error and disconnect
 
 | `type` | Key fields | Notes |
 |---|---|---|
-| `register` | `protocol: "pi-intercom"`, `version: 3`, `session` (see below), `sessionId?`, `stateId?` | the first thing after connecting; a version mismatch disconnects |
-| `unregister` | `preserveAsks?` | graceful exit |
-| `list` | `requestId` | request the session list; returned asynchronously via `sessions` |
-| `send` | `to`, `message` | `to` can be a session name or session ID |
-| `message_received` | `deliveryId` | the receiver confirms this delivery after durable enqueue |
-| `message_rejected` | `deliveryId`, `code`, `reason` | receiver rejects a conflicting delivery |
-| `presence` | `status?`, `name?`, `model?` … | update own status |
-| `cancel_message` / `cancel_ask` | `messageId` | recall |
-| `extension_publish` / `extension_state_commit` | `namespace` … | extension bus; unused by TmuxDeck |
+| `register` | `protocol: "pi-intercom"`, `version: 4`, `scopeId?`, `session` (see below), `sessionId?`, `stateId?` | First frame after connecting; `scopeId` is optional top-level scope; version mismatch causes disconnection |
+| `unregister` | `preserveAsks?` | Graceful disconnection |
+| `list` | `requestId` | Request active session list; broker enforces workspace scope by default |
+| `send` | `to`, `message` | `to` resolves by name/prefix in-scope, or by exact full session ID cross-scope |
+| `message_received` | `deliveryId` | Receiver confirms delivery after durable enqueue |
+| `message_rejected` | `deliveryId`, `code`, `reason` | Receiver rejects an invalid delivery |
+| `presence` | `status?`, `name?`, `model?` … | Update session status |
+| `cancel_message` / `cancel_ask` | `messageId` | Recall a message |
+| `extension_publish` / `extension_state_commit` | `namespace` … | Extension bus |
 
 ### The `session` field of `register`
 
 ```jsonc
 {
-  "name": "me",          // other sessions address by this
-  "cwd": "/path",        // display metadata
-  "model": "human",      // "human" so others can see at a glance this is a person, not an agent
-  "pid": 12345,          // key for pane association: walk up the parent chain to match pane_pid
+  "name": "me",             // Display/contact name within scope
+  "cwd": "/path/to/project", // Working directory
+  "model": "human",         // "human" to indicate a person rather than an agent
+  "pid": 12345,             // Key for pane/process association
   "startedAt": 1754870400000,
   "lastActivity": 1754870400000,
   "status": "idle"
 }
 ```
 
-> `cwd` / `model` / `pid` / `status` are all **display metadata, not authentication**. The broker's trust boundary is "same OS user", not a cryptographic principal.
+> **Scope location & isolation boundary:** `scopeId` is strictly a top-level field on `register` and never belongs inside `session`. `scopeId` provides same-OS-user workspace isolation and routing resolution, not a cryptographic security principal. The trust perimeter is the local OS user account.
+>
+> **Scope encapsulation:** `scopeId` is purely broker routing metadata. It **never** enters `SessionInfo`, `list` / `sessions` response payloads, lifecycle event frames (`session_joined`, `session_left`, `presence_update`), or frontend/mobile models.
 
 ---
 
@@ -72,18 +74,30 @@ Single-frame cap is **1 MiB**; the side exceeding it should error and disconnect
 
 | `type` | Key fields | Notes |
 |---|---|---|
-| `registered` | `sessionId`, `protocol`, `version` | registration succeeded; you get your own session ID |
-| `sessions` | `requestId`, `sessions[]` | the response to `list` |
-| `message` | `deliveryId`, `from`, `message` | a message arrived; you must ACK by `deliveryId` after handling |
-| `presence_update` | `session` | some session's status changed |
-| `session_joined` / `session_left` | `session` / `sessionId` | went online / offline |
-| `delivery_accepted` | `messageId`, `deliveryId` | broker accepted it and is awaiting receiver confirmation |
-| `delivered` | `messageId`, `deliveryId` | receiver confirmed durable receipt |
-| `delivery_failed` | `messageId`, `code`, `reason`, `retryable` | delivery failed |
-| `error` | `error` | broker error |
-| `message_control` / `extension_*` | — | not consumed by TmuxDeck |
+| `registered` | `sessionId`, `protocol`, `version` | Registration succeeded |
+| `sessions` | `requestId`, `sessions[]` | Scoped list response (`SessionInfo[]`, no scopeId exposed) |
+| `message` | `deliveryId`, `from`, `message` | Inbound message; must ACK with `message_received` |
+| `presence_update` | `session` | Session status change |
+| `session_joined` / `session_left` | `session` / `sessionId` | Online/offline lifecycle events |
+| `delivery_accepted` | `messageId`, `deliveryId` | Broker accepted message for delivery |
+| `delivered` | `messageId`, `deliveryId` | Target acknowledged durable enqueue |
+| `delivery_failed` | `messageId`, `code`, `reason`, `retryable` | Delivery failed |
+| `error` | `error` | Broker error |
 
-**Inbound parsing must tolerate unknown `type`**: the upstream protocol is evolving (the cross-harness branch is at v3, with several new frame types). `intercom.rs` therefore dispatches manually rather than using serde's internally tagged enums — unknown types can simply be ignored without failing deserialization of the whole connection.
+**Tolerant parsing:** Inbound frame parsing ignores unknown `type` fields without failing deserialization of the connection.
+
+---
+
+## Workspace scoping and routing rules (v4)
+
+1. **Broker-enforced scoping:** `intercom_list` returns only peers belonging to the caller's registered `scopeId`.
+2. **Name and prefix resolution:** Short names and prefix-based session matching are confined to the caller's workspace scope.
+3. **Cross-scope routing:** A sender communicating across scopes must provide the **exact full session ID**.
+4. **Zero raw scope exposure for frontend and mobile:** Desktop and mobile control surfaces maintain zero raw scope exposure (零原值暴露); the backend manages an independent scoped human client (`me`) per workspace and aggregates conversations into the unified `ConversationRegistry`.
+5. **Fail-closed legacy workspaces:** Pre-v4 workspaces without scope metadata fail closed on add/rename operations and require recreation.
+6. **Coordinated upgrade for installed adapters only:** When transitioning protocol versions, only currently installed and active adapters must be upgraded together. Reload `/reload` Pi sessions and restart active companion adapters.
+7. **Orchestrator:** Orchestrator is an optional Linux/systemd lifecycle product, outside the Broker compatibility set; omitted on macOS.
+8. **Same-OS-user isolation:** Scope is an operational routing boundary, not a cryptographic security principal.
 
 ---
 
@@ -91,41 +105,37 @@ Single-frame cap is **1 MiB**; the side exceeding it should error and disconnect
 
 ```jsonc
 {
-  "id": "20d43841…",     // stable session ID, the trustworthy addressing key
-  "name": "planner",     // duplicates allowed; sending to a duplicate name fails, switch to id
+  "id": "20d43841…",        // Stable session ID; unambiguous addressing target
+  "name": "planner",        // Human-readable name (unique per workspace scope)
   "cwd": "/projects/api",
   "model": "claude-sonnet-4",
   "pid": 12345,
   "startedAt": 1754870400000,
   "lastActivity": 1754870400000,
-  "status": "thinking",  // see below
-  "contextPct": 43       // context usage percent; may be absent
+  "status": "thinking",
+  "contextPct": 43
 }
 ```
 
-### status — the factual source for four-state detection
+### Status values
 
 | Value | Meaning |
 |---|---|
-| `idle` | idle, can receive input |
-| `thinking` | model is generating |
-| `tool:<name>` | running some tool |
-| absent / other | unknown (don't guess) |
-
-Auto-reported by each session at pi lifecycle events.
-
-> This single item eliminates all need for the "poll capture-pane + hash-compare content + silence heuristic" machinery. Do not re-implement that.
+| `idle` | Idle, ready for input |
+| `thinking` | Generating output |
+| `tool:<name>` | Executing a tool |
+| absent / other | Unknown |
 
 ---
 
-## Message
+## Message structure
 
 ```jsonc
 {
   "id": "m-1",
   "timestamp": 1754870400000,
-  "replyTo": "m-0",       // reply to some message; the receiver matches the corresponding ask with this
-  "expectsReply": true,   // the other side is asking, blocked waiting ← highest-priority signal
+  "replyTo": "m-0",
+  "expectsReply": true,     // Priority signal indicating a blocking question
   "content": {
     "text": "Need your confirmation",
     "attachments": [
@@ -135,61 +145,15 @@ Auto-reported by each session at pi lifecycle events.
 }
 ```
 
-`attachments.type` values: `file` / `snippet` / `context`.
-
-**`expectsReply: true` is the only signal that should trigger a push on the phone** — it means an agent is blocked waiting on you to reply, not merely sending a notification.
-
 ---
 
-## Delivery semantics
+## Upstream and provenance
 
-The broker owns addressing, the ask edges, and delivery state; each Harness adapter owns durable enqueue and injecting into the target session at a safe moment. So **don't re-implement a delivery-timing judgment in TmuxDeck to avoid interrupting an agent** — just `send`. That's the core reason intercom beats `send-keys` shoving characters in blindly (the latter gets swallowed or interrupts a thinking TUI).
-
-v3 delivery is two-phase: `delivery_accepted` only means the broker accepted it; the receiver must send `message_received { deliveryId }` after processing the `message`, and only then does the sender see `delivered`. The business `message.id` cannot substitute for `deliveryId`.
-
-### A reply must come from the session that received the ask
-
-The broker validates `replyTo` at the **sessionId level** (`broker.ts`: `replyEdge.to !== currentId` returns `delivery_failed`):
-
-- Opening a new connection and re-registering (even with the same name) gets a new sessionId and **cannot reply to the same ask**;
-- A reply can only be sent on **the connection that received the ask** (`intercom.rs`'s `reply()` does exactly this — same persistent connection, same sessionId);
-- Tested: an independent process sending with `replyTo` is rejected with `Reply target does not match the pending ask`.
-
-Impact on the phone: TmuxDeck must hold a single persistent connection and always reply through it; it cannot open a fresh connection per reply.
-
----
-
-## Differences between the two branches
-
-The current verified Pi adapter on this machine is the GitHub-only maintenance release **`@dataforxyz/agent-intercom-pi` `0.10.1-tmuxdeck.1`**, tag [`v0.10.1-tmuxdeck.1`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1), commit `452b63f11d50dcdbbcf8485eb04d19928bbbfb13`. It is based on upstream Pi `v0.10.0` (`85c118453a15b3631b2a1eb289b66a65d1ac6ab2`) and tracks the fixes upstream in [agent-intercom-pi#20](https://github.com/dataforxyz/agent-intercom-pi/issues/20).
-
-No global Codex, Claude, or OpenCode adapter package was detected in the same verification, so do not infer that all harness adapters are installed or share one package version. TmuxDeck's optional Managed Claude adapter is separately pinned and installed under TmuxDeck's config directory on macOS; Standard Claude, Codex, and OpenCode adapters remain independently managed. All participants that share a broker must still speak compatible protocol v3.
-
-The table below keeps the historical differences from the original `nicobailon/pi-intercom` (pi-only), for troubleshooting older environments:
-
-| | Original | Cross-harness |
-|---|---|---|
-| Supported agents | pi only | Pi, Codex, Claude Code, OpenCode |
-| Runtime files | `broker.sock` `broker.pid` `config.json` | plus `broker.owner`, `broker-asks.json`, `inbox/`, `outbox/` |
-| Delivery persistence | none (only pi session history) | persistent inbox/outbox + ACK + offline replay |
-| `ask` semantics | client hard-blocks for 10 minutes | soft-wait 30s then async; a late reply within 10 minutes is fine |
-| Tool shape | single `intercom({action})` | split into `intercom_send` / `_ask` / `_reply` / … |
-| License | MIT | AGPL-3.0-or-later |
-
-**Protocol migration is all-or-nothing**: mixing incompatible protocol generations splits clients into mutually invisible broker "islands". For a protocol-v3 maintenance update, run `/reload` in every Pi session and restart companion adapters so the shared broker can restart cleanly. Package version strings do not have to be identical when the adapters are independently verified as protocol-v3 compatible.
-
-The Pi maintenance adapter defaults discovery and name/ID-prefix routing to the canonical current workspace, supports explicit `scope: "machine"`, and accepts an exact full session ID as the intentional cross-workspace route. These are client-side filtering and fail-closed routing semantics. They are **not** wire authorization, broker isolation, credentials, or a new security boundary; the protocol-v3 broker remains machine-global for the same OS user, and other adapters may still present a machine-global roster.
-
-> For the phone scenario the cross-harness version is clearly the better fit: when you're away from the desk, a hard 10-minute blocking `ask` is a bad semantic.
-
-### License note
-
-Implementing a client yourself against the wire protocol **does not constitute a derivative work**; `intercom.rs` is an independent implementation and copies no upstream source. If you later need to modify the upstream adapter itself, the AGPL applies.
-
----
-
-## Upstream
-
-- [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom) (MIT, pi-only)
-- [dataforxyz/agent-intercom-pi](https://github.com/dataforxyz/agent-intercom-pi) (AGPL, cross-harness)
-- [ctliz/agent-intercom-pi v0.10.1-tmuxdeck.1](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1) (GitHub-only Pi maintenance release based on upstream v0.10.0)
+- [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom) (MIT, original pi-only implementation)
+- `@dataforxyz/agent-intercom-*` (AGPL, cross-harness protocol foundation)
+- `@ctliz/agent-intercom-core@0.1.0` (internal core protocol implementation)
+- `@ctliz/agent-intercom-pi` / [ctliz/agent-intercom-pi](https://github.com/ctliz/agent-intercom-pi) (`v0.11.0-connect.2`, protocol v4)
+- `@ctliz/agent-intercom-claude` / [ctliz/agent-intercom-claude](https://github.com/ctliz/agent-intercom-claude) (`0.12.0-connect.3`, Managed Claude with `--tui --safe`)
+- `@ctliz/agent-intercom-codex` (`0.11.0-connect.2`)
+- `@ctliz/agent-intercom-opencode` (`0.11.0-connect.2`)
+- `@ctliz/agent-intercom-orchestrator` (`0.11.0-connect.2`, optional Linux/systemd)

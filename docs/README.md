@@ -14,8 +14,8 @@
 | Doc | Contents |
 |---|---|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Module map, data flows, two easy-to-miss key implementations |
-| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide, including the fixed-tag Pi maintenance adapter and workspace-scoped Pi discovery |
-| [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom wire protocol (reconstructed from upstream source, to avoid re-deriving it) |
+| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide for Agent Intercom protocol v4, including broker-enforced workspace scoping, Pi v0.11.0-connect.2, and Managed Claude 0.12.0-connect.3 |
+| [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom wire protocol reference (protocol v4) |
 | [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | Conversation content source design (Claude Code JSONL preferred + fallback) |
 | [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | Mobile transport and security design |
 | [ROADMAP.md](./ROADMAP.md) | Schedule and progress, maintained by product |
@@ -63,4 +63,4 @@ Test instances may only be terminated by the **exact PID recorded at launch**: s
 [v1.9.2](./RELEASE-NOTES-v1.9.2.md) · [v1.9.3](./RELEASE-NOTES-v1.9.3.md) ·
 [v1.9.4](./RELEASE-NOTES-v1.9.4.md) · [v1.10.0](./RELEASE-NOTES-v1.10.0.md) ·
 [v1.11.0](./RELEASE-NOTES-v1.11.0.md) · [v1.11.1](./RELEASE-NOTES-v1.11.1.md) ·
-[v1.12.0](./RELEASE-NOTES-v1.12.0.md)
+[v1.12.0](./RELEASE-NOTES-v1.12.0.md) · [v1.13.0](./RELEASE-NOTES-v1.13.0.md)

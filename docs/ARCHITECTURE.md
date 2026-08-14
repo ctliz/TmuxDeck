@@ -1,7 +1,7 @@
 # TmuxDeck architecture
 
 > For developers and agents. Users should see the [README](../README.md).
-> This describes the module structure and data flows after the v1.12 split.
+> This describes the module structure and data flows for the v1.13 architecture.
 
 ---
 
@@ -19,7 +19,9 @@ src-tauri/src/
 ├── tray.rs           Menu bar menu construction
 ├── audit.rs          Kill/rename audit trail + session/pane counters
 │
-├── intercom.rs       ← Agent Intercom broker client (protocol v3, @dataforxyz/agent-intercom-* 0.10.0)
+├── intercom.rs       ← Agent Intercom broker client (protocol v4, ctliz agent-intercom v4, Pi v0.11.0-connect.2 / Claude 0.12.0-connect.3, dataforxyz provenance)
+├── claude_adapter.rs ← Managed Claude adapter management (macOS pinned 0.12.0-connect.3, --tui --safe, SHA verification, rollback)
+├── scope.rs          ← Workspace scope routing boundaries and validation (scope is routing boundary, not auth)
 ├── bridge.rs         ← Conversation bridge: panes ⊕ intercom sessions → unified conversation model;
 │                       ConversationRegistry, pane↔session association, deliver/forward, Transport trait
 ├── bridge_state.rs   Read-only registry/transport snapshot published into Tauri state for the desktop UI
@@ -40,6 +42,32 @@ src-tauri/src/
 **Layering constraint:** `commands/` only parses arguments and translates errors; business logic belongs in `tmux.rs` / `bridge.rs`. `intercom.rs` and `bridge.rs` **do not depend on the tauri crate** — that keeps them directly unit-testable and extractable into a standalone daemon later without changes.
 
 The frontend is componentized: `src/main.tsx` mounts `App.tsx`, which composes `src/components/` (`CardGrid`, `SessionCard`, `CreateWorkspaceModal`, `NewWorkspaceCard`, `SearchHeader`, `TmuxMissingScreen`); `src/i18n.ts` holds the en / zh-CN strings, `src/types.ts` the shared types, and `src/utils.ts` the shared helpers.
+
+---
+
+## Agent Intercom v4 & Workspace Scoping
+
+Starting with v1.13, TmuxDeck integrates **Agent Intercom protocol v4** (`ctliz` ecosystem with `@dataforxyz` provenance).
+
+### 1. Broker-enforced workspace scope
+- Peer discovery (`intercom_list`) and name/prefix resolution are enforced by the broker within the active workspace scope.
+- Cross-scope communication is explicitly permitted only by supplying the **exact full session ID**.
+- **Scope is same-OS-user isolation, not a security principal:** Scoping partitions discovery and prevents accidental cross-talk between workspaces; it is an operational routing boundary, not a cryptographic identity or authorization mechanism. The trust boundary remains the local OS user.
+
+### 2. Zero raw scope exposure for frontend and mobile
+- TmuxDeck desktop dashboard and mobile endpoints operate with zero raw scope exposure (零原值暴露).
+- The backend manages an independent scoped human client per workspace and aggregates conversation events across all workspaces into the unified `ConversationRegistry`.
+
+### 3. Fail-closed legacy workspaces
+- Workspaces created prior to v4 scoping metadata fail closed on pane additions or renames.
+- To enable proper v4 scope binding, legacy workspaces should be recreated.
+
+### 4. Coordinated upgrade for installed adapters
+- When migrating protocol versions, only **currently installed adapters** need to be upgraded together.
+- Open Pi sessions require `/reload`, and companion adapters (`cci`, `coi`, OpenCode) must be restarted. Uninstalled adapters require no action.
+
+### 5. Orchestrator deployment model
+- Orchestrator is an optional Linux/systemd lifecycle product, outside the Broker compatibility set; omitted on macOS where the broker is automatically socket-activated and torn down on demand.
 
 ---
 

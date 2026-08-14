@@ -21,7 +21,7 @@ use crate::bridge::{
 };
 use crate::bridge_state::BridgeState;
 use crate::intercom::{broker_available, IntercomClient, IntercomEvent};
-use crate::tmux::{list_all_panes, send_key_name, validate_pane_id, ALLOWED_KEYS};
+use crate::tmux::{list_all_panes, send_key_name, validate_pane_id, PaneDetail, ALLOWED_KEYS};
 use crate::transcript::CompositeTranscriptSource;
 use crate::transport::{InboundCommand, WsTransport};
 use std::collections::HashMap;
@@ -60,9 +60,41 @@ struct PendingReply {
     reply_to: String,
 }
 
+struct WorkspaceIntercom {
+    scope_id: String,
+    client: IntercomClient,
+    rx: Receiver<IntercomEvent>,
+}
+
+/// 过滤跨 workspace 出现重复 scope_id 的冲突映射。
+/// 凡是多个 workspace_id 映射到同一个 scope_id 的情况（人为篡改/碰撞），
+/// 均属于冲突状态，排除该 scope_id 涉及的所有 workspace，避免注册多个重名客户端。
+pub(crate) fn filter_unique_workspace_scopes(
+    desired: HashMap<String, String>,
+) -> (HashMap<String, String>, Vec<Vec<String>>) {
+    let mut scope_to_workspaces: HashMap<String, Vec<String>> = HashMap::new();
+    for (ws_id, scope_id) in desired {
+        scope_to_workspaces.entry(scope_id).or_default().push(ws_id);
+    }
+
+    let mut valid = HashMap::new();
+    let mut conflicts = Vec::new();
+
+    for (scope_id, mut workspaces) in scope_to_workspaces {
+        if workspaces.len() == 1 {
+            let ws_id = workspaces.remove(0);
+            valid.insert(ws_id, scope_id);
+        } else {
+            workspaces.sort();
+            conflicts.push(workspaces);
+        }
+    }
+    conflicts.sort();
+    (valid, conflicts)
+}
+
 pub struct BridgeEngine {
-    intercom: Option<IntercomClient>,
-    intercom_rx: Option<Receiver<IntercomEvent>>,
+    intercoms: HashMap<String, WorkspaceIntercom>,
     registry: ConversationRegistry,
     transcript: CompositeTranscriptSource,
     transport: WsTransport,
@@ -110,28 +142,8 @@ impl BridgeEngine {
             port
         );
 
-        // 2. intercom（可选）
-        let (intercom, intercom_rx) = if broker_available() {
-            match IntercomClient::connect("me") {
-                Ok(x) => {
-                    println!("[bridge] intercom broker connected as 'me'");
-                    (Some(x.0), Some(x.1))
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[bridge] intercom connect failed (fallback send-keys): {}",
-                        e
-                    );
-                    (None, None)
-                }
-            }
-        } else {
-            (None, None)
-        };
-
         let mut engine = Self {
-            intercom,
-            intercom_rx,
+            intercoms: HashMap::new(),
             registry: ConversationRegistry::new(),
             transcript: CompositeTranscriptSource::new(),
             transport,
@@ -153,15 +165,15 @@ impl BridgeEngine {
         self.refresh_all();
 
         loop {
-            // 1) intercom 事件（非阻塞轮询）
-            if let Some(rx) = &self.intercom_rx {
-                let mut events = Vec::new();
-                while let Ok(ev) = rx.try_recv() {
-                    events.push(ev);
+            // 1) intercom 事件（非阻塞轮询各 workspace 的 rx）
+            let mut events: Vec<(String, IntercomEvent)> = Vec::new();
+            for (ws_id, ws_intercom) in &self.intercoms {
+                while let Ok(ev) = ws_intercom.rx.try_recv() {
+                    events.push((ws_id.clone(), ev));
                 }
-                for ev in events {
-                    self.on_intercom(ev);
-                }
+            }
+            for (ws_id, ev) in events {
+                self.on_intercom(&ws_id, ev);
             }
 
             // 2) 手机指令
@@ -214,15 +226,84 @@ impl BridgeEngine {
         let now = Instant::now();
 
         // 1) pane 骨架
-        self.registry.refresh_panes(list_all_panes());
+        let panes = list_all_panes();
+        self.registry.refresh_panes(panes.clone());
         self.pending_replies
             .retain(|pane_id, _| self.registry.get(pane_id).is_some());
 
-        // 2) intercom 会话合并（若在线）
-        if let Some(client) = &self.intercom {
-            if client.is_connected() {
-                let _ = client.request_list();
+        // 2) 按 workspace_id 聚合 actual session target，并通过 scope::read_targets_scope 读取 desired scope
+        let mut ws_panes: HashMap<String, Vec<&PaneDetail>> = HashMap::new();
+        for p in &panes {
+            ws_panes.entry(p.workspace_id.clone()).or_default().push(p);
+        }
+
+        let mut raw_desired = HashMap::new();
+        for (ws_id, ws_pane_list) in &ws_panes {
+            let mut targets: Vec<&str> = ws_pane_list.iter().map(|p| p.session.as_str()).collect();
+            targets.sort_unstable();
+            targets.dedup();
+
+            if let Ok(scope_id) = crate::scope::read_targets_scope(&targets) {
+                raw_desired.insert(ws_id.clone(), scope_id);
             }
+        }
+
+        // pure helper 过滤跨 workspace 出现重复 scope_id 的冲突（冲突时排除涉及的所有 workspace）
+        let (desired_scopes, conflicts) = filter_unique_workspace_scopes(raw_desired);
+        for conflicting_ws in &conflicts {
+            eprintln!(
+                "[bridge] ERR_SCOPE_CONFLICT: skipping workspaces with colliding scope: {:?}",
+                conflicting_ws
+            );
+        }
+
+        // retain 条件：desired_scopes 中存在且 scope_id 一致且 client 处于 connected 状态
+        // 若 workspace 被移除、scope 变更、scope 冲突或 client 断开，旧 client 立即被 drop
+        self.intercoms.retain(|ws_id, existing| {
+            desired_scopes.get(ws_id).map(|s| s.as_str()) == Some(existing.scope_id.as_str())
+                && existing.client.is_connected()
+        });
+
+        // 为 missing desired workspace 建立连接（日志只输出 workspace，不输出 scope）
+        if broker_available() {
+            for (ws_id, scope_id) in &desired_scopes {
+                if !self.intercoms.contains_key(ws_id) {
+                    match IntercomClient::connect("me", scope_id) {
+                        Ok((client, rx)) => {
+                            println!(
+                                "[bridge] intercom broker connected as 'me' for workspace {}",
+                                ws_id
+                            );
+                            self.intercoms.insert(
+                                ws_id.clone(),
+                                WorkspaceIntercom {
+                                    scope_id: scope_id.clone(),
+                                    client,
+                                    rx,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[bridge] intercom connect failed for workspace {}: {}",
+                                ws_id, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3) intercom 会话合并（若在线）
+        for ws in self.intercoms.values() {
+            if ws.client.is_connected() {
+                let _ = ws.client.request_list();
+            }
+        }
+
+        // brokerConnected = 任一 connected
+        if let Ok(mut b) = self.state.broker_connected.lock() {
+            *b = self.intercoms.values().any(|w| w.client.is_connected());
         }
 
         // Transcript availability is authoritative backend metadata and may
@@ -232,7 +313,7 @@ impl BridgeEngine {
             self.registry.set_transcript_kind(&conv.id, kind);
         }
 
-        // 3) 状态比对：向手机端推送变化
+        // 4) 状态比对：向手机端推送变化
         let list = self.registry.list();
         if let Ok(mut convs) = self.state.conversations.lock() {
             let changed = convs.len() != list.len()
@@ -253,7 +334,7 @@ impl BridgeEngine {
             }
         }
 
-        // 4) transcript 轮询（仅订阅的对话；状态事件来自 broker 不受影响）
+        // 5) transcript 轮询（仅订阅的对话；状态事件来自 broker 不受影响）
         let subscribed = self.transport.subscribed_conversations();
         if !subscribed.is_empty() {
             self.poll_transcripts(&subscribed);
@@ -313,27 +394,41 @@ impl BridgeEngine {
     }
 
     // ── intercom 事件处理 ──
-    fn on_intercom(&mut self, ev: IntercomEvent) {
+    fn on_intercom(&mut self, workspace_id: &str, ev: IntercomEvent) {
         match ev {
             IntercomEvent::Registered { session_id, .. } => {
-                println!("[bridge] registered as session {}", session_id);
-                if let Some(c) = &self.intercom {
-                    let _ = c.request_list();
+                println!(
+                    "[bridge] registered as session {} in workspace {}",
+                    session_id, workspace_id
+                );
+                if let Some(ws) = self.intercoms.get(workspace_id) {
+                    let _ = ws.client.request_list();
                 }
             }
             IntercomEvent::Sessions { sessions, .. } => {
-                let self_id = self.intercom.as_ref().and_then(|c| c.session_id());
-                self.registry
-                    .apply_intercom_sessions(&sessions, self_id.as_deref());
+                let self_id = self
+                    .intercoms
+                    .get(workspace_id)
+                    .and_then(|w| w.client.session_id());
+                self.registry.apply_workspace_intercom_sessions(
+                    workspace_id,
+                    &sessions,
+                    self_id.as_deref(),
+                );
                 self.pending_replies.retain(|pane_id, pending| {
                     self.registry.get(pane_id).is_some()
-                        && sessions
-                            .iter()
-                            .any(|session| session.id == pending.session_id)
+                        && (self
+                            .registry
+                            .get(pane_id)
+                            .map(|c| c.workspace_id.as_str() != workspace_id)
+                            .unwrap_or(false)
+                            || sessions
+                                .iter()
+                                .any(|session| session.id == pending.session_id))
                 });
                 self.restore_pending_statuses();
                 if let Ok(mut b) = self.state.broker_connected.lock() {
-                    *b = true;
+                    *b = self.intercoms.values().any(|w| w.client.is_connected());
                 }
             }
             IntercomEvent::Message {
@@ -371,8 +466,8 @@ impl BridgeEngine {
                         });
                     }
                     // 回执：告知发送方已收到
-                    if let Some(c) = &self.intercom {
-                        let _ = c.acknowledge(&delivery_id);
+                    if let Some(ws) = self.intercoms.get(workspace_id) {
+                        let _ = ws.client.acknowledge(&delivery_id);
                     }
                 }
             }
@@ -387,20 +482,27 @@ impl BridgeEngine {
                 }
             }
             IntercomEvent::SessionJoined { .. } | IntercomEvent::SessionLeft { .. } => {
-                if let Some(c) = &self.intercom {
-                    let _ = c.request_list();
+                if let Some(ws) = self.intercoms.get(workspace_id) {
+                    let _ = ws.client.request_list();
                 }
             }
             IntercomEvent::Delivered { .. } | IntercomEvent::DeliveryFailed { .. } => {
                 // 投递回执透传（v1.14 不展示，日志留痕）
             }
             IntercomEvent::BrokerError { error } => {
-                eprintln!("[bridge] broker error: {}", error);
+                eprintln!(
+                    "[bridge] broker error in workspace {}: {}",
+                    workspace_id, error
+                );
             }
             IntercomEvent::Disconnected => {
-                eprintln!("[bridge] broker disconnected");
+                eprintln!(
+                    "[bridge] broker disconnected for workspace {}",
+                    workspace_id
+                );
+                self.intercoms.remove(workspace_id);
                 if let Ok(mut b) = self.state.broker_connected.lock() {
-                    *b = false;
+                    *b = self.intercoms.values().any(|w| w.client.is_connected());
                 }
             }
         }
@@ -437,10 +539,10 @@ impl BridgeEngine {
                     );
                     return;
                 }
-                if let (Some(pending), Some(intercom)) = (
-                    pending_reply_for_say(&self.pending_replies, &id),
-                    self.intercom.as_ref(),
-                ) {
+                let ws_client = self.intercoms.get(&conv.workspace_id).map(|w| &w.client);
+                if let (Some(pending), Some(intercom)) =
+                    (pending_reply_for_say(&self.pending_replies, &id), ws_client)
+                {
                     match intercom.reply(&pending.session_id, &text, &pending.reply_to) {
                         Ok(_) => {
                             self.pending_replies.remove(&id);
@@ -468,7 +570,7 @@ impl BridgeEngine {
                         }
                     }
                 }
-                match deliver(conv, &text, self.intercom.as_ref()) {
+                match deliver(conv, &text, ws_client) {
                     Ok(route) => {
                         record_mobile_command(peer_ip, "say", Some(&id), Some(&text), "accepted");
                         println!("[bridge] say {} ({:?})", id, route);
@@ -538,7 +640,8 @@ impl BridgeEngine {
                     );
                     return;
                 };
-                match forward(f, t, &text, self.intercom.as_ref()) {
+                let target_ws_client = self.intercoms.get(&t.workspace_id).map(|w| &w.client);
+                match forward(f, t, &text, target_ws_client) {
                     Ok(route) => {
                         record_mobile_command(
                             peer_ip,
@@ -698,8 +801,7 @@ mod tests {
                 .unwrap();
             let refresh = cmd_rx.recv().await.unwrap();
             let mut engine = BridgeEngine {
-                intercom: None,
-                intercom_rx: None,
+                intercoms: HashMap::new(),
                 registry: ConversationRegistry::new(),
                 transcript: CompositeTranscriptSource::new(),
                 transport,
@@ -747,8 +849,7 @@ mod tests {
             assert_ne!(conn_a, conn_b);
 
             let mut engine = BridgeEngine {
-                intercom: None,
-                intercom_rx: None,
+                intercoms: HashMap::new(),
                 registry: ConversationRegistry::new(),
                 transcript: CompositeTranscriptSource::new(),
                 transport,
@@ -864,6 +965,29 @@ mod tests {
             assert!(recv_text(&mut stream_a).await.contains("incremental"));
             assert!(recv_text(&mut stream_b).await.contains("incremental"));
         });
+    }
+
+    #[test]
+    fn test_filter_unique_workspace_scopes_excludes_colliding_workspaces() {
+        let mut raw = HashMap::new();
+        raw.insert("ws_a".into(), "Scope_Alpha1234567890".into());
+        raw.insert("ws_b".into(), "Scope_Alpha1234567890".into()); // duplicate with ws_a
+        raw.insert("ws_c".into(), "Scope_Gamma1234567890".into()); // unique
+
+        let (valid, conflicts) = filter_unique_workspace_scopes(raw);
+
+        // ws_c is retained
+        assert_eq!(valid.len(), 1);
+        assert_eq!(
+            valid.get("ws_c").map(|s| s.as_str()),
+            Some("Scope_Gamma1234567890")
+        );
+        assert!(!valid.contains_key("ws_a"));
+        assert!(!valid.contains_key("ws_b"));
+
+        // ws_a and ws_b are recorded in conflicts
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0], vec!["ws_a".to_string(), "ws_b".to_string()]);
     }
 
     #[test]

@@ -781,3 +781,35 @@ test("mobile conversation view keeps a minimal persistent action set", () => {
   assert.doesNotMatch(html, /Kind:\s*\$\{/);
   assert.doesNotMatch(html, /<span class="conv-id">/);
 });
+
+test("scope error codes are translated in both en and zh dictionaries", () => {
+  const scopeErrors = [
+    "ERR_SCOPE_UNAVAILABLE",
+    "ERR_SCOPE_CONFLICT",
+    "ERR_SCOPE_REATTACH",
+    "ERR_SCOPE_GEN_FAILED",
+  ];
+  for (const code of scopeErrors) {
+    assert.ok(dictionaries.en[code], `Missing en translation for ${code}`);
+    assert.ok(dictionaries.zh[code], `Missing zh translation for ${code}`);
+    assert.notStrictEqual(translateError(code), code);
+  }
+});
+
+test("frontend and mobile surfaces zero scope leakage", () => {
+  const mobileHtml = fs.readFileSync(
+    path.resolve(process.cwd(), "src-tauri/mobile/index.html"),
+    "utf-8"
+  );
+  assert.doesNotMatch(mobileHtml, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(mobileHtml, /scopeId/i);
+  assert.doesNotMatch(mobileHtml, /workspaceScope/i);
+
+  const typesContent = fs.readFileSync(
+    path.resolve(process.cwd(), "src/types.ts"),
+    "utf-8"
+  );
+  assert.doesNotMatch(typesContent, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(typesContent, /scope_id/i);
+  assert.doesNotMatch(typesContent, /scopeId/i);
+});

@@ -305,6 +305,83 @@ impl ConversationRegistry {
         self.apply_intercom_snapshot(sessions, self_id, &pane_pids, &parents);
     }
 
+    /// Workspace-scoped snapshot: 只清空和重建指定 workspace 内的对话和路由，绝不清空其他 workspace。
+    pub fn apply_workspace_intercom_sessions(
+        &mut self,
+        workspace_id: &str,
+        sessions: &[SessionInfo],
+        self_id: Option<&str>,
+    ) {
+        let pane_pids = pane_pid_map();
+        let parents = process_parent_map();
+        self.apply_workspace_intercom_snapshot(
+            workspace_id,
+            sessions,
+            self_id,
+            &pane_pids,
+            &parents,
+        );
+    }
+
+    fn apply_workspace_intercom_snapshot(
+        &mut self,
+        workspace_id: &str,
+        sessions: &[SessionInfo],
+        self_id: Option<&str>,
+        pane_pids: &HashMap<i64, String>,
+        parents: &HashMap<i64, i64>,
+    ) {
+        // 只清理属于当前 workspace 的路由映射
+        self.intercom_to_pane.retain(|_, pane_id| {
+            self.conversations
+                .get(pane_id)
+                .map(|c| c.workspace_id != workspace_id)
+                .unwrap_or(false)
+        });
+        // 只重置属于当前 workspace 的 conversation 状态
+        for conv in self.conversations.values_mut() {
+            if conv.workspace_id == workspace_id {
+                conv.intercom_session_id = None;
+                conv.status = ConversationStatus::Unknown;
+                conv.title = conv.session.clone();
+            }
+        }
+
+        let mut candidates: HashMap<String, Vec<&SessionInfo>> = HashMap::new();
+        for session in sessions {
+            if Some(session.id.as_str()) == self_id {
+                continue;
+            }
+            let Some(pane_id) = find_owning_pane(session.pid, pane_pids, parents) else {
+                continue;
+            };
+            let Some(conversation) = self.conversations.get(&pane_id) else {
+                continue;
+            };
+            // 必须匹配同 workspace 的 pane
+            if conversation.workspace_id == workspace_id
+                && session_matches_pane(session, conversation)
+            {
+                candidates.entry(pane_id).or_default().push(session);
+            }
+        }
+
+        for (pane_id, matches) in candidates {
+            let [session] = matches.as_slice() else {
+                continue;
+            };
+            let Some(conversation) = self.conversations.get_mut(&pane_id) else {
+                continue;
+            };
+            conversation.intercom_session_id = Some(session.id.clone());
+            if let Some(name) = &session.name {
+                conversation.title = name.clone();
+            }
+            conversation.status = session.agent_status().into();
+            self.intercom_to_pane.insert(session.id.clone(), pane_id);
+        }
+    }
+
     fn apply_intercom_snapshot(
         &mut self,
         sessions: &[SessionInfo],
@@ -842,6 +919,52 @@ mod tests {
         );
         assert!(reg.by_intercom_id("one").is_none());
         assert!(reg.by_intercom_id("two").is_none());
+    }
+
+    #[test]
+    fn test_workspace_intercom_snapshot_isolation() {
+        let mut reg = ConversationRegistry::new();
+        let mut pane_a = pane("%1", "ws-a", "pi");
+        pane_a.workspace_id = "ws-a".into();
+        pane_a.workspace_name = "ws-a".into();
+
+        let mut pane_b = pane("%2", "ws-b", "pi");
+        pane_b.workspace_id = "ws-b".into();
+        pane_b.workspace_name = "ws-b".into();
+
+        reg.refresh_panes(vec![pane_a, pane_b]);
+
+        let pane_pids = HashMap::from([(100, "%1".to_string()), (200, "%2".to_string())]);
+        let parents = HashMap::from([(101, 100), (201, 200)]);
+
+        let session_a = intercom_session("sess-a", 101, "/tmp/ws-a", "pi");
+        let session_b = intercom_session("sess-b", 201, "/tmp/ws-b", "pi");
+
+        reg.apply_workspace_intercom_snapshot("ws-a", &[session_a], None, &pane_pids, &parents);
+        reg.apply_workspace_intercom_snapshot("ws-b", &[session_b], None, &pane_pids, &parents);
+
+        assert_eq!(
+            reg.get("%1").unwrap().intercom_session_id.as_deref(),
+            Some("sess-a")
+        );
+        assert_eq!(
+            reg.get("%2").unwrap().intercom_session_id.as_deref(),
+            Some("sess-b")
+        );
+        assert_eq!(reg.by_intercom_id("sess-a").unwrap().id, "%1");
+        assert_eq!(reg.by_intercom_id("sess-b").unwrap().id, "%2");
+
+        // 对 ws-b 应用空 snapshot 只会重置 %2 和移除 sess-b 路由，绝不清空 ws-a 的 %1 与 sess-a 路由
+        reg.apply_workspace_intercom_snapshot("ws-b", &[], None, &pane_pids, &parents);
+
+        assert_eq!(
+            reg.get("%1").unwrap().intercom_session_id.as_deref(),
+            Some("sess-a")
+        );
+        assert_eq!(reg.by_intercom_id("sess-a").unwrap().id, "%1");
+        assert!(reg.get("%2").unwrap().intercom_session_id.is_none());
+        assert_eq!(reg.get("%2").unwrap().status, ConversationStatus::Unknown);
+        assert!(reg.by_intercom_id("sess-b").is_none());
     }
 
     #[test]

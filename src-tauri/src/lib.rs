@@ -11,6 +11,7 @@ mod engine;
 mod intercom;
 mod models;
 mod registry;
+mod scope;
 mod tmux;
 mod transcript;
 mod transport;

@@ -205,6 +205,10 @@ const en: Record<string, string> = {
   "ERR_MANAGED_CLAUDE_INSTALL": "Managed Claude Intercom installation failed",
   "ERR_RANDOM_ID": "Could not create a private random Intercom ID",
   "ERR_STANDARD_CLAUDE_UNAVAILABLE": "Standard Claude Code is not installed",
+  "ERR_SCOPE_UNAVAILABLE": "Workspace communication isolation is unavailable",
+  "ERR_SCOPE_CONFLICT": "Workspace communication state is inconsistent",
+  "ERR_SCOPE_REATTACH": "Could not preserve workspace communication isolation after rename",
+  "ERR_SCOPE_GEN_FAILED": "Could not initialize workspace communication isolation",
 
   // Fallbacks & Validation
   "val.enterName": "Please enter a valid workspace name",
@@ -439,6 +443,10 @@ const zh: Record<string, string> = {
   "ERR_MANAGED_CLAUDE_INSTALL": "托管 Claude Intercom 安装失败",
   "ERR_RANDOM_ID": "无法生成随机 Intercom ID",
   "ERR_STANDARD_CLAUDE_UNAVAILABLE": "未安装标准 Claude Code",
+  "ERR_SCOPE_UNAVAILABLE": "工作区通信隔离不可用",
+  "ERR_SCOPE_CONFLICT": "工作区通信状态不一致",
+  "ERR_SCOPE_REATTACH": "重命名后无法保留工作区通信隔离",
+  "ERR_SCOPE_GEN_FAILED": "无法初始化工作区通信隔离",
 
   // Fallbacks & Validation
   "val.enterName": "请输入有效的项目名称 (支持字母、数字、下划线和连字符)",

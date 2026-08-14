@@ -6,8 +6,8 @@
 ## Current status
 
 - **Latest release:** v1.12.0 (2026-08-13) — Managed Claude fallback, atomic batch panes, and workspace-aware mobile conversations
-- **Trunk:** direct pushes to main; v1.12.0 passes local macOS frontend/backend verification and macOS/Windows CI builds, while Windows on-device verification remains pending
-- **Test suite:** 124 backend tests passing + 2 environment/on-device ignored, and 40 frontend tests passing; physical-phone LAN acceptance remains pending
+- **Next release candidate:** v1.13.0 (in progress) — Agent Intercom protocol v4 integration, broker-enforced workspace scoping, Managed Claude 0.12.0-connect.3
+- **Test suite:** 131 backend tests passing + 2 environment/on-device ignored, and 42 frontend tests passing; physical-phone LAN acceptance remains pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 
 ## Planning queue
@@ -41,7 +41,7 @@ Progress:
 
 **Security boundary:** LAN mode is plaintext and intended only for a trusted local network. Token authentication remains mandatory; VPN/TLS is a reserved extension.
 
-**External dependency:** cross-harness operation uses the `@dataforxyz/agent-intercom-*` adapter family. Pi currently uses the GitHub-only [`v0.10.1-tmuxdeck.1` maintenance fork](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.10.1-tmuxdeck.1), based on upstream `v0.10.0`, for current-workspace discovery/fail-closed routing and reply-batch fixes tracked in [agent-intercom-pi#20](https://github.com/dataforxyz/agent-intercom-pi/issues/20). This client-side workspace filtering is not a broker security boundary. The v1.12.0 release bundles a separate pinned macOS Claude maintenance artifact containing the Monitor packaging fix previously tracked in [agent-intercom-claude#6](https://github.com/dataforxyz/agent-intercom-claude/issues/6), so that upstream packaging issue is no longer a blocker for Managed Claude. TmuxDeck still falls back persistently to Standard Claude, and upstream Monitor warnings remain a follow-up. Protocol-v4 broker-enforced workspace-scoped discovery remains follow-up scope rather than part of v1.12.0.
+**External dependency:** cross-harness operation uses the `ctliz` Agent Intercom protocol v4 ecosystem (with `@dataforxyz` provenance), published under official `@ctliz` npm packages with the `@connect` dist-tag and `@ctliz/agent-intercom-core@0.1.0`. Pi uses the pinned release [`v0.11.0-connect.2`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.11.0-connect.2) (`git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2` or `@ctliz/agent-intercom-pi@connect`), and Managed Claude on macOS is upgraded to `0.12.0-connect.3` (`--tui --safe`). Protocol v4 provides broker-enforced same-workspace scoping for discovery (`intercom_list`) and name/prefix resolution, with exact full session IDs required for cross-scope routing. Scope is same-OS-user isolation, not a security principal (trust boundary remains the local OS user). Frontend and mobile maintain zero raw scope exposure (零原值暴露); the backend manages an independent scoped human client per workspace and aggregates conversations into the unified registry. Legacy pre-v4 workspaces fail closed on add/rename and must be recreated. Coordinated upgrades apply to installed adapters only; Orchestrator is an optional Linux/systemd lifecycle product, outside the Broker compatibility set, and is omitted on macOS.
 
 ### P1 · Windows on-device verification (deferred, schedule TBD)
 
