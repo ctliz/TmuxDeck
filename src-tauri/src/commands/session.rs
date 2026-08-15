@@ -3,13 +3,10 @@ use std::process::Command;
 
 use crate::audit::{observe_session_count, record_kill, tmux_counts};
 use crate::commands::native::{
-    create_native_workspace, destroy_native_workspace_unlocked,
-    ghostty_native_available, list_native_slots, open_native_workspace, rename_native_workspace,
-    NativeSlot, TERMINAL_OPTION,
+    create_native_workspace, destroy_native_workspace_unlocked, ghostty_native_available,
+    list_native_slots, open_native_workspace, rename_native_workspace, NativeSlot, TERMINAL_OPTION,
 };
-use crate::commands::utils::{
-    append_identity_env_clears, shell_single_quote, to_wsl_path,
-};
+use crate::commands::utils::{append_identity_env_clears, shell_single_quote, to_wsl_path};
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
 use crate::registry::{detect_environment, ToolInfo};
@@ -317,7 +314,9 @@ fn rollback_create_session(
         if let Ok(out) = run_tmux(&["kill-session", "-t", s]) {
             if !out.status.success() {
                 let err = String::from_utf8_lossy(&out.stderr);
-                if !crate::tmux::is_no_server_err(&err) && !crate::tmux::is_session_missing_err(&err) {
+                if !crate::tmux::is_no_server_err(&err)
+                    && !crate::tmux::is_session_missing_err(&err)
+                {
                     rollback_errors.push(format!("kill_session: {}", err.trim()));
                 }
             }
@@ -333,7 +332,11 @@ fn rollback_create_session(
     if rollback_errors.is_empty() {
         original_err
     } else {
-        format!("ERR_CREATE_FAILED|rollback_failed|{}|{}", original_err, rollback_errors.join(", "))
+        format!(
+            "ERR_CREATE_FAILED|rollback_failed|{}|{}",
+            original_err,
+            rollback_errors.join(", ")
+        )
     }
 }
 
@@ -347,7 +350,9 @@ fn rollback_create_native_workspace(
         if let Ok(out) = run_tmux(&["kill-session", "-t", &slot.target]) {
             if !out.status.success() {
                 let err = String::from_utf8_lossy(&out.stderr);
-                if !crate::tmux::is_no_server_err(&err) && !crate::tmux::is_session_missing_err(&err) {
+                if !crate::tmux::is_no_server_err(&err)
+                    && !crate::tmux::is_session_missing_err(&err)
+                {
                     rollback_errors.push(format!("kill_slot {}: {}", slot.target, err.trim()));
                 }
             }
@@ -363,7 +368,11 @@ fn rollback_create_native_workspace(
     if rollback_errors.is_empty() {
         original_err
     } else {
-        format!("ERR_CREATE_FAILED|rollback_failed|{}|{}", original_err, rollback_errors.join(", "))
+        format!(
+            "ERR_CREATE_FAILED|rollback_failed|{}|{}",
+            original_err,
+            rollback_errors.join(", ")
+        )
     }
 }
 
@@ -429,11 +438,8 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             },
         });
     }
-    let manifest = crate::team::create_team_manifest(
-        team_run_id.clone(),
-        lead_session_id.clone(),
-        members,
-    )?;
+    let manifest =
+        crate::team::create_team_manifest(team_run_id.clone(), lead_session_id.clone(), members)?;
     let manifest_path = crate::team::write_team_manifest(&manifest)?;
     let manifest_path_str = manifest_path.to_string_lossy().to_string();
 
@@ -452,7 +458,11 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         match slots_result {
             Ok(slots) => {
                 if let Err(e) = open_native_workspace(&sanitized_name, &slots, slots.len()) {
-                    return Err(rollback_create_native_workspace(&slots, Some(&team_run_id), e));
+                    return Err(rollback_create_native_workspace(
+                        &slots,
+                        Some(&team_run_id),
+                        e,
+                    ));
                 }
                 save_create_defaults(&opts);
                 return Ok(());
@@ -501,7 +511,9 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         "-e".to_string(),
         format!("PATH={}", augmented_path),
     ];
-    new_args.extend(crate::commands::utils::terminal_capability_envs(Some(&opts.terminal_id)));
+    new_args.extend(crate::commands::utils::terminal_capability_envs(Some(
+        &opts.terminal_id,
+    )));
     new_args.extend([
         "-e".to_string(),
         format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
@@ -511,11 +523,13 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
     }
-    new_args.push(crate::commands::utils::isolated_agent_command_with_team_env(
-        &first_agent_cmd,
-        pane_agent_ids[0] != "shell",
-        &first_team_envs,
-    ));
+    new_args.push(
+        crate::commands::utils::isolated_agent_command_with_team_env(
+            &first_agent_cmd,
+            pane_agent_ids[0] != "shell",
+            &first_team_envs,
+        ),
+    );
     append_identity_env_clears(&mut new_args, &sanitized_name);
     new_args.extend([
         ";".to_string(),
@@ -537,7 +551,9 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         crate::team::OPTION_TEAM_RUN_ID.to_string(),
         team_run_id.clone(),
     ]);
-    new_args.extend(crate::commands::utils::session_terminal_options(&sanitized_name));
+    new_args.extend(crate::commands::utils::session_terminal_options(
+        &sanitized_name,
+    ));
     let new_refs: Vec<&str> = new_args.iter().map(String::as_str).collect();
 
     let output = match run_tmux(&new_refs) {
@@ -557,7 +573,11 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         } else {
             format!("ERR_CREATE_OUTPUT_ERR|{}", err_msg)
         };
-        return Err(rollback_create_session(Some(&sanitized_name), Some(&team_run_id), err));
+        return Err(rollback_create_session(
+            Some(&sanitized_name),
+            Some(&team_run_id),
+            err,
+        ));
     }
 
     let first_pane = run_tmux(&["list-panes", "-t", &sanitized_name, "-F", "#{pane_id}"])
@@ -614,7 +634,10 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             return Err(rollback_create_session(
                 Some(&sanitized_name),
                 Some(&team_run_id),
-                format!("ERR_CREATE_OUTPUT_ERR|{}", String::from_utf8_lossy(&out.stderr)),
+                format!(
+                    "ERR_CREATE_OUTPUT_ERR|{}",
+                    String::from_utf8_lossy(&out.stderr)
+                ),
             ));
         }
         Err(e) => {
@@ -635,7 +658,9 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             "-t".to_string(),
             sanitized_name.clone(),
         ];
-        split_args.extend(crate::commands::utils::terminal_capability_envs(Some(&opts.terminal_id)));
+        split_args.extend(crate::commands::utils::terminal_capability_envs(Some(
+            &opts.terminal_id,
+        )));
         split_args.extend([
             "-e".to_string(),
             format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
@@ -693,7 +718,10 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
                 return Err(rollback_create_session(
                     Some(&sanitized_name),
                     Some(&team_run_id),
-                    format!("ERR_CREATE_OUTPUT_ERR|{}", String::from_utf8_lossy(&out.stderr)),
+                    format!(
+                        "ERR_CREATE_OUTPUT_ERR|{}",
+                        String::from_utf8_lossy(&out.stderr)
+                    ),
                 ));
             }
             Err(e) => {
@@ -767,7 +795,10 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
                 return Err(rollback_create_session(
                     Some(&sanitized_name),
                     Some(&team_run_id),
-                    format!("ERR_CREATE_OUTPUT_ERR|{}", String::from_utf8_lossy(&out.stderr)),
+                    format!(
+                        "ERR_CREATE_OUTPUT_ERR|{}",
+                        String::from_utf8_lossy(&out.stderr)
+                    ),
                 ));
             }
             Err(e) => {
@@ -1119,7 +1150,8 @@ mod tests {
             .to_string_lossy()
             .to_string();
         let valid_session_id = "tmuxdeck-a0000000-0000-4000-8000-000000000001";
-        let (command, id) = panel_agent_command("claude", &managed, "alpha", 1, valid_session_id).unwrap();
+        let (command, id) =
+            panel_agent_command("claude", &managed, "alpha", 1, valid_session_id).unwrap();
         assert_eq!(id, valid_session_id);
         assert_eq!(
             command,

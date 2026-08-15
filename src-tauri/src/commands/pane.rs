@@ -65,7 +65,9 @@ fn standard_split_args(
         "-t".to_string(),
         session.to_string(),
     ];
-    args.extend(crate::commands::utils::terminal_capability_envs(terminal_id));
+    args.extend(crate::commands::utils::terminal_capability_envs(
+        terminal_id,
+    ));
     args.extend([
         "-e".to_string(),
         format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
@@ -289,12 +291,18 @@ fn add_standard_panes(
 ) -> Result<usize, String> {
     let first_pane_number = crate::tmux::get_session_panes(session, false, None).len() + 1;
     let mut created = Vec::new();
-    let session_terminal = run_tmux(&["show-options", "-v", "-t", session, crate::commands::native::TERMINAL_OPTION])
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let session_terminal = run_tmux(&[
+        "show-options",
+        "-v",
+        "-t",
+        session,
+        crate::commands::native::TERMINAL_OPTION,
+    ])
+    .ok()
+    .filter(|out| out.status.success())
+    .and_then(|out| String::from_utf8(out.stdout).ok())
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty());
 
     for offset in 0..count {
         let pane_num = first_pane_number + offset;
@@ -493,7 +501,9 @@ pub fn add_panes(
         if opt_run.is_empty() || opt_lead.is_empty() {
             return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
         }
-        if !crate::team::is_valid_team_run_id(&opt_run) || !crate::team::is_valid_session_id(&opt_lead) {
+        if !crate::team::is_valid_team_run_id(&opt_run)
+            || !crate::team::is_valid_session_id(&opt_lead)
+        {
             return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
         }
         let expected_manifest = crate::team::team_manifest_path(&opt_run)?
@@ -534,7 +544,9 @@ pub fn add_panes(
             if opt_run.is_empty() || opt_lead.is_empty() {
                 return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
             }
-            if !crate::team::is_valid_team_run_id(&opt_run) || !crate::team::is_valid_session_id(&opt_lead) {
+            if !crate::team::is_valid_team_run_id(&opt_run)
+                || !crate::team::is_valid_session_id(&opt_lead)
+            {
                 return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
             }
 
@@ -902,7 +914,9 @@ pub fn kill_pane(pane_id: String) -> Result<(), String> {
             );
             return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
         }
-        if !crate::team::is_valid_team_run_id(&opt_run) || !crate::team::is_valid_session_id(&opt_lead) {
+        if !crate::team::is_valid_team_run_id(&opt_run)
+            || !crate::team::is_valid_session_id(&opt_lead)
+        {
             record_kill(
                 "kill_pane",
                 trimmed,
@@ -1215,7 +1229,9 @@ mod tests {
             Err("ERR_KILL_PANE_LAST_IN_SESSION".to_string())
         );
         assert_eq!(
-            pane_kill_context("%1|workspace|tmuxdeck-a0000000-0000-4000-8000-000000000001|lead|0\n"),
+            pane_kill_context(
+                "%1|workspace|tmuxdeck-a0000000-0000-4000-8000-000000000001|lead|0\n"
+            ),
             Err("ERR_KILL_PANE_LAST_IN_SESSION".to_string())
         );
     }
@@ -1293,7 +1309,13 @@ mod tests {
 
     #[test]
     fn standard_metadata_includes_managed_identity_and_marker() {
-        let args = standard_pane_metadata_args("%4", "claude", Some("tmuxdeck-random"), "tmuxdeck-lead", true);
+        let args = standard_pane_metadata_args(
+            "%4",
+            "claude",
+            Some("tmuxdeck-random"),
+            "tmuxdeck-lead",
+            true,
+        );
         assert!(args
             .windows(2)
             .any(|pair| pair == ["@tmuxdeck-agent", "claude"]));
@@ -1320,11 +1342,26 @@ mod tests {
         assert_eq!(
             args,
             [
-                "set-option", "-p", "-t", "%4", "@tmuxdeck-agent", "pi",
+                "set-option",
+                "-p",
+                "-t",
+                "%4",
+                "@tmuxdeck-agent",
+                "pi",
                 ";",
-                "set-option", "-p", "-t", "%4", "@tmuxdeck-role", "worker",
+                "set-option",
+                "-p",
+                "-t",
+                "%4",
+                "@tmuxdeck-role",
+                "worker",
                 ";",
-                "set-option", "-p", "-t", "%4", "@tmuxdeck-manager-target", "tmuxdeck-lead"
+                "set-option",
+                "-p",
+                "-t",
+                "%4",
+                "@tmuxdeck-manager-target",
+                "tmuxdeck-lead"
             ]
         );
     }
@@ -1409,12 +1446,10 @@ mod tests {
             backend: crate::team::TEAM_BACKEND.to_string(),
             run_id: "team_11223344-5566-4778-8899-aabbccddeeff".to_string(),
             lead_id: exact_lead_id.to_string(),
-            members: vec![
-                crate::team::TeamMember {
-                    session_id: exact_lead_id.to_string(),
-                    role: "lead".to_string(),
-                },
-            ],
+            members: vec![crate::team::TeamMember {
+                session_id: exact_lead_id.to_string(),
+                role: "lead".to_string(),
+            }],
             created_at: 1723680000000,
             capabilities: vec![],
         };
@@ -1433,7 +1468,10 @@ mod tests {
         let is_legacy = true;
         let is_lead = false;
         assert!(is_legacy);
-        assert!(!is_lead, "Legacy standard workspace must not guard first pane as lead");
+        assert!(
+            !is_lead,
+            "Legacy standard workspace must not guard first pane as lead"
+        );
     }
 
     #[test]
@@ -1446,7 +1484,13 @@ mod tests {
         let slot1_valid = !slot1_env.is_empty() && slot1_env == expected_path;
         let slot2_valid = !slot2_env.is_empty() && slot2_env == expected_path;
 
-        assert!(!slot1_valid, "First slot with empty env must immediately fail validation");
-        assert!(slot2_valid, "Second slot with matching env would pass validation");
+        assert!(
+            !slot1_valid,
+            "First slot with empty env must immediately fail validation"
+        );
+        assert!(
+            slot2_valid,
+            "Second slot with matching env would pass validation"
+        );
     }
 }

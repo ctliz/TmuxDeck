@@ -316,7 +316,11 @@ pub(crate) fn terminal_capability_envs(terminal_id: Option<&str>) -> Vec<String>
     ]
 }
 
-pub(crate) fn panel_agent_command(agent_id: &str, command: &str, bypass_permissions: bool) -> String {
+pub(crate) fn panel_agent_command(
+    agent_id: &str,
+    command: &str,
+    bypass_permissions: bool,
+) -> String {
     if !bypass_permissions {
         return command.to_string();
     }
@@ -548,21 +552,40 @@ mod tests {
 
     #[test]
     fn test_panel_agent_bypass_is_scoped_and_token_aware() {
-        assert_eq!(panel_agent_command("claude", "claude", true), "claude --dangerously-skip-permissions");
-        assert_eq!(panel_agent_command("codex", "codex", true), "codex --dangerously-bypass-approvals-and-sandbox");
-        assert_eq!(panel_agent_command("opencode", "opencode", true), "opencode --auto");
+        assert_eq!(
+            panel_agent_command("claude", "claude", true),
+            "claude --dangerously-skip-permissions"
+        );
+        assert_eq!(
+            panel_agent_command("codex", "codex", true),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+        assert_eq!(
+            panel_agent_command("opencode", "opencode", true),
+            "opencode --auto"
+        );
         assert_eq!(panel_agent_command("pi", "pi", true), "pi");
         assert_eq!(panel_agent_command("agy", "agy", true), "agy");
-        assert_eq!(panel_agent_command("custom", "claude --custom", true), "claude --custom");
+        assert_eq!(
+            panel_agent_command("custom", "claude --custom", true),
+            "claude --custom"
+        );
         assert_eq!(
             panel_agent_command("claude", "claude --dangerously-skip-permissions", true),
             "claude --dangerously-skip-permissions"
         );
         assert_eq!(
-            panel_agent_command("claude", "claude --dangerously-skip-permissions-extra", true),
+            panel_agent_command(
+                "claude",
+                "claude --dangerously-skip-permissions-extra",
+                true
+            ),
             "claude --dangerously-skip-permissions-extra --dangerously-skip-permissions"
         );
-        assert_eq!(panel_agent_command("codex", "codex --auto", false), "codex --auto");
+        assert_eq!(
+            panel_agent_command("codex", "codex --auto", false),
+            "codex --auto"
+        );
     }
 
     #[test]

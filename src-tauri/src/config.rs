@@ -37,6 +37,29 @@ impl Default for Config {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn missing_panel_bypass_field_defaults_to_enabled() {
+        let config: Config = serde_json::from_str(
+            r#"{"default_terminal":"ghostty","default_agent":"pi","default_panes":4,"custom_agent":null,"recent_dirs":[]}"#,
+        )
+        .unwrap();
+        assert!(config.panel_bypass_permissions);
+    }
+
+    #[test]
+    fn panel_bypass_field_round_trips_disabled() {
+        let mut config = Config::default();
+        config.panel_bypass_permissions = false;
+        let encoded = serde_json::to_string(&config).unwrap();
+        let decoded: Config = serde_json::from_str(&encoded).unwrap();
+        assert!(!decoded.panel_bypass_permissions);
+    }
+}
+
 pub fn get_config_dir() -> std::path::PathBuf {
     if let Some(config_dir) = dirs::config_dir() {
         config_dir.join("tmuxdeck")
@@ -71,7 +94,8 @@ pub fn save_config(config: Config) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let json = serde_json::to_string_pretty(&config).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
+    let json =
+        serde_json::to_string_pretty(&config).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
     std::fs::write(path, json).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
     crate::registry::invalidate_environment_cache();
     Ok(())

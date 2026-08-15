@@ -957,3 +957,13 @@ test("TrayPanel renders SessionList before UsageStrip in the scroll container", 
   );
 });
 
+test("AdapterConsentModal renders single targetVersion when installedVersion matches targetVersion", () => {
+  const consentModalSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/AdapterConsentModal.tsx"),
+    "utf-8"
+  );
+  assert.match(
+    consentModalSrc,
+    /item\.installedVersion && item\.installedVersion !== item\.targetVersion/
+  );
+});

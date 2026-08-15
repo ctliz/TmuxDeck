@@ -214,8 +214,9 @@ export function AdapterConsentModal({
                   <div>
                     <span className="text-slate-500">ver: </span>
                     <span className="text-slate-300">
-                      {item.installedVersion ? `v${item.installedVersion} → ` : ""}
-                      v{item.targetVersion}
+                      {item.installedVersion && item.installedVersion !== item.targetVersion
+                        ? `v${item.installedVersion} → v${item.targetVersion}`
+                        : `v${item.targetVersion}`}
                     </span>
                   </div>
                   <div className="flex items-center space-x-1">

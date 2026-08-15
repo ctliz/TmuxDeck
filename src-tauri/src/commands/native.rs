@@ -139,8 +139,14 @@ pub(crate) fn create_native_workspace(
                     if let Ok(out) = run_tmux(&["kill-session", "-t", &target]) {
                         if !out.status.success() {
                             let err = String::from_utf8_lossy(&out.stderr);
-                            if !crate::tmux::is_no_server_err(&err) && !crate::tmux::is_session_missing_err(&err) {
-                                cleanup_errors.push(format!("kill_slot {}: {}", target, err.trim()));
+                            if !crate::tmux::is_no_server_err(&err)
+                                && !crate::tmux::is_session_missing_err(&err)
+                            {
+                                cleanup_errors.push(format!(
+                                    "kill_slot {}: {}",
+                                    target,
+                                    err.trim()
+                                ));
                             }
                         }
                     } else {
@@ -232,7 +238,9 @@ fn native_slot_command_args(
         "-e".to_string(),
         format!("PATH={}", augmented_path),
     ];
-    args.extend(crate::commands::utils::terminal_capability_envs(Some("ghostty")));
+    args.extend(crate::commands::utils::terminal_capability_envs(Some(
+        "ghostty",
+    )));
     args.extend([
         "-e".to_string(),
         format!("TMUXDECK_WORKSPACE={}", workspace),
@@ -246,11 +254,13 @@ fn native_slot_command_args(
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
     }
-    args.push(crate::commands::utils::isolated_agent_command_with_team_env(
-        &agent_cmd,
-        agent_id != "shell",
-        &team_envs,
-    ));
+    args.push(
+        crate::commands::utils::isolated_agent_command_with_team_env(
+            &agent_cmd,
+            agent_id != "shell",
+            &team_envs,
+        ),
+    );
     args.extend([
         ";".to_string(),
         "set-option".to_string(),
@@ -888,13 +898,7 @@ pub(crate) fn kill_native_slot(target: &str) -> Result<(), String> {
                 return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
             }
 
-            let s_panes = run_tmux(&[
-                "list-panes",
-                "-t",
-                s_target,
-                "-F",
-                "#{pane_dead}",
-            ]);
+            let s_panes = run_tmux(&["list-panes", "-t", s_target, "-F", "#{pane_dead}"]);
             let s_dead = match s_panes {
                 Ok(out) if out.status.success() => {
                     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1526,7 +1530,10 @@ mod tests {
 
         // In legacy mode, is_target_lead is false -> no lead guard is triggered
         let is_target_lead = false;
-        assert!(!is_target_lead, "Legacy mode must not guard any slot as lead");
+        assert!(
+            !is_target_lead,
+            "Legacy mode must not guard any slot as lead"
+        );
     }
 
     #[test]
@@ -1549,7 +1556,10 @@ mod tests {
 
         let is_lead_match = true;
         let guard_triggered = is_lead_match && (members_len > 1 || slots.len() > 1);
-        assert!(guard_triggered, "Hidden active slot must keep lead guard active");
+        assert!(
+            guard_triggered,
+            "Hidden active slot must keep lead guard active"
+        );
     }
 
     #[test]
