@@ -14,7 +14,7 @@
 | Doc | Contents |
 |---|---|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Module map, data flows, two easy-to-miss key implementations |
-| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide for Agent Intercom protocol v4, including broker-enforced workspace scoping, Pi v0.11.0-connect.2, and Managed Claude 0.12.0-connect.3 |
+| [GUIDE-cross-harness-agent-intercom.md](./GUIDE-cross-harness-agent-intercom.md) | Cross-harness Intercom install, naming and collaboration guide for Agent Intercom protocol v4, including broker-enforced workspace scoping, Pi v0.12.0-connect.1, and Managed Claude 0.13.0-connect.1 |
 | [REFERENCE-intercom-protocol.md](./REFERENCE-intercom-protocol.md) | Agent Intercom wire protocol reference (protocol v4) |
 | [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | Conversation content source design (Claude Code JSONL preferred + fallback) |
 | [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | Mobile transport and security design |

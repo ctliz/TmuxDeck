@@ -39,7 +39,7 @@ All active sides must use protocol-v4-compatible `agent-intercom-*` adapters (`c
 
 **Installed adapters only:** Coordinated upgrades apply only to the adapters currently installed and in use on your machine. You do not need to install adapters for uninstalled harnesses.
 
-The v4 ecosystem packages are published under the `@ctliz` npm scope (with internal core `@ctliz/agent-intercom-core@0.1.0`). Canonical and recommended installation commands specify the `@connect` dist-tag (e.g. `@ctliz/agent-intercom-codex@connect`) or exact package versions. Future GA releases will advance the `latest` dist-tag.
+The v4 ecosystem packages are published under the `@ctliz` npm scope (with canonical core `@ctliz/agent-intercom-core@0.2.0`, published on GitHub v0.2.0; npm registry availability required for offline lockfile checks). Canonical and recommended installation commands specify the `@connect` dist-tag (e.g. `@ctliz/agent-intercom-codex@connect`) or exact package versions. Future GA releases will advance the `latest` dist-tag.
 
 After installing or upgrading any adapter, run `/reload` in **every still-open Pi session** and restart every companion Claude, Codex, and OpenCode adapter. This lets the old broker exit after its final client disconnects and allows one restarted compatible client to start the shared protocol-v4 broker cleanly.
 
@@ -48,14 +48,14 @@ After installing or upgrading any adapter, run `/reload` in **every still-open P
 Recommended install and update command:
 
 ```bash
-pi install git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2
+pi install git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1
 ```
 
-The Git fixed-tag install is recommended for Pi. The official npm package `@ctliz/agent-intercom-pi@connect` (`0.11.0-connect.2`) is also published.
+The Git fixed-tag install is recommended for Pi (requires registry Core 0.2.0 availability for package-lock resolution). The official npm package `@ctliz/agent-intercom-pi@connect` is also published.
 
 Provenance:
 
-- Release tag: [`v0.11.0-connect.2`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.11.0-connect.2)
+- Release tag: [`v0.12.0-connect.1`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.12.0-connect.1)
 - Upstream base: `@dataforxyz/agent-intercom-pi` provenance
 
 After install or update, run this in every open Pi session:
@@ -137,7 +137,7 @@ After updating, restart ordinary Codex sessions and all `coi` workers.
 
 On macOS, select Claude Code in TmuxDeck's **Create Workspace** modal and choose **Install Managed Adapter**. TmuxDeck installs its pinned adapter from the app bundle without contacting npm or changing any global npm package. The same control becomes **Repair Managed Adapter** if health verification fails.
 
-The managed resource corresponds to `@ctliz/agent-intercom-claude@connect` (`0.12.0-connect.3`), bundled as `agent-intercom-claude-0.12.0-connect.3.tgz` and published with source at <https://github.com/ctliz/agent-intercom-claude/releases/tag/v0.12.0-connect.3>, retaining original `@dataforxyz/agent-intercom-claude` provenance. It packages the Claude Monitor files required for `cci --tui --safe`. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
+The managed resource corresponds to `@ctliz/agent-intercom-claude@connect` (`0.13.0-connect.1`), bundled as `ctliz-agent-intercom-claude-0.13.0-connect.1.tgz` and published with source at <https://github.com/ctliz/agent-intercom-claude/releases/tag/v0.13.0-connect.1>, retaining original `@dataforxyz/agent-intercom-claude` provenance. It packages the Claude Monitor files required for `cci --tui --safe`. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
 
 Installation verifies the pinned SHA-256, rejects links, devices, absolute paths and `..`, stages the replacement, validates the Claude plugin → Monitor → MCP/runtime chain, and rolls back if validation or config persistence fails. A healthy existing version remains in place after a failed repair.
 
@@ -431,7 +431,7 @@ Recommended troubleshooting order:
 1. Run `intercom_status({})` on the current side.
 2. Confirm all sides use the same `PI_CODING_AGENT_DIR`.
 3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers.
-4. Confirm Pi is installed from `git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2`; re-run that fixed `pi install` command if repair is needed.
+4. Confirm Pi is installed from `git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1`; re-run that fixed `pi install` command if repair is needed.
 5. Run `/reload` in every open Pi session; fully restart Claude (`cci`), Codex (`coi`), and OpenCode companion adapters so the protocol-v4 broker can restart cleanly.
 6. Run `intercom_list({})` for the current workspace. Use the exact full ID for intentional cross-workspace routing.
 7. If an existing workspace fails closed on add/rename, recreate the workspace under v4.
@@ -449,16 +449,16 @@ Recommended troubleshooting order:
 
 ## 10. Local environment verification
 
-Verified on this machine for v1.13.0:
+Verified on this machine for v1.14.0:
 
 ```text
-Pi package source: git:github.com/ctliz/agent-intercom-pi@v0.11.0-connect.2 (or @ctliz/agent-intercom-pi@connect)
-Pi package version: @ctliz/agent-intercom-pi 0.11.0-connect.2
-Claude package:     @ctliz/agent-intercom-claude@connect (0.12.0-connect.3, --tui --safe)
-Codex package:      @ctliz/agent-intercom-codex@connect (0.11.0-connect.2)
-OpenCode package:   @ctliz/agent-intercom-opencode@connect (0.11.0-connect.2)
-Core internal:      @ctliz/agent-intercom-core@0.1.0
-Protocol:           v4 (broker-enforced workspace scoping)
+Pi package source: git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1 (or @ctliz/agent-intercom-pi@connect)
+Pi package version: @ctliz/agent-intercom-pi 0.12.0-connect.1
+Claude package:     @ctliz/agent-intercom-claude@connect (0.13.0-connect.1, --tui --safe)
+Codex package:      @ctliz/agent-intercom-codex@connect (0.12.0-connect.1)
+OpenCode package:   @ctliz/agent-intercom-opencode@connect (0.12.0-connect.1)
+Core internal:      @ctliz/agent-intercom-core@0.2.0
+Protocol:           v4 (broker-enforced workspace scoping & Zero-Manual-Join Auto-Team)
 ```
 
 Attribution and provenance to original upstream `@dataforxyz/agent-intercom-*` are preserved. Official npm packages are published under the `@ctliz` scope.

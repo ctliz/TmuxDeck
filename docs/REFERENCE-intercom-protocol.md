@@ -1,6 +1,6 @@
 # pi-intercom wire protocol reference
 
-> This document is updated against Agent Intercom protocol v4 (`types.ts`, `broker.ts`, and `broker/framing.ts` in the `ctliz` ecosystem with `@dataforxyz` provenance), covering Pi `v0.11.0-connect.2` and Managed Claude `0.12.0-connect.3`. **Written down so we never have to re-derive it.**
+> This document is updated against Agent Intercom protocol v4 (`types.ts`, `broker.ts`, and `broker/framing.ts` in the `ctliz` ecosystem with `@dataforxyz` provenance), covering Pi `v0.12.0-connect.1` and Managed Claude `0.13.0-connect.1`. **Written down so we never have to re-derive it.**
 >
 > Implementation lives in `src-tauri/src/intercom.rs`; the verification script is `scripts/intercom-probe.mjs`.
 
@@ -151,9 +151,9 @@ Single-frame cap is **1 MiB**; exceeding it triggers an immediate connection dro
 
 - [nicobailon/pi-intercom](https://github.com/nicobailon/pi-intercom) (MIT, original pi-only implementation)
 - `@dataforxyz/agent-intercom-*` (AGPL, cross-harness protocol foundation)
-- `@ctliz/agent-intercom-core@0.1.0` (internal core protocol implementation)
-- `@ctliz/agent-intercom-pi` / [ctliz/agent-intercom-pi](https://github.com/ctliz/agent-intercom-pi) (`v0.11.0-connect.2`, protocol v4)
-- `@ctliz/agent-intercom-claude` / [ctliz/agent-intercom-claude](https://github.com/ctliz/agent-intercom-claude) (`0.12.0-connect.3`, Managed Claude with `--tui --safe`)
-- `@ctliz/agent-intercom-codex` (`0.11.0-connect.2`)
-- `@ctliz/agent-intercom-opencode` (`0.11.0-connect.2`)
-- `@ctliz/agent-intercom-orchestrator` (`0.11.0-connect.2`, optional Linux/systemd)
+- `@ctliz/agent-intercom-core@0.2.0` (core protocol implementation & team-manifest kernel)
+- `@ctliz/agent-intercom-pi` / [ctliz/agent-intercom-pi](https://github.com/ctliz/agent-intercom-pi) (`v0.12.0-connect.1`, protocol v4)
+- `@ctliz/agent-intercom-claude` / [ctliz/agent-intercom-claude](https://github.com/ctliz/agent-intercom-claude) (`0.13.0-connect.1`, Managed Claude with `--tui --safe`)
+- `@ctliz/agent-intercom-codex` (`0.12.0-connect.1`)
+- `@ctliz/agent-intercom-opencode` (`0.12.0-connect.1`)
+- `@ctliz/agent-intercom-orchestrator` (`0.12.0-connect.1`, optional Linux/systemd)
