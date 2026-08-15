@@ -43,6 +43,7 @@ interface CreateWorkspaceModalProps {
   onSaveCustomAgent: () => void;
   /** "managed" installs, repairs or re-selects the enhanced link; "standard" opts out. */
   onClaudeAction: (mode: ClaudeMode) => void;
+  onPanelBypassChange: (enabled: boolean) => void;
   onCreate: () => void;
 }
 
@@ -75,6 +76,7 @@ export function CreateWorkspaceModal({
   onPickDirectory,
   onSaveCustomAgent,
   onClaudeAction,
+  onPanelBypassChange,
   onCreate,
 }: CreateWorkspaceModalProps) {
   const [showClaudeMenu, setShowClaudeMenu] = useState(false);
@@ -562,6 +564,21 @@ export function CreateWorkspaceModal({
               </div>
             </div>
           )}
+
+          <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 space-y-2">
+            <label className="flex items-start gap-2 text-xs text-amber-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config?.panel_bypass_permissions ?? true}
+                onChange={(e) => onPanelBypassChange(e.target.checked)}
+                className="mt-0.5 accent-amber-500"
+              />
+              <span>
+                <span className="font-medium">{t("modal.panelBypassLabel")}</span>
+                <span className="block mt-0.5 text-[10px] text-amber-300/70">{t("modal.panelBypassWarning")}</span>
+              </span>
+            </label>
+          </div>
 
           {/* Dynamic Summary */}
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/60 text-xs text-slate-400">

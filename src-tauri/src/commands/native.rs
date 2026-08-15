@@ -208,6 +208,11 @@ fn native_slot_command_args(
     let slot_value = slot.to_string();
     let (agent_cmd, intercom_id) =
         native_agent_command(agent_id, agent_cmd, workspace, slot, session_id)?;
+    let agent_cmd = crate::commands::utils::panel_agent_command(
+        agent_id,
+        &agent_cmd,
+        crate::config::load_config().panel_bypass_permissions,
+    );
     let augmented_path = crate::commands::utils::build_augmented_path_for_command(&agent_cmd);
     let team_envs = crate::team::build_pane_team_env(&crate::team::PaneTeamEnvOpts {
         workspace_name: workspace,

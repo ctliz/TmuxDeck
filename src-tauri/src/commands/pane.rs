@@ -301,7 +301,14 @@ fn add_standard_panes(
         let s_id = &session_ids[offset];
         let (pane_agent_cmd, intercom_id) =
             match panel_agent_command(agent_id, agent_cmd, session, pane_num, s_id) {
-                Ok(command) => command,
+                Ok((command, id)) => (
+                    crate::commands::utils::panel_agent_command(
+                        agent_id,
+                        &command,
+                        crate::config::load_config().panel_bypass_permissions,
+                    ),
+                    id,
+                ),
                 Err(error) => {
                     return Err(rollback_error(
                         error,

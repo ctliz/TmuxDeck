@@ -22,6 +22,7 @@ export interface Config {
   custom_agent?: CustomAgent;
   recent_dirs: string[];
   use_standard_claude: boolean;
+  panel_bypass_permissions?: boolean;
 }
 
 export type ManagedClaudeState =

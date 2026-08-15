@@ -378,6 +378,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     }
 
     let env_info = detect_environment();
+    let panel_bypass_permissions = load_config().panel_bypass_permissions;
     let count = match opts.panes {
         1 | 2 | 4 | 6 => opts.panes as usize,
         _ => 4,
@@ -469,7 +470,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         1,
         &pane_session_ids[0],
     ) {
-        Ok(cmd) => cmd,
+        Ok((command, id)) => (
+            crate::commands::utils::panel_agent_command(
+                &pane_agent_ids[0],
+                &command,
+                panel_bypass_permissions,
+            ),
+            id,
+        ),
         Err(e) => {
             return Err(rollback_create_session(None, Some(&team_run_id), e));
         }
@@ -645,7 +653,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             pane,
             &pane_session_ids[pane - 1],
         ) {
-            Ok(cmd) => cmd,
+            Ok((command, id)) => (
+                crate::commands::utils::panel_agent_command(
+                    &pane_agent_ids[pane - 1],
+                    &command,
+                    panel_bypass_permissions,
+                ),
+                id,
+            ),
             Err(e) => {
                 return Err(rollback_create_session(
                     Some(&sanitized_name),

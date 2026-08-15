@@ -316,6 +316,62 @@ pub(crate) fn terminal_capability_envs(terminal_id: Option<&str>) -> Vec<String>
     ]
 }
 
+pub(crate) fn panel_agent_command(agent_id: &str, command: &str, bypass_permissions: bool) -> String {
+    if !bypass_permissions {
+        return command.to_string();
+    }
+    let flag = match agent_id {
+        "claude" => "--dangerously-skip-permissions",
+        "codex" => "--dangerously-bypass-approvals-and-sandbox",
+        "opencode" => "--auto",
+        // agy/Gemini are intentionally deferred to v1.15.0.
+        _ => return command.to_string(),
+    };
+    if shell_words(command).iter().any(|token| token == flag) {
+        command.to_string()
+    } else if command.trim().is_empty() {
+        command.to_string()
+    } else {
+        format!("{} {}", command.trim_end(), flag)
+    }
+}
+
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in command.chars() {
+        if escaped {
+            word.push(ch);
+            escaped = false;
+        } else if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+        } else if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            } else {
+                word.push(ch);
+            }
+        } else if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+        } else if ch.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        } else {
+            word.push(ch);
+        }
+    }
+    if escaped {
+        word.push('\\');
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
 pub(crate) fn session_terminal_options(target: &str) -> Vec<String> {
     vec![
         ";".to_string(),
@@ -488,6 +544,25 @@ mod tests {
         assert!(command.contains("@tmuxdeck-agent shell"));
         assert!(command.contains(r#"exec "${SHELL:-/bin/sh}""#));
         assert!(command.contains(r#"else exit "$exit_code""#));
+    }
+
+    #[test]
+    fn test_panel_agent_bypass_is_scoped_and_token_aware() {
+        assert_eq!(panel_agent_command("claude", "claude", true), "claude --dangerously-skip-permissions");
+        assert_eq!(panel_agent_command("codex", "codex", true), "codex --dangerously-bypass-approvals-and-sandbox");
+        assert_eq!(panel_agent_command("opencode", "opencode", true), "opencode --auto");
+        assert_eq!(panel_agent_command("pi", "pi", true), "pi");
+        assert_eq!(panel_agent_command("agy", "agy", true), "agy");
+        assert_eq!(panel_agent_command("custom", "claude --custom", true), "claude --custom");
+        assert_eq!(
+            panel_agent_command("claude", "claude --dangerously-skip-permissions", true),
+            "claude --dangerously-skip-permissions"
+        );
+        assert_eq!(
+            panel_agent_command("claude", "claude --dangerously-skip-permissions-extra", true),
+            "claude --dangerously-skip-permissions-extra --dangerously-skip-permissions"
+        );
+        assert_eq!(panel_agent_command("codex", "codex --auto", false), "codex --auto");
     }
 
     #[test]

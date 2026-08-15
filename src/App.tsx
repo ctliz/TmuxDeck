@@ -281,7 +281,7 @@ export default function App() {
     if (!customAgentCmd.trim()) return alert(t("val.enterCustomCmd"));
     const newCustom: CustomAgent = { name: customAgentName.trim() || t("agent.custom"), command: customAgentCmd.trim() };
     try {
-      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [], use_standard_claude: false };
+      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [], use_standard_claude: false, panel_bypass_permissions: true };
       const updatedConfig: Config = { ...currentConfig, custom_agent: newCustom };
       await invoke("save_config", { config: updatedConfig });
       const envData = await invoke<Environment>("detect_environment");
@@ -291,6 +291,24 @@ export default function App() {
       setShowCustomAgentForm(false);
     } catch (err: any) {
       alert(t("val.saveCustomFailed") + ": " + translateError(err));
+    }
+  };
+
+  const handlePanelBypassChange = async (enabled: boolean) => {
+    const currentConfig = config || {
+      default_terminal: selectedTerminal,
+      default_agent: "custom",
+      default_panes: selectedPanes,
+      recent_dirs: [],
+      use_standard_claude: false,
+      panel_bypass_permissions: true,
+    };
+    const updatedConfig = { ...currentConfig, panel_bypass_permissions: enabled };
+    try {
+      await invoke("save_config", { config: updatedConfig });
+      setConfig(updatedConfig);
+    } catch (err: any) {
+      alert(t("val.saveConfigFailed") + ": " + translateError(err));
     }
   };
 
@@ -570,6 +588,7 @@ export default function App() {
         onPickDirectory={handlePickDirectory}
         onSaveCustomAgent={handleSaveCustomAgent}
         onClaudeAction={handleClaudeAction}
+        onPanelBypassChange={handlePanelBypassChange}
         onCreate={handleCreate}
       />
 

@@ -6,6 +6,10 @@ pub struct CustomAgent {
     pub command: String,
 }
 
+fn default_panel_bypass_permissions() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub default_terminal: String,
@@ -15,6 +19,8 @@ pub struct Config {
     pub recent_dirs: Vec<String>,
     #[serde(default)]
     pub use_standard_claude: bool,
+    #[serde(default = "default_panel_bypass_permissions")]
+    pub panel_bypass_permissions: bool,
 }
 
 impl Default for Config {
@@ -26,6 +32,7 @@ impl Default for Config {
             custom_agent: None,
             recent_dirs: Vec::new(),
             use_standard_claude: false,
+            panel_bypass_permissions: true,
         }
     }
 }
