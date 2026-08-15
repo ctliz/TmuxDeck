@@ -127,10 +127,9 @@ export function TrayPanel() {
         </span>
       </header>
 
-      {/* 单一滚动区：用量与工作区一起滚，避免嵌套滚动容器互相抢高度、
+      {/* 单一滚动区：工作区与用量一起滚，避免嵌套滚动容器互相抢高度、
           把工作区列表挤成半行。header/footer 保持固定。 */}
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto pb-2">
-        <UsageStrip snapshot={snapshot} />
         <SessionList
           sessions={sorted}
           agents={env?.agents ?? []}
@@ -138,6 +137,7 @@ export function TrayPanel() {
           onOpen={handleOpen}
           onAddPane={handleAddPane}
         />
+        <UsageStrip snapshot={snapshot} />
       </div>
 
       {errorMsg && (

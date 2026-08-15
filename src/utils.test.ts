@@ -941,3 +941,19 @@ test("AdapterConsentModal and CreateWorkspaceModal surface zero scope leakage", 
   assert.doesNotMatch(createModalSrc, /scope_id/i);
   assert.doesNotMatch(createModalSrc, /scopeId/i);
 });
+
+test("TrayPanel renders SessionList before UsageStrip in the scroll container", () => {
+  const trayPanelSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/tray/TrayPanel.tsx"),
+    "utf-8"
+  );
+  const sessionListIndex = trayPanelSrc.indexOf("<SessionList");
+  const usageStripIndex = trayPanelSrc.indexOf("<UsageStrip");
+  assert.ok(sessionListIndex !== -1, "Missing SessionList in TrayPanel");
+  assert.ok(usageStripIndex !== -1, "Missing UsageStrip in TrayPanel");
+  assert.ok(
+    sessionListIndex < usageStripIndex,
+    "SessionList must appear before UsageStrip in TrayPanel"
+  );
+});
+

@@ -492,11 +492,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         sanitized_name.clone(),
         "-e".to_string(),
         format!("PATH={}", augmented_path),
+    ];
+    new_args.extend(crate::commands::utils::terminal_capability_envs(Some(&opts.terminal_id)));
+    new_args.extend([
         "-e".to_string(),
         format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
         "-e".to_string(),
         format!("AGENT_INTERCOM_TEAM_MANIFEST={}", manifest_path_str),
-    ];
+    ]);
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
     }
@@ -526,6 +529,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         crate::team::OPTION_TEAM_RUN_ID.to_string(),
         team_run_id.clone(),
     ]);
+    new_args.extend(crate::commands::utils::session_terminal_options(&sanitized_name));
     let new_refs: Vec<&str> = new_args.iter().map(String::as_str).collect();
 
     let output = match run_tmux(&new_refs) {
@@ -622,11 +626,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             "#{pane_id}".to_string(),
             "-t".to_string(),
             sanitized_name.clone(),
+        ];
+        split_args.extend(crate::commands::utils::terminal_capability_envs(Some(&opts.terminal_id)));
+        split_args.extend([
             "-e".to_string(),
             format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
             "-e".to_string(),
             format!("AGENT_INTERCOM_TEAM_MANIFEST={}", manifest_path_str),
-        ];
+        ]);
         if !work_dir_clean.is_empty() && work_dir_clean != "~" {
             split_args.push("-c".to_string());
             split_args.push(work_dir_clean.clone());

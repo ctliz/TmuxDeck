@@ -303,6 +303,49 @@ pub(crate) fn append_identity_env_clears(args: &mut Vec<String>, target: &str) {
     }
 }
 
+pub(crate) fn terminal_capability_envs(terminal_id: Option<&str>) -> Vec<String> {
+    let term_program = std::env::var("TERM_PROGRAM")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| terminal_id.unwrap_or("ghostty").to_string());
+    vec![
+        "-e".to_string(),
+        "COLORTERM=truecolor".to_string(),
+        "-e".to_string(),
+        format!("TERM_PROGRAM={}", term_program),
+    ]
+}
+
+pub(crate) fn session_terminal_options(target: &str) -> Vec<String> {
+    vec![
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "focus-events".to_string(),
+        "on".to_string(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "extended-keys".to_string(),
+        "on".to_string(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "default-terminal".to_string(),
+        "tmux-256color".to_string(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "-a".to_string(),
+        "terminal-overrides".to_string(),
+        ",*:RGB".to_string(),
+    ]
+}
+
 #[tauri::command]
 pub fn get_terminal_icon(terminal_id: String) -> Result<Vec<u8>, String> {
     let env_info = detect_environment();
@@ -445,5 +488,22 @@ mod tests {
         assert!(command.contains("@tmuxdeck-agent shell"));
         assert!(command.contains(r#"exec "${SHELL:-/bin/sh}""#));
         assert!(command.contains(r#"else exit "$exit_code""#));
+    }
+
+    #[test]
+    fn test_terminal_capability_envs_and_options() {
+        let envs = terminal_capability_envs(Some("ghostty"));
+        assert_eq!(envs[0], "-e");
+        assert_eq!(envs[1], "COLORTERM=truecolor");
+        assert_eq!(envs[2], "-e");
+        assert!(envs[3].starts_with("TERM_PROGRAM="));
+
+        let opts = session_terminal_options("sess-1");
+        assert!(opts.contains(&"focus-events".to_string()));
+        assert!(opts.contains(&"extended-keys".to_string()));
+        assert!(opts.contains(&"default-terminal".to_string()));
+        assert!(opts.contains(&"tmux-256color".to_string()));
+        assert!(opts.contains(&"terminal-overrides".to_string()));
+        assert!(opts.contains(&",*:RGB".to_string()));
     }
 }

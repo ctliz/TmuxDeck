@@ -226,6 +226,9 @@ fn native_slot_command_args(
         target.clone(),
         "-e".to_string(),
         format!("PATH={}", augmented_path),
+    ];
+    args.extend(crate::commands::utils::terminal_capability_envs(Some("ghostty")));
+    args.extend([
         "-e".to_string(),
         format!("TMUXDECK_WORKSPACE={}", workspace),
         "-e".to_string(),
@@ -234,7 +237,7 @@ fn native_slot_command_args(
         format!("AGENT_INTERCOM_SCOPE_ID={}", scope_id),
         "-e".to_string(),
         format!("AGENT_INTERCOM_TEAM_MANIFEST={}", manifest_path),
-    ];
+    ]);
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
     }
@@ -272,6 +275,7 @@ fn native_slot_command_args(
             value.to_string(),
         ]);
     }
+    args.extend(crate::commands::utils::session_terminal_options(&target));
 
     // Set pane options with -p
     args.extend([

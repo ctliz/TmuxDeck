@@ -58,14 +58,18 @@ fn standard_split_args(
     command: &str,
     scope_id: &str,
     manifest_path: &str,
+    terminal_id: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         "split-window".to_string(),
         "-t".to_string(),
         session.to_string(),
+    ];
+    args.extend(crate::commands::utils::terminal_capability_envs(terminal_id));
+    args.extend([
         "-e".to_string(),
         format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
-    ];
+    ]);
     if !manifest_path.is_empty() {
         args.extend([
             "-e".to_string(),
@@ -285,6 +289,13 @@ fn add_standard_panes(
 ) -> Result<usize, String> {
     let first_pane_number = crate::tmux::get_session_panes(session, false, None).len() + 1;
     let mut created = Vec::new();
+    let session_terminal = run_tmux(&["show-options", "-v", "-t", session, crate::commands::native::TERMINAL_OPTION])
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     for offset in 0..count {
         let pane_num = first_pane_number + offset;
         let s_id = &session_ids[offset];
@@ -313,8 +324,14 @@ fn add_standard_panes(
             agent_id != "shell",
             &pane_team_envs,
         );
-        let split_args =
-            standard_split_args(session, work_dir, &isolated_agent, scope_id, manifest_path);
+        let split_args = standard_split_args(
+            session,
+            work_dir,
+            &isolated_agent,
+            scope_id,
+            manifest_path,
+            session_terminal.as_deref(),
+        );
         let refs: Vec<&str> = split_args.iter().map(String::as_str).collect();
         let output = match run_tmux(&refs) {
             Ok(output) => output,
@@ -1239,32 +1256,29 @@ mod tests {
 
     #[test]
     fn standard_batch_split_command_preserves_target_workdir_and_output_id() {
-        assert_eq!(
-            standard_split_args(
-                "deck",
-                "/tmp/project",
-                "agent --flag",
-                "Scope_WorkspaceA123",
-                "/tmp/manifest.json"
-            ),
-            [
-                "split-window",
-                "-t",
-                "deck",
-                "-e",
-                "AGENT_INTERCOM_SCOPE_ID=Scope_WorkspaceA123",
-                "-e",
-                "AGENT_INTERCOM_TEAM_MANIFEST=/tmp/manifest.json",
-                "-c",
-                "/tmp/project",
-                "-P",
-                "-F",
-                "#{pane_id}",
-                "agent --flag",
-            ]
+        let args = standard_split_args(
+            "deck",
+            "/tmp/project",
+            "agent --flag",
+            "Scope_WorkspaceA123",
+            "/tmp/manifest.json",
+            Some("ghostty"),
         );
+        assert_eq!(args[0], "split-window");
+        assert_eq!(args[1], "-t");
+        assert_eq!(args[2], "deck");
+        assert!(args.contains(&"-e".to_string()));
+        assert!(args.contains(&"COLORTERM=truecolor".to_string()));
+        assert!(args.iter().any(|arg| arg.starts_with("TERM_PROGRAM=")));
+        assert!(args.contains(&"AGENT_INTERCOM_SCOPE_ID=Scope_WorkspaceA123".to_string()));
+        assert!(args.contains(&"AGENT_INTERCOM_TEAM_MANIFEST=/tmp/manifest.json".to_string()));
+        assert!(args.contains(&"-c".to_string()));
+        assert!(args.contains(&"/tmp/project".to_string()));
+        assert!(args.contains(&"#{pane_id}".to_string()));
+        assert_eq!(args.last().unwrap(), "agent --flag");
+
         assert!(
-            !standard_split_args("deck", "~", "shell", "Scope_WorkspaceA123", "")
+            !standard_split_args("deck", "~", "shell", "Scope_WorkspaceA123", "", None)
                 .iter()
                 .any(|arg| arg == "-c")
         );
