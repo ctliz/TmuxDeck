@@ -1487,6 +1487,17 @@ pub fn probe_codex_config_toml(
         return CodexConfigIdentity::ManagedTarget;
     }
 
+    let expected_server_path = expected_launcher_path.with_file_name("codex-server.mjs");
+    if cmd_str == "node"
+        && args_arr
+            .and_then(|args| args.get(0))
+            .and_then(|value| value.as_str())
+            .map(|arg| arg == expected_server_path.to_string_lossy())
+            .unwrap_or(false)
+    {
+        return CodexConfigIdentity::ManagedTarget;
+    }
+
     if cmd_str.contains("/managed/codex-intercom/") {
         let parts: Vec<&str> = cmd_str.split('/').collect();
         if let Some(pos) = parts.iter().position(|&p| p == "codex-intercom") {
@@ -1516,7 +1527,9 @@ pub fn probe_codex_config_toml(
     if let Some(arr) = args_arr {
         if arr.len() == 1 {
             if let Some(arg_str) = arr.get(0).and_then(|v| v.as_str()) {
-                if arg_str == expected_launcher_path.to_string_lossy() {
+                if arg_str == expected_launcher_path.to_string_lossy()
+                    || arg_str == expected_server_path.to_string_lossy()
+                {
                     return CodexConfigIdentity::ManagedTarget;
                 }
                 if arg_str.contains("/managed/codex-intercom/") {
@@ -1567,11 +1580,11 @@ pub fn update_codex_config_toml(
         .ok_or(AdapterError::Config)?;
 
     let mut server_table = Table::new();
-    server_table.insert(
-        "command",
-        value(launcher_path.to_string_lossy().to_string()),
-    );
-    server_table.insert("args", Item::Value(toml_edit::Value::Array(Array::new())));
+    let server_path = launcher_path.with_file_name("codex-server.mjs");
+    server_table.insert("command", value("node"));
+    let mut server_args = Array::new();
+    server_args.push(server_path.to_string_lossy().to_string());
+    server_table.insert("args", Item::Value(toml_edit::Value::Array(server_args)));
     server_table.insert("startup_timeout_sec", value(120i64));
 
     mcp_servers.insert(CODEX_MCP_SERVER_KEY, Item::Table(server_table));
@@ -3902,6 +3915,7 @@ pub fn apply_workspace_install_plan(
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use std::process::{Command, Stdio};
     use std::sync::Mutex;
 
     pub struct TestTempDir {
@@ -4282,6 +4296,9 @@ pub mod tests {
 
         let content = fs::read_to_string(&config_file).unwrap();
         assert!(content.contains("codex-intercom"));
+        assert!(content.contains("command = \"node\""));
+        assert!(content.contains("codex-server.mjs"));
+        assert!(!content.contains("codex-launcher.mjs"));
         assert!(content.contains("AGENT_INTERCOM_SCOPE_ID"));
     }
 
@@ -4579,6 +4596,35 @@ pub mod tests {
         assert!(codex_keys
             .keys()
             .all(|key| !key.ends_with("/node-pty") && !key.ends_with("/node-addon-api")));
+
+        // The MCP entrypoint must be the bundled server itself, not the CLI launcher.
+        let mut child = Command::new("node")
+            .arg(codex_stage.join("dist/codex-server.mjs"))
+            .current_dir(&codex_stage)
+            .env(
+                "AGENT_INTERCOM_TEAM_MANIFEST",
+                dir.path().join("manifest.json"),
+            )
+            .env(
+                "AGENT_INTERCOM_SESSION_ID",
+                "tmuxdeck-a0000000-0000-4000-8000-000000000001",
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+            .unwrap();
+        drop(stdin);
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        let response = String::from_utf8(output.stdout).unwrap();
+        assert!(response.contains("\"jsonrpc\":\"2.0\""));
+        assert!(response.contains("\"id\":1"));
+        assert!(response.contains("\"protocolVersion\""));
 
         fs::copy(
             source_resources.join(OPENCODE_RESOURCE_NAME),

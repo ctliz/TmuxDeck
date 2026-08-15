@@ -257,7 +257,7 @@ xattr -cr /Applications/TmuxDeck.app
 
 ## 开发者指南
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发配置与代码规范，参见 [docs/](docs/README.md) 了解架构设计、协议参考与决策记录。
+参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发配置、代码规范以及贡献 Communication Connector / Adapter（Pi、Claude、Codex、OpenCode、Orchestrator、Agy）的指南；参见 [docs/](docs/README.md) 了解架构设计、协议参考与决策记录。
 
 ## 贡献者
 

@@ -261,7 +261,7 @@ Linux is not supported yet. Windows works through WSL and ships the same install
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and code conventions, and [docs/](docs/README.md) for architecture, protocol reference, and decision records.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code conventions, and guidelines on contributing communication connectors / adapters (Pi, Claude, Codex, OpenCode, Orchestrator, Agy). See [docs/](docs/README.md) for architecture, protocol reference, and decision records.
 
 ## Contributors
 
