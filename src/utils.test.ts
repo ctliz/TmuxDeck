@@ -15,8 +15,15 @@ import {
   sanitizeNameFrontend,
   summarizePaneAgents,
 } from "./utils.ts";
-import { claudeHint, claudeSwitchTarget } from "./types.ts";
-import type { CreateOpts, ManagedClaudeStatus, ToolInfo, TmuxSession, TmuxPane } from "./types.ts";
+import { claudeHint, claudeSwitchTarget, reorderPaneAgentsForLead } from "./types.ts";
+import type {
+  CreateOpts,
+  ManagedClaudeStatus,
+  ToolInfo,
+  TmuxSession,
+  TmuxPane,
+  WorkspaceInstallPlan,
+} from "./types.ts";
 
 test("sanitizeNameFrontend - valid alphanumeric names", () => {
   assert.strictEqual(sanitizeNameFrontend("my-project"), "my-project");
@@ -812,4 +819,125 @@ test("frontend and mobile surfaces zero scope leakage", () => {
   assert.doesNotMatch(typesContent, /AGENT_INTERCOM_SCOPE_ID/);
   assert.doesNotMatch(typesContent, /scope_id/i);
   assert.doesNotMatch(typesContent, /scopeId/i);
+});
+
+test("reorderPaneAgentsForLead moves the designated lead to index 0 and preserves order of others", () => {
+  // Lead is already index 0
+  assert.deepStrictEqual(
+    reorderPaneAgentsForLead(["pi", "claude", "codex"], 0),
+    ["pi", "claude", "codex"]
+  );
+
+  // Promoting index 1 (claude) to lead
+  assert.deepStrictEqual(
+    reorderPaneAgentsForLead(["pi", "claude", "codex"], 1),
+    ["claude", "pi", "codex"]
+  );
+
+  // Promoting index 2 (codex) to lead in mixed pane configs
+  assert.deepStrictEqual(
+    reorderPaneAgentsForLead(["pi", "claude", "codex", "shell"], 2),
+    ["codex", "pi", "claude", "shell"]
+  );
+
+  // Duplicate pane configs before preallocation are equivalent; promoting pane 2 produces a new array where index 0 is still pi
+  const dupes = ["pi", "pi", "pi"];
+  const reorderedDupes = reorderPaneAgentsForLead(dupes, 2);
+  assert.deepStrictEqual(reorderedDupes, ["pi", "pi", "pi"]);
+  assert.notStrictEqual(reorderedDupes, dupes, "must return a new array instance");
+
+  // Invalid index handling: negative, out of bounds, fractional (e.g. 1.5), NaN returns new array copy without mutation
+  const original = ["pi", "claude", "codex"];
+  assert.deepStrictEqual(reorderPaneAgentsForLead(original, -1), ["pi", "claude", "codex"]);
+  assert.deepStrictEqual(reorderPaneAgentsForLead(original, 5), ["pi", "claude", "codex"]);
+  assert.deepStrictEqual(reorderPaneAgentsForLead(original, 1.5), ["pi", "claude", "codex"]);
+  assert.deepStrictEqual(reorderPaneAgentsForLead(original, 0.7), ["pi", "claude", "codex"]);
+  assert.deepStrictEqual(reorderPaneAgentsForLead(original, NaN), ["pi", "claude", "codex"]);
+  assert.notStrictEqual(reorderPaneAgentsForLead(original, -1), original, "must return a new array instance");
+  assert.deepStrictEqual(reorderPaneAgentsForLead([], 0), []);
+});
+
+test("adapter consent action copy, source enums and error codes in both locales", () => {
+  const samplePlan: WorkspaceInstallPlan = {
+    planId: "opaque-plan-1",
+    planFingerprint: "fingerprint-abc",
+    requiresConsent: true,
+    canApply: false,
+    canCreateWithoutInstalling: false,
+    healthyAgentIds: ["pi"],
+    items: [
+      {
+        agentId: "claude",
+        hostDisplayName: "Claude Code",
+        adapterKind: "claude-plugin-monitor",
+        state: "not-installed",
+        targetVersion: "0.13.0-connect.1",
+        installedVersion: null,
+        sourceKind: "bundled",
+        configChangeKind: "app-private-managed",
+        networkRequired: false,
+        license: "AGPL-3.0-or-later",
+        actionReason: "install",
+      },
+      {
+        agentId: "codex",
+        hostDisplayName: "OpenAI Codex",
+        adapterKind: "codex-mcp",
+        state: "incompatible-namespace",
+        targetVersion: "0.12.0-connect.1",
+        installedVersion: "0.9.0",
+        sourceKind: "npm-registry",
+        packageName: "@ctliz/agent-intercom-codex",
+        configChangeKind: "host-config-registered",
+        networkRequired: true,
+        license: "AGPL-3.0-or-later",
+        actionReason: "manual-migration-required",
+      },
+    ],
+  };
+  assert.strictEqual(samplePlan.requiresConsent, true);
+  assert.strictEqual(samplePlan.canApply, false);
+  assert.strictEqual(samplePlan.canCreateWithoutInstalling, false);
+  assert.strictEqual(samplePlan.items[0].adapterKind, "claude-plugin-monitor");
+  assert.strictEqual(samplePlan.items[0].sourceKind, "bundled");
+  assert.strictEqual(samplePlan.items[1].sourceKind, "npm-registry");
+  assert.strictEqual(samplePlan.items[1].actionReason, "manual-migration-required");
+
+  assert.strictEqual(t("consent.actionInstall"), "Install adapter & create");
+  assert.strictEqual(t("consent.actionWithout"), "Create without installing");
+  assert.strictEqual(t("consent.actionCancel"), "Cancel");
+  assert.strictEqual(t("consent.offlineBundle"), "Bundled offline");
+  assert.strictEqual(t("consent.source.bundled"), "Bundled offline asset");
+  assert.strictEqual(t("consent.source.npmRegistry", { pkg: "@ctliz/agent-intercom-codex" }), "npm: @ctliz/agent-intercom-codex");
+  assert.strictEqual(t("consent.actionReason.manualMigration"), "Manual migration required");
+
+  const adapterErrors = [
+    "ERR_PLAN_STALE",
+    "ERR_ADAPTER_INSTALL_FAILED",
+    "ERR_ADAPTER_NOT_FOUND",
+    "ERR_ADAPTER_INCOMPATIBLE_NS",
+  ];
+  for (const code of adapterErrors) {
+    assert.ok(dictionaries.en[code], `Missing en translation for ${code}`);
+    assert.ok(dictionaries.zh[code], `Missing zh translation for ${code}`);
+    assert.notStrictEqual(translateError(code), code);
+  }
+});
+
+test("AdapterConsentModal and CreateWorkspaceModal surface zero scope leakage", () => {
+  const consentModalSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/AdapterConsentModal.tsx"),
+    "utf-8"
+  );
+  assert.doesNotMatch(consentModalSrc, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(consentModalSrc, /scope_id/i);
+  assert.doesNotMatch(consentModalSrc, /scopeId/i);
+
+  const createModalSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/CreateWorkspaceModal.tsx"),
+    "utf-8"
+  );
+  assert.doesNotMatch(createModalSrc, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(createModalSrc, /scope_id/i);
+  assert.doesNotMatch(createModalSrc, /scopeId/i);
 });

@@ -1,24 +1,115 @@
 use crate::registry::detect_environment;
 use std::process::Command;
 
-pub(crate) const AGENT_IDENTITY_ENV_VARS: &[&str] = &[
+pub(crate) const PROCESS_SCRUB_ENV_VARS: &[&str] = &[
     "PI_SESSION_ID",
     "PI_SESSION_FILE",
     "PI_INTERCOM_SESSION_ID",
+    "PI_SUBAGENT_INTERCOM_SESSION_NAME",
     "PI_CODING_AGENT",
     "PI_MODEL",
     "PI_PROVIDER",
     "PI_REASONING_LEVEL",
-    "OPENCODE_INTERCOM_SESSION_ID",
-    "OPENCODE_INTERCOM_NAME",
-    "OPENCODE_INTERCOM_MODEL",
-    "CODEX_INTERCOM_SESSION_ID",
-    "CODEX_INTERCOM_NAME",
-    "CODEX_INTERCOM_MODEL",
     "CLAUDE_INTERCOM_SESSION_ID",
     "CLAUDE_INTERCOM_NAME",
     "CLAUDE_INTERCOM_MODEL",
+    "CLAUDE_PEER_ID",
+    "CLAUDE_PEER_NAME",
+    "CLAUDE_INTERCOM_ID",
+    "CLAUDE_INTERCOM_WORKER_NAME",
+    "CODEX_INTERCOM_SESSION_ID",
+    "CODEX_INTERCOM_NAME",
+    "CODEX_INTERCOM_MODEL",
+    "CODEX_PEER_ID",
+    "CODEX_PEER_NAME",
+    "CODEX_INTERCOM_BRIDGE_NAME",
+    "OPENCODE_INTERCOM_SESSION_ID",
+    "OPENCODE_INTERCOM_NAME",
+    "OPENCODE_INTERCOM_MODEL",
+    "OPENCODE_PEER_ID",
+    "OPENCODE_PEER_NAME",
+    "OPENCODE_SESSION_ID",
+    "AGENT_INTERCOM_SESSION_ID",
+    "AGENT_INTERCOM_SESSION_NAME",
+    "AGENT_INTERCOM_NAME",
+    "AGENT_INTERCOM_MANAGER_TARGET",
+    "AGENT_INTERCOM_MANAGER_SESSION_ID",
+    "AGENT_INTERCOM_ROLE",
+    "AGENT_INTERCOM_WORKER_ID",
+    "AGENT_INTERCOM_RUN_ID",
+    "AGENT_INTERCOM_OWNED",
+    "AGENT_INTERCOM_SYSTEMD_UNIT",
+    "AGENT_INTERCOM_FRESH",
+    "AGENT_INTERCOM_WORKER_INCARNATION_ID",
+    "AGENT_INTERCOM_WORKER_GENERATION",
+    "AGENT_INTERCOM_PARTICIPANT_ID",
+    "AGENT_INTERCOM_BINDING_EPOCH",
+    "AGENT_INTERCOM_MANAGER_CONTEXT",
+    "AGENT_INTERCOM_ORCHESTRATOR_DISABLED",
+    "AGENT_INTERCOM_BOSS_RUN_ID",
+    "AGENT_INTERCOM_BOSS_ROLE",
+    "AGENT_INTERCOM_BOSS_CONTROLLER_TARGET",
+    "AGENT_INTERCOM_BOSS_MANAGER_TARGET",
+    "AGENT_INTERCOM_BOSS_TEAM_TARGETS",
+    "AGENT_INTERCOM_BOSS_VISIBILITY",
+    "AGENT_INTERCOM_TEAM_MANIFEST",
 ];
+
+pub(crate) const SESSION_SCRUB_ENV_VARS: &[&str] = &[
+    "PI_SESSION_ID",
+    "PI_SESSION_FILE",
+    "PI_INTERCOM_SESSION_ID",
+    "PI_SUBAGENT_INTERCOM_SESSION_NAME",
+    "PI_CODING_AGENT",
+    "PI_MODEL",
+    "PI_PROVIDER",
+    "PI_REASONING_LEVEL",
+    "CLAUDE_INTERCOM_SESSION_ID",
+    "CLAUDE_INTERCOM_NAME",
+    "CLAUDE_INTERCOM_MODEL",
+    "CLAUDE_PEER_ID",
+    "CLAUDE_PEER_NAME",
+    "CLAUDE_INTERCOM_ID",
+    "CLAUDE_INTERCOM_WORKER_NAME",
+    "CODEX_INTERCOM_SESSION_ID",
+    "CODEX_INTERCOM_NAME",
+    "CODEX_INTERCOM_MODEL",
+    "CODEX_PEER_ID",
+    "CODEX_PEER_NAME",
+    "CODEX_INTERCOM_BRIDGE_NAME",
+    "OPENCODE_INTERCOM_SESSION_ID",
+    "OPENCODE_INTERCOM_NAME",
+    "OPENCODE_INTERCOM_MODEL",
+    "OPENCODE_PEER_ID",
+    "OPENCODE_PEER_NAME",
+    "OPENCODE_SESSION_ID",
+    "AGENT_INTERCOM_SESSION_ID",
+    "AGENT_INTERCOM_SESSION_NAME",
+    "AGENT_INTERCOM_NAME",
+    "AGENT_INTERCOM_MANAGER_TARGET",
+    "AGENT_INTERCOM_MANAGER_SESSION_ID",
+    "AGENT_INTERCOM_ROLE",
+    "AGENT_INTERCOM_WORKER_ID",
+    "AGENT_INTERCOM_RUN_ID",
+    "AGENT_INTERCOM_OWNED",
+    "AGENT_INTERCOM_SYSTEMD_UNIT",
+    "AGENT_INTERCOM_FRESH",
+    "AGENT_INTERCOM_WORKER_INCARNATION_ID",
+    "AGENT_INTERCOM_WORKER_GENERATION",
+    "AGENT_INTERCOM_PARTICIPANT_ID",
+    "AGENT_INTERCOM_BINDING_EPOCH",
+    "AGENT_INTERCOM_MANAGER_CONTEXT",
+    "AGENT_INTERCOM_ORCHESTRATOR_DISABLED",
+    "AGENT_INTERCOM_BOSS_RUN_ID",
+    "AGENT_INTERCOM_BOSS_ROLE",
+    "AGENT_INTERCOM_BOSS_CONTROLLER_TARGET",
+    "AGENT_INTERCOM_BOSS_MANAGER_TARGET",
+    "AGENT_INTERCOM_BOSS_TEAM_TARGETS",
+    "AGENT_INTERCOM_BOSS_VISIBILITY",
+];
+
+#[allow(dead_code)]
+pub(crate) const AGENT_IDENTITY_ENV_VARS: &[&str] = PROCESS_SCRUB_ENV_VARS;
 
 pub(crate) fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
@@ -140,10 +231,19 @@ pub(crate) fn build_augmented_path_for_command(command: &str) -> String {
     base_path
 }
 
-pub(crate) fn isolated_agent_command(command: &str, return_to_shell: bool) -> String {
-    let unset = AGENT_IDENTITY_ENV_VARS
+pub(crate) fn isolated_agent_command_with_team_env(
+    command: &str,
+    return_to_shell: bool,
+    team_envs: &[(String, String)],
+) -> String {
+    let unset = PROCESS_SCRUB_ENV_VARS
         .iter()
         .map(|name| format!("-u {}", name))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let set_envs = team_envs
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, shell_single_quote(v)))
         .collect::<Vec<_>>()
         .join(" ");
     let path = build_augmented_path_for_command(command);
@@ -155,12 +255,27 @@ pub(crate) fn isolated_agent_command(command: &str, return_to_shell: bool) -> St
     } else {
         command.to_string()
     };
-    format!(
-        "env {} PATH={} /bin/sh -c {}",
-        unset,
-        shell_single_quote(&path),
-        shell_single_quote(&pane_command)
-    )
+    if set_envs.is_empty() {
+        format!(
+            "env {} PATH={} /bin/sh -c {}",
+            unset,
+            shell_single_quote(&path),
+            shell_single_quote(&pane_command)
+        )
+    } else {
+        format!(
+            "env {} {} PATH={} /bin/sh -c {}",
+            unset,
+            set_envs,
+            shell_single_quote(&path),
+            shell_single_quote(&pane_command)
+        )
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn isolated_agent_command(command: &str, return_to_shell: bool) -> String {
+    isolated_agent_command_with_team_env(command, return_to_shell, &[])
 }
 
 #[tauri::command]
@@ -176,14 +291,14 @@ pub fn use_standard_claude() -> Result<(), String> {
 }
 
 pub(crate) fn append_identity_env_clears(args: &mut Vec<String>, target: &str) {
-    for name in AGENT_IDENTITY_ENV_VARS {
+    for name in SESSION_SCRUB_ENV_VARS {
         args.extend([
             ";".to_string(),
             "set-environment".to_string(),
+            "-u".to_string(),
             "-t".to_string(),
             target.to_string(),
             (*name).to_string(),
-            String::new(),
         ]);
     }
 }
@@ -248,6 +363,44 @@ mod tests {
         assert!(command.contains("PATH="));
         assert!(!command.contains("-u PI_CODING_AGENT_DIR"));
         assert!(command.contains("/bin/sh -c 'pi --model test'"));
+    }
+
+    #[test]
+    fn test_orchestrator_and_boss_vars_are_scrubbed() {
+        let command = isolated_agent_command("claude", false);
+        for required_var in [
+            "AGENT_INTERCOM_WORKER_ID",
+            "AGENT_INTERCOM_RUN_ID",
+            "AGENT_INTERCOM_OWNED",
+            "AGENT_INTERCOM_SYSTEMD_UNIT",
+            "AGENT_INTERCOM_FRESH",
+            "AGENT_INTERCOM_WORKER_INCARNATION_ID",
+            "AGENT_INTERCOM_WORKER_GENERATION",
+            "AGENT_INTERCOM_PARTICIPANT_ID",
+            "AGENT_INTERCOM_BINDING_EPOCH",
+            "AGENT_INTERCOM_MANAGER_CONTEXT",
+            "AGENT_INTERCOM_ORCHESTRATOR_DISABLED",
+            "AGENT_INTERCOM_BOSS_RUN_ID",
+            "AGENT_INTERCOM_BOSS_ROLE",
+            "AGENT_INTERCOM_BOSS_CONTROLLER_TARGET",
+            "AGENT_INTERCOM_BOSS_MANAGER_TARGET",
+            "AGENT_INTERCOM_BOSS_TEAM_TARGETS",
+            "AGENT_INTERCOM_BOSS_VISIBILITY",
+        ] {
+            assert!(
+                command.contains(&format!("-u {}", required_var)),
+                "Process scrub must include {}",
+                required_var
+            );
+            assert!(
+                SESSION_SCRUB_ENV_VARS.contains(&required_var),
+                "Session scrub must include {}",
+                required_var
+            );
+        }
+        // AGENT_INTERCOM_SCOPE_ID must NEVER be scrubbed
+        assert!(!command.contains("-u AGENT_INTERCOM_SCOPE_ID"));
+        assert!(!SESSION_SCRUB_ENV_VARS.contains(&"AGENT_INTERCOM_SCOPE_ID"));
     }
 
     #[test]

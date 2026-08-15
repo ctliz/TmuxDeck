@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 
 use crate::config::get_config_dir;
 
-pub const MANAGED_CLAUDE_VERSION: &str = "0.12.0-connect.3";
-pub const MANAGED_CLAUDE_RESOURCE: &str = "agent-intercom-claude-0.12.0-connect.3.tgz";
+pub const MANAGED_CLAUDE_VERSION: &str = "0.13.0-connect.1";
+pub const MANAGED_CLAUDE_RESOURCE: &str = "ctliz-agent-intercom-claude-0.13.0-connect.1.tgz";
 pub const MANAGED_CLAUDE_SHA256: &str =
-    "f246fe19c43f2a2a487e9d86620c20e7d5686e11adb7fc632281f390c87049ad";
-pub const MANAGED_ADAPTER_MARKER: &str = "0.12.0-connect.3";
+    "a766f4631d92df3dc26ee81f9bec06da38c3c09bae9ea4c6b0ef3975eeeb96ba";
+pub const MANAGED_ADAPTER_MARKER: &str = "0.13.0-connect.1";
 
 const REQUIRED_FILES: &[&str] = &[
     ".claude-plugin/plugin.json",
@@ -101,6 +101,7 @@ pub fn managed_cci_path() -> PathBuf {
     managed_claude_root().join("dist").join("cci.mjs")
 }
 
+#[allow(dead_code)]
 fn manifest_path(root: &Path) -> PathBuf {
     root.join("tmuxdeck-managed.json")
 }
@@ -148,6 +149,7 @@ fn validate_plugin_chain(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn verify_installed_files(root: &Path, manifest: &InstallManifest) -> Result<(), String> {
     if manifest.version != MANAGED_CLAUDE_VERSION || manifest.sha256 != MANAGED_CLAUDE_SHA256 {
         return Err("managed manifest version or artifact digest does not match".into());
@@ -273,13 +275,15 @@ fn validate_runtime(root: &Path) -> Result<(), String> {
 }
 
 fn healthy_root(root: &Path) -> bool {
-    let Ok(bytes) = std::fs::read(manifest_path(root)) else {
-        return false;
-    };
-    let Ok(manifest) = serde_json::from_slice::<InstallManifest>(&bytes) else {
-        return false;
-    };
-    verify_installed_files(root, &manifest).is_ok() && validate_runtime(root).is_ok()
+    crate::commands::adapter::verify_managed_root_integrity(
+        root,
+        "claude-intercom",
+        MANAGED_CLAUDE_VERSION,
+        crate::commands::adapter::CLAUDE_IMMUTABLE_DIGESTS,
+        "@ctliz/agent-intercom-claude",
+        MANAGED_CLAUDE_RESOURCE,
+        MANAGED_CLAUDE_SHA256,
+    ) && validate_runtime(root).is_ok()
 }
 
 fn health_cache() -> &'static Mutex<Option<(Instant, ManagedClaudeState)>> {
@@ -338,6 +342,7 @@ pub fn get_managed_claude_status() -> ManagedClaudeStatus {
     }
 }
 
+#[allow(dead_code)]
 #[cfg(target_os = "macos")]
 fn bundled_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
@@ -354,6 +359,7 @@ fn bundled_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     .ok_or_else(|| "ERR_MANAGED_CLAUDE_RESOURCE|bundled adapter archive is missing".to_string())
 }
 
+#[allow(dead_code)]
 fn archive_listing_is_safe(names: &str, verbose: &str) -> bool {
     let safe_names = names.lines().all(|entry| {
         !entry.starts_with('/')
@@ -366,6 +372,7 @@ fn archive_listing_is_safe(names: &str, verbose: &str) -> bool {
     safe_names && safe_types
 }
 
+#[allow(dead_code)]
 #[cfg(target_os = "macos")]
 fn validate_archive(resource: &Path) -> Result<(), String> {
     let names = Command::new("/usr/bin/tar")
@@ -401,6 +408,7 @@ fn validate_archive(resource: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn activate_staged_install(root: &Path, staging: &Path, backup: &Path) -> Result<(), String> {
     if root.exists() {
         std::fs::rename(root, backup)
@@ -413,6 +421,7 @@ fn activate_staged_install(root: &Path, staging: &Path, backup: &Path) -> Result
     Ok(())
 }
 
+#[allow(dead_code)]
 fn build_manifest(root: &Path) -> Result<InstallManifest, String> {
     let files = REQUIRED_FILES
         .iter()
@@ -440,79 +449,33 @@ pub fn install_managed_claude(app: tauri::AppHandle) -> Result<ManagedClaudeStat
     }
     #[cfg(target_os = "macos")]
     {
-        let resource = bundled_resource_path(&app)?;
-        if sha256(&resource)? != MANAGED_CLAUDE_SHA256 {
-            return Err("ERR_MANAGED_CLAUDE_VERIFY|bundled archive SHA-256 mismatch".into());
+        let runner = crate::commands::adapter::RealCommandRunner;
+        let resources = crate::commands::adapter::TauriResourceLocator { app: &app };
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| "ERR_MANAGED_CLAUDE_UNAVAILABLE".to_string())?;
+        let config_dir = crate::config::get_config_dir();
+        let pi_agent_dir = crate::commands::adapter::get_pi_agent_dir(&home_dir);
+        let ctx = crate::commands::adapter::AdapterContext {
+            runner: &runner,
+            home_dir,
+            config_dir,
+            pi_agent_dir,
+            is_macos: cfg!(target_os = "macos"),
+            #[cfg(test)]
+            injected_fail_point: crate::commands::adapter::FAIL_NONE,
+        };
+
+        crate::commands::adapter::apply_single_adapter(&ctx, &resources, "claude")
+            .map_err(|e| format!("ERR_MANAGED_CLAUDE_INSTALL|{e}"))?;
+
+        let mut config = crate::config::load_config();
+        config.use_standard_claude = false;
+        if let Err(error) = crate::config::save_config(config) {
+            return Err(format!("ERR_MANAGED_CLAUDE_INSTALL|{error}"));
         }
-        validate_archive(&resource)?;
-
-        let root = managed_claude_root();
-        let parent = root
-            .parent()
-            .ok_or_else(|| "ERR_MANAGED_CLAUDE_INSTALL|invalid destination".to_string())?;
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("ERR_MANAGED_CLAUDE_INSTALL|{}", error))?;
-        let nonce = random_hex(8)?;
-        let staging = parent.join(format!(".install-{nonce}"));
-        let backup = parent.join(format!(".previous-{nonce}"));
-        std::fs::create_dir(&staging)
-            .map_err(|error| format!("ERR_MANAGED_CLAUDE_INSTALL|{}", error))?;
-
-        let install_result = (|| {
-            let output = Command::new("/usr/bin/tar")
-                .args(["-xzf"])
-                .arg(&resource)
-                .args(["--strip-components", "1", "-C"])
-                .arg(&staging)
-                .output()
-                .map_err(|error| format!("ERR_MANAGED_CLAUDE_INSTALL|{}", error))?;
-            if !output.status.success() {
-                return Err(format!(
-                    "ERR_MANAGED_CLAUDE_INSTALL|{}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ));
-            }
-            validate_plugin_chain(&staging)
-                .map_err(|error| format!("ERR_MANAGED_CLAUDE_VERIFY|{error}"))?;
-            let manifest = build_manifest(&staging)?;
-            std::fs::write(
-                manifest_path(&staging),
-                serde_json::to_vec_pretty(&manifest)
-                    .map_err(|error| format!("ERR_MANAGED_CLAUDE_INSTALL|{}", error))?,
-            )
-            .map_err(|error| format!("ERR_MANAGED_CLAUDE_INSTALL|{}", error))?;
-            verify_installed_files(&staging, &manifest)
-                .and_then(|_| validate_runtime(&staging))
-                .map_err(|error| format!("ERR_MANAGED_CLAUDE_VERIFY|{error}"))?;
-
-            activate_staged_install(&root, &staging, &backup)?;
-            if !healthy_root(&root) {
-                let _ = std::fs::remove_dir_all(&root);
-                let _ = std::fs::rename(&backup, &root);
-                return Err(
-                    "ERR_MANAGED_CLAUDE_VERIFY|installed adapter failed its health check".into(),
-                );
-            }
-
-            let mut config = crate::config::load_config();
-            config.use_standard_claude = false;
-            if let Err(error) = crate::config::save_config(config) {
-                let _ = std::fs::remove_dir_all(&root);
-                if backup.exists() {
-                    let _ = std::fs::rename(&backup, &root);
-                }
-                return Err(error);
-            }
-            let _ = std::fs::remove_dir_all(&backup);
-            invalidate_managed_claude_health_cache();
-            crate::registry::invalidate_environment_cache();
-            Ok(get_managed_claude_status())
-        })();
-
-        if install_result.is_err() {
-            let _ = std::fs::remove_dir_all(&staging);
-        }
-        install_result
+        invalidate_managed_claude_health_cache();
+        crate::registry::invalidate_environment_cache();
+        Ok(get_managed_claude_status())
     }
 }
 

@@ -12,6 +12,7 @@ mod intercom;
 mod models;
 mod registry;
 mod scope;
+mod team;
 mod tmux;
 mod transcript;
 mod transport;
@@ -62,6 +63,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             {
+                let _ = crate::team::reconcile_orphan_manifests();
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
                 use tauri::Manager;
 
@@ -220,7 +222,9 @@ pub fn run() {
             get_usage_snapshot,
             panel_show_main,
             panel_hide,
-            panel_quit
+            panel_quit,
+            check_workspace_adapters,
+            apply_workspace_install_plan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -304,17 +308,29 @@ mod tests {
 
     #[test]
     fn test_run_tmux_smoke() {
-        if check_tmux_installed().is_some() {
-            let res = run_tmux(&["list-sessions"]);
-            assert!(res.is_ok(), "run_tmux failed to execute command");
-            let output = res.unwrap();
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // tmux exits non-zero when no server is running yet; both outcomes are valid.
-            assert!(
-                output.status.success() || is_no_server_err(&stderr),
-                "tmux should either succeed or report no server, stderr: {}",
-                stderr
-            );
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(tmux_path) = check_tmux_installed() {
+                let mut bytes = [0u8; 4];
+                let _ = getrandom::getrandom(&mut bytes);
+                let nonce: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                let socket = format!("tmuxdeck-test-{}-{nonce}", std::process::id());
+                let res = std::process::Command::new(&tmux_path)
+                    .args(["-L", &socket, "list-sessions"])
+                    .output();
+                assert!(res.is_ok(), "isolated tmux execution failed");
+                let output = res.unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                // tmux exits non-zero when no server is running yet; both outcomes are valid.
+                assert!(
+                    output.status.success() || is_no_server_err(&stderr),
+                    "isolated tmux should either succeed or report no server, stderr: {stderr}"
+                );
+                // Clean up any isolated server that might have been spawned
+                let _ = std::process::Command::new(&tmux_path)
+                    .args(["-L", &socket, "kill-server"])
+                    .output();
+            }
         }
     }
 }

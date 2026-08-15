@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "1.13.0"
+version = "1.14.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -34,4 +34,5 @@ tokio-tungstenite = "0.30"
 futures-util = "0.3"
 getrandom = "0.2"
 sha2 = "0.10"
+toml_edit = "=0.25.13"
 

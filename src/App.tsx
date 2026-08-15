@@ -10,11 +10,21 @@ import {
   resizePaneAgents,
   sanitizeNameFrontend,
 } from "./utils";
-import { ClaudeMode, Config, CreateOpts, CustomAgent, Environment, ManagedClaudeStatus, TmuxSession } from "./types";
+import {
+  ClaudeMode,
+  Config,
+  CreateOpts,
+  CustomAgent,
+  Environment,
+  ManagedClaudeStatus,
+  TmuxSession,
+  WorkspaceInstallPlan,
+} from "./types";
 import { TmuxMissingScreen } from "./components/TmuxMissingScreen";
 import { SearchHeader } from "./components/SearchHeader";
 import { CardGrid } from "./components/CardGrid";
 import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
+import { AdapterConsentModal } from "./components/AdapterConsentModal";
 import { MobilePairingModal } from "./components/MobilePairingModal";
 
 export default function App() {
@@ -51,6 +61,9 @@ export default function App() {
   const [showCustomAgentForm, setShowCustomAgentForm] = useState(false);
   const [customAgentName, setCustomAgentName] = useState("");
   const [customAgentCmd, setCustomAgentCmd] = useState("");
+  const [adapterPlan, setAdapterPlan] = useState<WorkspaceInstallPlan | null>(null);
+  const [showAdapterConsent, setShowAdapterConsent] = useState(false);
+  const [adapterBusy, setAdapterBusy] = useState(false);
   const effectivePaneAgentIds = resizePaneAgents(
     paneAgentIds,
     selectedPanes,
@@ -295,30 +308,73 @@ export default function App() {
     }
   };
 
+  const createWorkspace = async () => {
+    const cleanName = sanitizeNameFrontend(newSessionName);
+    if (!cleanName) throw new Error(t("val.enterName"));
+    const opts: CreateOpts = {
+      name: cleanName,
+      dir: workingDir.trim() || null,
+      agent_id: selectedAgent,
+      pane_agent_ids: effectivePaneAgentIds,
+      panes: selectedPanes,
+      terminal_id: selectedTerminal,
+    };
+    await invoke("create_session", { opts });
+    setShowCreateModal(false);
+    setShowAdapterConsent(false);
+    setAdapterPlan(null);
+    setNewSessionName("");
+    setWorkingDir("");
+    setPaneAgentIds([]);
+    // Full reload: creating a workspace also appends to config.recent_dirs.
+    await loadData();
+  };
+
   const handleCreate = async () => {
     const cleanName = sanitizeNameFrontend(newSessionName);
     if (!cleanName) return alert(t("val.enterName"));
     setLoading(true);
     try {
-      const opts: CreateOpts = {
-        name: cleanName,
-        dir: workingDir.trim() || null,
-        agent_id: selectedAgent,
-        pane_agent_ids: effectivePaneAgentIds,
-        panes: selectedPanes,
-        terminal_id: selectedTerminal,
-      };
-      await invoke("create_session", { opts });
-      setShowCreateModal(false);
-      setNewSessionName("");
-      setWorkingDir("");
-      setPaneAgentIds([]);
-      // Full reload: creating a workspace also appends to config.recent_dirs.
-      await loadData();
+      const plan = await invoke<WorkspaceInstallPlan>("check_workspace_adapters", {
+        paneAgentIds: effectivePaneAgentIds,
+      });
+      if (plan.requiresConsent) {
+        setAdapterPlan(plan);
+        setShowAdapterConsent(true);
+        return;
+      }
+      await createWorkspace();
     } catch (err: any) {
       alert(t("val.createFailed") + ": " + translateError(err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleInstallAndCreate = async () => {
+    if (!adapterPlan) return;
+    setAdapterBusy(true);
+    try {
+      await invoke("apply_workspace_install_plan", {
+        planId: adapterPlan.planId,
+        planFingerprint: adapterPlan.planFingerprint,
+      });
+      await createWorkspace();
+    } catch (err: any) {
+      alert(t("val.createFailed") + ": " + translateError(err));
+    } finally {
+      setAdapterBusy(false);
+    }
+  };
+
+  const handleCreateWithoutInstalling = async () => {
+    setAdapterBusy(true);
+    try {
+      await createWorkspace();
+    } catch (err: any) {
+      alert(t("val.createFailed") + ": " + translateError(err));
+    } finally {
+      setAdapterBusy(false);
     }
   };
 
@@ -515,6 +571,20 @@ export default function App() {
         onSaveCustomAgent={handleSaveCustomAgent}
         onClaudeAction={handleClaudeAction}
         onCreate={handleCreate}
+      />
+
+      <AdapterConsentModal
+        show={showAdapterConsent}
+        plan={adapterPlan}
+        loading={adapterBusy}
+        onClose={() => {
+          if (!adapterBusy) {
+            setShowAdapterConsent(false);
+            setAdapterPlan(null);
+          }
+        }}
+        onInstallAndCreate={handleInstallAndCreate}
+        onCreateWithoutInstalling={handleCreateWithoutInstalling}
       />
 
       <MobilePairingModal

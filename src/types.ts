@@ -136,3 +136,96 @@ export interface BridgePairingStatus {
   brokerConnected: boolean;
   trustedLanOnly?: boolean;
 }
+
+export type AdapterHealthState =
+  | "healthy"
+  | "healthy-existing-global"
+  | "not-installed"
+  | "needs-upgrade"
+  | "needs-repair"
+  | "incompatible-namespace"
+  | "unavailable";
+
+export type CommunicationAdapterKind =
+  | "pi-extension"
+  | "claude-plugin-monitor"
+  | "codex-mcp"
+  | "opencode-plugin";
+
+export type AdapterSourceKind =
+  | "bundled"
+  | "npm-registry"
+  | "pi-git"
+  | "existing-global";
+
+export type CanonicalAdapterPackage =
+  | "@ctliz/agent-intercom-pi"
+  | "@ctliz/agent-intercom-claude"
+  | "@ctliz/agent-intercom-codex"
+  | "@ctliz/agent-intercom-opencode";
+
+export type ConfigChangeKind =
+  | "none"
+  | "app-private-managed"
+  | "host-config-registered";
+
+export type AdapterActionReason =
+  | "install"
+  | "upgrade"
+  | "repair"
+  | "manual-migration-required";
+
+export interface CommunicationAdapterPlanItem {
+  agentId: string;
+  hostDisplayName: string;
+  adapterKind: CommunicationAdapterKind;
+  state: AdapterHealthState;
+  targetVersion: string;
+  installedVersion: string | null;
+  sourceKind: AdapterSourceKind;
+  packageName?: CanonicalAdapterPackage;
+  configChangeKind: ConfigChangeKind;
+  networkRequired: boolean;
+  license: string;
+  actionReason: AdapterActionReason;
+}
+
+export interface WorkspaceInstallPlan {
+  /** Opaque server plan identifier */
+  planId: string;
+  /** Opaque server plan fingerprint */
+  planFingerprint: string;
+  requiresConsent: boolean;
+  canApply: boolean;
+  canCreateWithoutInstalling: boolean;
+  healthyAgentIds: string[];
+  items: CommunicationAdapterPlanItem[];
+}
+
+export type AdapterConsentAction =
+  | "install-and-create"
+  | "create-without-installing"
+  | "cancel";
+
+export type TeamRole = "lead" | "worker";
+
+/**
+ * Reorders a pane agent array so that the designated Lead agent is placed at index 0 (Pane 1).
+ * Preserves the overall count and relative order of coworker agents.
+ * Returns a new array copy; does not mutate the input array.
+ */
+export function reorderPaneAgentsForLead(
+  paneAgentIds: string[],
+  leadIndex: number
+): string[] {
+  if (
+    !Number.isInteger(leadIndex) ||
+    leadIndex <= 0 ||
+    leadIndex >= paneAgentIds.length
+  ) {
+    return [...paneAgentIds];
+  }
+  const leadAgent = paneAgentIds[leadIndex];
+  const rest = paneAgentIds.filter((_, idx) => idx !== leadIndex);
+  return [leadAgent, ...rest];
+}

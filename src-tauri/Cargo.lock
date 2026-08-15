@@ -3621,7 +3621,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "1.13.0"
+version = "1.14.0"
 dependencies = [
  "dirs 5.0.1",
  "futures-util",
@@ -3636,6 +3636,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "tokio-tungstenite",
+ "toml_edit 0.25.13+spec-1.1.0",
 ]
 
 [[package]]
@@ -4150,6 +4151,7 @@ dependencies = [
  "indexmap 2.14.0",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 

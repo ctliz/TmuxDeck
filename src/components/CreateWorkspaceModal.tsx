@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, ChevronDown, Folder, Plus, Settings, TriangleAlert } from "lucide-react";
+import { Bot, ChevronDown, Crown, Folder, Plus, Settings, Sparkles, TriangleAlert } from "lucide-react";
 import { agentDisplayName, t, tPlural, translateName } from "../i18n";
 import { sanitizeNameFrontend, summarizePaneAgents } from "../utils";
 import {
@@ -9,6 +9,7 @@ import {
   ManagedClaudeStatus,
   claudeHint,
   claudeSwitchTarget,
+  reorderPaneAgentsForLead,
 } from "../types";
 
 interface CreateWorkspaceModalProps {
@@ -132,8 +133,8 @@ export function CreateWorkspaceModal({
     paneAgentSummary.uniform && paneAgentSummary.agentId === selectedAgent;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in-up">
-      <div className="w-full max-w-lg rounded-3xl bg-slate-900/90 backdrop-blur-2xl border border-white/20 shadow-2xl p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 transition-opacity duration-150 motion-reduce:transition-none">
+      <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-6 text-slate-100 motion-reduce:transform-none">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
             <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
@@ -145,7 +146,8 @@ export function CreateWorkspaceModal({
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white text-lg font-bold cursor-pointer"
+            aria-label={t("btn.cancel")}
+            className="text-slate-400 hover:text-white text-lg font-bold cursor-pointer p-1 rounded-lg hover:bg-slate-800 transition"
           >
             ✕
           </button>
@@ -449,7 +451,7 @@ export function CreateWorkspaceModal({
             </div>
           </div>
 
-          {/* Per-pane Agent Assignment */}
+          {/* Per-pane Agent Assignment & Team Builder */}
           {showPerPaneAgents && (
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -471,38 +473,65 @@ export function CreateWorkspaceModal({
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-0.5">
-                {paneAgentIds.map((agentId, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center space-x-2 px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-800"
-                  >
-                    <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                      {t("modal.paneIndexLabel", { n: idx + 1 })}
-                    </span>
-                    <select
-                      value={agentId}
-                      aria-label={t("modal.paneIndexLabel", { n: idx + 1 })}
-                      onChange={(e) => setPaneAgentAt(idx, e.target.value)}
-                      className="flex-1 min-w-0 bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer"
+                {paneAgentIds.map((agentId, idx) => {
+                  const isLead = idx === 0;
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-center space-x-1.5 px-2 py-1.5 rounded-xl bg-slate-950 border transition ${
+                        isLead ? "border-amber-500/40 bg-amber-950/10" : "border-slate-800"
+                      }`}
                     >
-                      {env?.agents.map((agent) => (
-                        <option
-                          key={agent.id}
-                          value={agent.id}
-                          className="bg-slate-900"
+                      <span className="text-[10px] text-slate-500 font-mono shrink-0">
+                        {t("modal.paneIndexLabel", { n: idx + 1 })}
+                      </span>
+                      {isLead ? (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center gap-0.5 shrink-0"
+                          title={t("modal.leadBadge")}
                         >
-                          {agentDisplayName(agent)}
-                        </option>
-                      ))}
-                      {!env?.agents.some((agent) => agent.id === agentId) && (
-                        <option value={agentId} className="bg-slate-900">
-                          {agentId}
-                        </option>
+                          <Crown className="w-2.5 h-2.5" />
+                          <span>{t("modal.roleLead")}</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setPaneAgentIds(reorderPaneAgentsForLead(paneAgentIds, idx))}
+                          title={t("modal.makeLead")}
+                          className="px-1.5 py-0.5 rounded text-[10px] text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 border border-slate-800 hover:border-amber-500/30 transition cursor-pointer flex items-center gap-0.5 shrink-0"
+                        >
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>{t("modal.makeLead")}</span>
+                        </button>
                       )}
-                    </select>
-                  </div>
-                ))}
+                      <select
+                        value={agentId}
+                        aria-label={t("modal.paneIndexLabel", { n: idx + 1 })}
+                        onChange={(e) => setPaneAgentAt(idx, e.target.value)}
+                        className="flex-1 min-w-0 bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer"
+                      >
+                        {env?.agents.map((agent) => (
+                          <option
+                            key={agent.id}
+                            value={agent.id}
+                            className="bg-slate-900"
+                          >
+                            {agentDisplayName(agent)}
+                          </option>
+                        ))}
+                        {!env?.agents.some((agent) => agent.id === agentId) && (
+                          <option value={agentId} className="bg-slate-900">
+                            {agentId}
+                          </option>
+                        )}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
+              <p aria-live="polite" className="text-[10px] text-slate-500 mt-1">
+                {t("modal.leadHint")}
+              </p>
             </div>
           )}
 

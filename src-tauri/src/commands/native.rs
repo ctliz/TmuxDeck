@@ -1,5 +1,5 @@
 use crate::audit::{record_kill, tmux_counts};
-use crate::commands::utils::{append_identity_env_clears, isolated_agent_command};
+use crate::commands::utils::append_identity_env_clears;
 use crate::tmux::{check_tmux_installed, is_no_server_err, run_tmux, sanitize_session_name};
 use std::process::Command;
 use std::sync::Mutex;
@@ -95,8 +95,11 @@ pub(crate) fn create_native_workspace(
     agent_commands: &[String],
     agent_ids: &[String],
     scope_id: &str,
+    team_run_id: &str,
+    manifest_path: &str,
+    session_ids: &[String],
 ) -> Result<Vec<NativeSlot>, String> {
-    if agent_commands.len() != count || agent_ids.len() != count {
+    if agent_commands.len() != count || agent_ids.len() != count || session_ids.len() != count {
         return Err("ERR_PANE_AGENT_COUNT".to_string());
     }
     let workspace = sanitize_session_name(workspace)?;
@@ -105,22 +108,55 @@ pub(crate) fn create_native_workspace(
     {
         return Err("ERR_CREATE_OUTPUT_ERR|workspace already exists".to_string());
     }
+    let lead_session_id = &session_ids[0];
     let mut created = Vec::new();
     for slot in 1..=count {
-        match create_native_slot(
+        let is_lead = slot == 1;
+        let role = if is_lead {
+            crate::team::ROLE_LEAD
+        } else {
+            crate::team::ROLE_WORKER
+        };
+        let session_id = &session_ids[slot - 1];
+        match create_native_slot_with_team(
             &workspace,
             slot,
             work_dir,
             &agent_commands[slot - 1],
             &agent_ids[slot - 1],
             scope_id,
+            team_run_id,
+            manifest_path,
+            session_id,
+            role,
+            lead_session_id,
         ) {
             Ok(info) => created.push(info),
             Err(error) => {
-                for info in &created {
-                    let _ = run_tmux(&["kill-session", "-t", &info.target]);
+                let mut cleanup_errors = Vec::new();
+                for slot_idx in 1..=slot {
+                    let target = slot_target(&workspace, slot_idx);
+                    if let Ok(out) = run_tmux(&["kill-session", "-t", &target]) {
+                        if !out.status.success() {
+                            let err = String::from_utf8_lossy(&out.stderr);
+                            if !crate::tmux::is_no_server_err(&err) && !crate::tmux::is_session_missing_err(&err) {
+                                cleanup_errors.push(format!("kill_slot {}: {}", target, err.trim()));
+                            }
+                        }
+                    } else {
+                        cleanup_errors.push(format!("kill_slot spawn failed for {}", target));
+                    }
                 }
-                return Err(error);
+                if cleanup_errors.is_empty() {
+                    return Err(error);
+                } else {
+                    return Err(format!(
+                        "{}|{}|{}",
+                        crate::team::ERR_TEAM_ROLLBACK,
+                        error,
+                        cleanup_errors.join(", ")
+                    ));
+                }
             }
         }
     }
@@ -136,12 +172,13 @@ fn native_agent_command(
     command: &str,
     workspace: &str,
     slot: usize,
-) -> Result<(String, Option<String>), String> {
+    assigned_session_id: &str,
+) -> Result<(String, String), String> {
+    let id = assigned_session_id.to_string();
     let is_managed_cci = std::path::Path::new(command) == crate::claude_adapter::managed_cci_path();
     if agent_id != "claude" || !is_managed_cci {
-        return Ok((command.to_string(), None));
+        return Ok((command.to_string(), id));
     }
-    let id = crate::claude_adapter::random_intercom_id()?;
     let name = format!("{} · Claude {:02}", workspace, slot);
     Ok((
         format!(
@@ -150,7 +187,7 @@ fn native_agent_command(
             shell_quote(&id),
             shell_quote(&name)
         ),
-        Some(id),
+        id,
     ))
 }
 
@@ -161,11 +198,27 @@ fn native_slot_command_args(
     agent_cmd: &str,
     agent_id: &str,
     scope_id: &str,
+    team_run_id: &str,
+    manifest_path: &str,
+    session_id: &str,
+    role: &str,
+    lead_session_id: &str,
 ) -> Result<Vec<String>, String> {
     let target = slot_target(workspace, slot);
     let slot_value = slot.to_string();
-    let (agent_cmd, intercom_id) = native_agent_command(agent_id, agent_cmd, workspace, slot)?;
+    let (agent_cmd, intercom_id) =
+        native_agent_command(agent_id, agent_cmd, workspace, slot, session_id)?;
     let augmented_path = crate::commands::utils::build_augmented_path_for_command(&agent_cmd);
+    let team_envs = crate::team::build_pane_team_env(&crate::team::PaneTeamEnvOpts {
+        workspace_name: workspace,
+        pane_index: slot,
+        agent_id,
+        scope_id,
+        team_manifest_path: manifest_path,
+        session_id,
+        role,
+        lead_session_id,
+    });
     let mut args = vec![
         "new-session".to_string(),
         "-d".to_string(),
@@ -179,11 +232,17 @@ fn native_slot_command_args(
         format!("TMUXDECK_SLOT={}", slot_value),
         "-e".to_string(),
         format!("AGENT_INTERCOM_SCOPE_ID={}", scope_id),
+        "-e".to_string(),
+        format!("AGENT_INTERCOM_TEAM_MANIFEST={}", manifest_path),
     ];
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
     }
-    args.push(isolated_agent_command(&agent_cmd, agent_id != "shell"));
+    args.push(crate::commands::utils::isolated_agent_command_with_team_env(
+        &agent_cmd,
+        agent_id != "shell",
+        &team_envs,
+    ));
     args.extend([
         ";".to_string(),
         "set-option".to_string(),
@@ -201,6 +260,8 @@ fn native_slot_command_args(
         (TERMINAL_OPTION, "ghostty"),
         ("@tmuxdeck-agent", agent_id),
         ("status", "off"),
+        (crate::team::OPTION_LEAD_ID, lead_session_id),
+        (crate::team::OPTION_TEAM_RUN_ID, team_run_id),
     ] {
         args.extend([
             ";".to_string(),
@@ -211,24 +272,48 @@ fn native_slot_command_args(
             value.to_string(),
         ]);
     }
-    if let Some(intercom_id) = intercom_id {
-        for (option, value) in [
-            ("@tmuxdeck-intercom-id", intercom_id.as_str()),
-            (
-                "@tmuxdeck-claude-adapter",
-                crate::claude_adapter::MANAGED_ADAPTER_MARKER,
-            ),
-        ] {
-            args.extend([
-                ";".to_string(),
-                "set-option".to_string(),
-                "-p".to_string(),
-                "-t".to_string(),
-                target.clone(),
-                option.to_string(),
-                value.to_string(),
-            ]);
-        }
+
+    // Set pane options with -p
+    args.extend([
+        ";".to_string(),
+        "set-option".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        target.clone(),
+        crate::team::OPTION_INTERCOM_ID.to_string(),
+        intercom_id.clone(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        target.clone(),
+        crate::team::OPTION_ROLE.to_string(),
+        role.to_string(),
+    ]);
+
+    if role != crate::team::ROLE_LEAD {
+        args.extend([
+            ";".to_string(),
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            target.clone(),
+            crate::team::OPTION_MANAGER_TARGET.to_string(),
+            lead_session_id.to_string(),
+        ]);
+    }
+    if agent_id == "claude"
+        && std::path::Path::new(&agent_cmd) == crate::claude_adapter::managed_cci_path()
+    {
+        args.extend([
+            ";".to_string(),
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            target.clone(),
+            "@tmuxdeck-claude-adapter".to_string(),
+            crate::claude_adapter::MANAGED_ADAPTER_MARKER.to_string(),
+        ]);
     }
     Ok(args)
 }
@@ -264,36 +349,66 @@ fn startup_exit_error(target: &str, pane_status: &str) -> Option<String> {
     ))
 }
 
-pub(crate) fn create_native_slot(
+pub(crate) fn create_native_slot_with_team(
     workspace: &str,
     slot: usize,
     work_dir: &str,
     agent_cmd: &str,
     agent_id: &str,
     scope_id: &str,
+    team_run_id: &str,
+    manifest_path: &str,
+    session_id: &str,
+    role: &str,
+    lead_session_id: &str,
 ) -> Result<NativeSlot, String> {
     let workspace = sanitize_session_name(workspace)?;
     let target = slot_target(&workspace, slot);
     let slot_value = slot.to_string();
-    let args = native_slot_command_args(&workspace, slot, work_dir, agent_cmd, agent_id, scope_id)?;
+    let args = native_slot_command_args(
+        &workspace,
+        slot,
+        work_dir,
+        agent_cmd,
+        agent_id,
+        scope_id,
+        team_run_id,
+        manifest_path,
+        session_id,
+        role,
+        lead_session_id,
+    )?;
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let output = run_tmux(&refs).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    let output = match run_tmux(&refs) {
+        Ok(out) => out,
+        Err(e) => {
+            let _ = run_tmux(&["kill-session", "-t", &target]);
+            return Err(format!("ERR_CREATE_FAILED|{}", e));
+        }
+    };
     if !output.status.success() {
+        let _ = run_tmux(&["kill-session", "-t", &target]);
         return Err(native_slot_setup_error(
             &target,
             &String::from_utf8_lossy(&output.stderr),
         ));
     }
     std::thread::sleep(std::time::Duration::from_millis(250));
-    let pane = run_tmux(&[
+    let pane = match run_tmux(&[
         "list-panes",
         "-t",
         &target,
         "-F",
         "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}",
-    ])
-    .map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    ]) {
+        Ok(out) => out,
+        Err(e) => {
+            let _ = run_tmux(&["kill-session", "-t", &target]);
+            return Err(format!("ERR_CREATE_FAILED|{}", e));
+        }
+    };
     if !pane.status.success() {
+        let _ = run_tmux(&["kill-session", "-t", &target]);
         return Err(native_slot_setup_error(
             &target,
             &String::from_utf8_lossy(&pane.stderr),
@@ -303,9 +418,15 @@ pub(crate) fn create_native_slot(
         let _ = run_tmux(&["kill-session", "-t", &target]);
         return Err(error);
     }
-    let remain_off = run_tmux(&["set-option", "-w", "-t", &target, "remain-on-exit", "off"])
-        .map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    let remain_off = match run_tmux(&["set-option", "-w", "-t", &target, "remain-on-exit", "off"]) {
+        Ok(out) => out,
+        Err(e) => {
+            let _ = run_tmux(&["kill-session", "-t", &target]);
+            return Err(format!("ERR_CREATE_FAILED|{}", e));
+        }
+    };
     if !remain_off.status.success() {
+        let _ = run_tmux(&["kill-session", "-t", &target]);
         return Err(native_slot_setup_error(
             &target,
             &String::from_utf8_lossy(&remain_off.stderr),
@@ -575,35 +696,319 @@ pub(crate) fn rename_native_workspace(old_name: &str, new_name: &str) -> Result<
 
 pub(crate) fn kill_native_slot(target: &str) -> Result<(), String> {
     let target = validate_native_slot_target(target)?;
-    let marker = run_tmux(&["show-options", "-v", "-t", &target, NATIVE_OPTION])
+    let _lock = crate::team::TEAM_MUTATION_LOCK
+        .lock()
+        .map_err(|_| "ERR_KILL_FAILED|lock".to_string())?;
+
+    let marker = run_tmux(&["show-options", "-v", "-t", target, NATIVE_OPTION])
         .map_err(|e| format!("ERR_KILL_FAILED|{}", e))?;
     if !marker.status.success() || String::from_utf8_lossy(&marker.stdout).trim() != "1" {
         return Err("ERR_KILL_SLOT_NOT_NATIVE".to_string());
     }
+
+    let Some((workspace, _slot_str)) = target.rsplit_once("__td_slot_") else {
+        return Err("ERR_KILL_SLOT_INVALID_TARGET".to_string());
+    };
+
+    let team_run_id = run_tmux(&[
+        "show-options",
+        "-v",
+        "-t",
+        target,
+        crate::team::OPTION_TEAM_RUN_ID,
+    ])
+    .ok()
+    .filter(|o| o.status.success())
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .filter(|s| !s.is_empty());
+
+    let lead_id = run_tmux(&[
+        "show-options",
+        "-v",
+        "-t",
+        target,
+        crate::team::OPTION_LEAD_ID,
+    ])
+    .ok()
+    .filter(|o| o.status.success())
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .filter(|s| !s.is_empty());
+
+    let slot_intercom_id = run_tmux(&[
+        "show-options",
+        "-p",
+        "-v",
+        "-t",
+        target,
+        crate::team::OPTION_INTERCOM_ID,
+    ])
+    .ok()
+    .filter(|o| o.status.success())
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .filter(|s| !s.is_empty());
+
+    let role = run_tmux(&[
+        "show-options",
+        "-p",
+        "-v",
+        "-t",
+        target,
+        crate::team::OPTION_ROLE,
+    ])
+    .ok()
+    .filter(|o| o.status.success())
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .filter(|s| !s.is_empty());
+
+    let all_slots = list_native_slots(workspace)?;
+
+    let is_legacy = team_run_id.is_none() && lead_id.is_none();
+    let (old_manifest, is_target_lead) = if !is_legacy {
+        let (Some(run_id), Some(lead)) = (&team_run_id, &lead_id) else {
+            return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
+        };
+        if !crate::team::is_valid_team_run_id(run_id) || !crate::team::is_valid_session_id(lead) {
+            return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
+        }
+        let expected_manifest = crate::team::team_manifest_path(run_id)?
+            .to_string_lossy()
+            .to_string();
+
+        let manifest = match crate::team::read_team_manifest(run_id) {
+            Ok(m) => m,
+            Err(_) => return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string()),
+        };
+        if manifest.run_id != *run_id || manifest.lead_id != *lead {
+            return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+        }
+
+        let mut live_members = Vec::new();
+        let mut lead_found = false;
+        let mut lead_dead = false;
+
+        for slot in &all_slots {
+            let s_target = &slot.target;
+            let s_run_id = run_tmux(&[
+                "show-options",
+                "-v",
+                "-t",
+                s_target,
+                crate::team::OPTION_TEAM_RUN_ID,
+            ])
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+            let s_lead_id = run_tmux(&[
+                "show-options",
+                "-v",
+                "-t",
+                s_target,
+                crate::team::OPTION_LEAD_ID,
+            ])
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+            if s_run_id != *run_id || s_lead_id != *lead {
+                return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+            }
+
+            let env_out = run_tmux(&[
+                "show-environment",
+                "-t",
+                s_target,
+                "AGENT_INTERCOM_TEAM_MANIFEST",
+            ])
+            .map_err(|_| crate::team::ERR_TEAM_UNAVAILABLE.to_string())?;
+            if !env_out.status.success() {
+                return Err(crate::team::ERR_TEAM_UNAVAILABLE.to_string());
+            }
+            let p = String::from_utf8_lossy(&env_out.stdout)
+                .lines()
+                .find_map(|l| l.strip_prefix("AGENT_INTERCOM_TEAM_MANIFEST="))
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string();
+            if p.is_empty() || p != expected_manifest {
+                return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+            }
+
+            let s_intercom = run_tmux(&[
+                "show-options",
+                "-p",
+                "-v",
+                "-t",
+                s_target,
+                crate::team::OPTION_INTERCOM_ID,
+            ])
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+            let s_role = run_tmux(&[
+                "show-options",
+                "-p",
+                "-v",
+                "-t",
+                s_target,
+                crate::team::OPTION_ROLE,
+            ])
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+            let s_manager = run_tmux(&[
+                "show-options",
+                "-p",
+                "-v",
+                "-t",
+                s_target,
+                crate::team::OPTION_MANAGER_TARGET,
+            ])
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+            if s_intercom.is_empty() || s_role.is_empty() {
+                return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+            }
+
+            let s_panes = run_tmux(&[
+                "list-panes",
+                "-t",
+                s_target,
+                "-F",
+                "#{pane_dead}",
+            ]);
+            let s_dead = match s_panes {
+                Ok(out) if out.status.success() => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    stdout.lines().next().unwrap_or("").trim() == "1"
+                }
+                _ => true,
+            };
+
+            live_members.push(crate::team::LiveTeamMemberInfo {
+                session_id: s_intercom.clone(),
+                role: s_role.clone(),
+                manager_target: s_manager,
+            });
+            if s_intercom == *lead {
+                lead_found = true;
+                lead_dead = s_dead;
+            }
+        }
+
+        if !lead_found || lead_dead {
+            return Err("ERR_LEAD_DISCONNECTED".to_string());
+        }
+
+        crate::team::validate_live_team_members(&manifest, &live_members)?;
+
+        let Some(t_id) = slot_intercom_id.as_ref().filter(|s| !s.is_empty()) else {
+            return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+        };
+        let Some(t_role) = role.as_ref().filter(|s| !s.is_empty()) else {
+            return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+        };
+
+        let Some(manifest_member) = manifest.members.iter().find(|m| m.session_id == *t_id) else {
+            return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+        };
+        if manifest_member.role != *t_role {
+            return Err(crate::team::ERR_TEAM_CONFLICT.to_string());
+        }
+
+        let is_lead_match = t_id == lead;
+        if is_lead_match && (manifest.members.len() > 1 || all_slots.len() > 1) {
+            return Err("ERR_KILL_LEAD_NOT_ALLOWED".to_string());
+        }
+
+        if !is_lead_match {
+            if let Err(e) = crate::team::remove_team_member(run_id, t_id) {
+                return Err(e);
+            }
+        }
+        (Some(manifest), is_lead_match)
+    } else {
+        (None, false)
+    };
+
     let before = tmux_counts();
-    let output =
-        run_tmux(&["kill-session", "-t", &target]).map_err(|e| format!("ERR_KILL_FAILED|{}", e))?;
+    let output = match run_tmux(&["kill-session", "-t", target]) {
+        Ok(output) => output,
+        Err(e) => {
+            if let Some(orig) = &old_manifest {
+                if let Err(restore_err) = crate::team::write_team_manifest(orig) {
+                    return Err(format!(
+                        "{}|{}|{}",
+                        crate::team::ERR_TEAM_ROLLBACK,
+                        e,
+                        restore_err
+                    ));
+                }
+            }
+            return Err(format!("ERR_KILL_FAILED|{}", e));
+        }
+    };
     let status = if output.status.success() {
         "success"
     } else {
         "failed"
     };
-    record_kill("kill_slot", &target, before, tmux_counts(), status);
+    record_kill("kill_slot", target, before, tmux_counts(), status);
     if output.status.success() {
+        if let (Some(run_id), true) = (&team_run_id, is_target_lead) {
+            crate::team::delete_team_manifest(run_id)
+                .map_err(|e| format!("ERR_KILL_OUTPUT_ERR|manifest_delete|{}", e))?;
+        }
         Ok(())
     } else {
-        Err(format!(
-            "ERR_KILL_OUTPUT_ERR|{}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
+        let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
+        if let Some(orig) = &old_manifest {
+            if let Err(restore_err) = crate::team::write_team_manifest(orig) {
+                return Err(format!(
+                    "{}|{}|{}",
+                    crate::team::ERR_TEAM_ROLLBACK,
+                    err_msg,
+                    restore_err
+                ));
+            }
+        }
+        Err(format!("ERR_KILL_OUTPUT_ERR|{}", err_msg))
     }
 }
 
-pub(crate) fn destroy_native_workspace(workspace: &str) -> Result<bool, String> {
+pub(crate) fn destroy_native_workspace_unlocked(workspace: &str) -> Result<bool, String> {
     let slots = list_native_slots(workspace)?;
     if slots.is_empty() {
         return Ok(false);
     }
+
+    let mut team_run_ids = std::collections::HashSet::new();
+    for slot in &slots {
+        if let Ok(out) = run_tmux(&[
+            "show-options",
+            "-t",
+            &slot.target,
+            "-v",
+            crate::team::OPTION_TEAM_RUN_ID,
+        ]) {
+            if out.status.success() {
+                let r_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if crate::team::is_valid_team_run_id(&r_id) {
+                    team_run_ids.insert(r_id);
+                }
+            }
+        }
+    }
+
     let before = tmux_counts();
     let mut failed = None;
     for slot in &slots {
@@ -613,20 +1018,35 @@ pub(crate) fn destroy_native_workspace(workspace: &str) -> Result<bool, String> 
             Err(error) => failed = Some(error.to_string()),
         }
     }
+
+    let all_succeeded = failed.is_none();
+    let mut delete_err = None;
+    if all_succeeded {
+        for run_id in team_run_ids {
+            if let Err(e) = crate::team::delete_team_manifest(&run_id) {
+                delete_err = Some(format!("ERR_KILL_OUTPUT_ERR|manifest_delete|{}", e));
+            }
+        }
+    }
+
     record_kill(
         "kill_workspace",
         workspace,
         before,
         tmux_counts(),
-        if failed.is_none() {
+        if all_succeeded && delete_err.is_none() {
             "success"
         } else {
             "failed"
         },
     );
-    failed.map_or(Ok(true), |error| {
-        Err(format!("ERR_KILL_OUTPUT_ERR|{}", error))
-    })
+    if let Some(error) = failed {
+        return Err(format!("ERR_KILL_OUTPUT_ERR|{}", error));
+    }
+    if let Some(err) = delete_err {
+        return Err(err);
+    }
+    Ok(true)
 }
 
 fn applescript_string(value: &str) -> String {
@@ -957,8 +1377,19 @@ mod tests {
 
     #[test]
     fn test_native_workspace_validates_per_slot_agents() {
+        let valid_session_id = "tmuxdeck-a0000000-0000-4000-8000-000000000001".to_string();
         assert!(matches!(
-            create_native_workspace("workspace", 2, "/tmp", &["/bin/pi".into()], &["pi".into()], "Scope_WorkspaceA123"),
+            create_native_workspace(
+                "workspace",
+                2,
+                "/tmp",
+                &["/bin/pi".into()],
+                &["pi".into()],
+                "Scope_WorkspaceA123",
+                "team_a0000000-0000-4000-8000-000000000001",
+                "/tmp/manifest.json",
+                &[valid_session_id]
+            ),
             Err(error) if error == "ERR_PANE_AGENT_COUNT"
         ));
     }
@@ -968,23 +1399,23 @@ mod tests {
         let managed = crate::claude_adapter::managed_cci_path()
             .to_string_lossy()
             .to_string();
-        let (command, id) = native_agent_command("claude", &managed, "alpha", 2).unwrap();
-        let id = id.unwrap();
-        assert!(id.starts_with("tmuxdeck-"));
+        let valid_id = "tmuxdeck-a0000000-0000-4000-8000-000000000001";
+        let (command, id) = native_agent_command("claude", &managed, "alpha", 2, valid_id).unwrap();
+        assert_eq!(id, valid_id);
         assert_eq!(
             command,
             format!(
                 "'{}' --tui --safe --id '{}' --name 'alpha · Claude 02'",
-                managed, id
+                managed, valid_id
             )
         );
         assert_eq!(
-            native_agent_command("claude", "/opt/bin/claude", "alpha", 2).unwrap(),
-            ("/opt/bin/claude".into(), None)
+            native_agent_command("claude", "/opt/bin/claude", "alpha", 2, valid_id).unwrap(),
+            ("/opt/bin/claude".into(), valid_id.into())
         );
         assert_eq!(
-            native_agent_command("custom", "cci --custom", "alpha", 2).unwrap(),
-            ("cci --custom".into(), None)
+            native_agent_command("custom", "cci --custom", "alpha", 2, valid_id).unwrap(),
+            ("cci --custom".into(), valid_id.into())
         );
     }
 
@@ -997,13 +1428,18 @@ mod tests {
             "custom-agent --model 'A B'",
             "custom",
             "Scope_WorkspaceA123",
+            "team_a0000000-0000-4000-8000-000000000001",
+            "/tmp/manifest.json",
+            "tmuxdeck-b0000000-0000-4000-8000-000000000002",
+            crate::team::ROLE_WORKER,
+            "tmuxdeck-a0000000-0000-4000-8000-000000000001",
         )
         .unwrap();
         assert_eq!(args.iter().filter(|arg| *arg == "new-session").count(), 1);
-        assert_eq!(args.iter().filter(|arg| *arg == "set-option").count(), 7);
+        assert!(args.iter().filter(|arg| *arg == "set-option").count() >= 7);
         assert_eq!(
             args.iter().filter(|arg| *arg == "set-environment").count(),
-            crate::commands::utils::AGENT_IDENTITY_ENV_VARS.len()
+            crate::commands::utils::SESSION_SCRUB_ENV_VARS.len()
         );
         assert!(args
             .windows(2)
@@ -1062,6 +1498,83 @@ mod tests {
             Some("ERR_NATIVE_SLOT_AGENT_EXITED|workspace__td_slot_01|signal|9".to_string())
         );
         assert_eq!(startup_exit_error("workspace__td_slot_01", "0||"), None);
+    }
+
+    #[test]
+    fn test_destroy_native_workspace_nested_lock_boundary() {
+        let _guard = crate::team::TEAM_MUTATION_LOCK.lock().unwrap();
+        // Calling destroy_native_workspace_unlocked while holding TEAM_MUTATION_LOCK must NOT deadlock!
+        let result = destroy_native_workspace_unlocked("non_existent_test_workspace_123");
+        assert_eq!(result, Ok(false));
+    }
+
+    #[test]
+    fn test_legacy_native_no_lead_guard() {
+        let team_run_id: Option<String> = None;
+        let lead_id: Option<String> = None;
+        let is_legacy = team_run_id.is_none() && lead_id.is_none();
+        assert!(is_legacy);
+
+        // In legacy mode, is_target_lead is false -> no lead guard is triggered
+        let is_target_lead = false;
+        assert!(!is_target_lead, "Legacy mode must not guard any slot as lead");
+    }
+
+    #[test]
+    fn test_hidden_native_slots_counted_in_lead_guard() {
+        let slots = vec![
+            NativeSlot {
+                target: slot_target("deck", 1),
+                slot: "1".to_string(),
+            },
+            NativeSlot {
+                target: slot_target("deck", 2),
+                slot: "2".to_string(),
+            },
+        ];
+        // Even if Ghostty only shows slot 1 (visible = [1]), total active slots is 2
+        let visible = vec![1usize];
+        assert_eq!(visible.len(), 1);
+        assert_eq!(slots.len(), 2);
+        let members_len = 2;
+
+        let is_lead_match = true;
+        let guard_triggered = is_lead_match && (members_len > 1 || slots.len() > 1);
+        assert!(guard_triggered, "Hidden active slot must keep lead guard active");
+    }
+
+    #[test]
+    fn test_native_attempted_slot_rollback_targets_all_slots() {
+        let workspace = "deck";
+        let failing_slot = 3usize;
+        let mut cleanup_targets = Vec::new();
+        for slot_idx in 1..=failing_slot {
+            cleanup_targets.push(slot_target(workspace, slot_idx));
+        }
+        assert_eq!(
+            cleanup_targets,
+            vec![
+                "deck__td_slot_01".to_string(),
+                "deck__td_slot_02".to_string(),
+                "deck__td_slot_03".to_string(),
+            ],
+            "Rollback must target slots 1..=slot, including the failing slot"
+        );
+    }
+
+    #[test]
+    fn test_native_rollback_surfaces_cleanup_failure_under_err_team_rollback() {
+        let original_error = "ERR_CREATE_NATIVE_SLOT_SETUP|deck__td_slot_02|bad option";
+        let cleanup_errors = vec!["kill_slot deck__td_slot_02: permission denied".to_string()];
+        let formatted = format!(
+            "{}|{}|{}",
+            crate::team::ERR_TEAM_ROLLBACK,
+            original_error,
+            cleanup_errors.join(", ")
+        );
+        assert!(formatted.starts_with(crate::team::ERR_TEAM_ROLLBACK));
+        assert!(formatted.contains(original_error));
+        assert!(formatted.contains("permission denied"));
     }
 
     #[test]

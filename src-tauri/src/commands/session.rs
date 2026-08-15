@@ -3,11 +3,12 @@ use std::process::Command;
 
 use crate::audit::{observe_session_count, record_kill, tmux_counts};
 use crate::commands::native::{
-    create_native_workspace, destroy_native_workspace, ghostty_native_available, list_native_slots,
-    open_native_workspace, rename_native_workspace, TERMINAL_OPTION,
+    create_native_workspace, destroy_native_workspace_unlocked,
+    ghostty_native_available, list_native_slots, open_native_workspace, rename_native_workspace,
+    NativeSlot, TERMINAL_OPTION,
 };
 use crate::commands::utils::{
-    append_identity_env_clears, isolated_agent_command, shell_single_quote, to_wsl_path,
+    append_identity_env_clears, shell_single_quote, to_wsl_path,
 };
 use crate::config::{load_config, save_config};
 use crate::models::{CreateOpts, TmuxSession};
@@ -288,11 +289,12 @@ pub(crate) fn panel_agent_command(
     command: &str,
     workspace: &str,
     pane: usize,
-) -> Result<(String, Option<String>), String> {
+    assigned_session_id: &str,
+) -> Result<(String, String), String> {
+    let id = assigned_session_id.to_string();
     if agent_id != "claude" || !is_managed_cci_command(command) {
-        return Ok((command.to_string(), None));
+        return Ok((command.to_string(), id));
     }
-    let id = crate::claude_adapter::random_intercom_id()?;
     let name = format!("{} · Claude {:02}", workspace, pane);
     Ok((
         format!(
@@ -301,12 +303,75 @@ pub(crate) fn panel_agent_command(
             shell_single_quote(&id),
             shell_single_quote(&name)
         ),
-        Some(id),
+        id,
     ))
+}
+
+fn rollback_create_session(
+    session_name: Option<&str>,
+    team_run_id: Option<&str>,
+    original_err: String,
+) -> String {
+    let mut rollback_errors = Vec::new();
+    if let Some(s) = session_name {
+        if let Ok(out) = run_tmux(&["kill-session", "-t", s]) {
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                if !crate::tmux::is_no_server_err(&err) && !crate::tmux::is_session_missing_err(&err) {
+                    rollback_errors.push(format!("kill_session: {}", err.trim()));
+                }
+            }
+        } else {
+            rollback_errors.push(format!("kill_session spawn failed for {}", s));
+        }
+    }
+    if let Some(run_id) = team_run_id {
+        if let Err(e) = crate::team::delete_team_manifest(run_id) {
+            rollback_errors.push(format!("delete_manifest: {}", e));
+        }
+    }
+    if rollback_errors.is_empty() {
+        original_err
+    } else {
+        format!("ERR_CREATE_FAILED|rollback_failed|{}|{}", original_err, rollback_errors.join(", "))
+    }
+}
+
+fn rollback_create_native_workspace(
+    slots: &[NativeSlot],
+    team_run_id: Option<&str>,
+    original_err: String,
+) -> String {
+    let mut rollback_errors = Vec::new();
+    for slot in slots {
+        if let Ok(out) = run_tmux(&["kill-session", "-t", &slot.target]) {
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                if !crate::tmux::is_no_server_err(&err) && !crate::tmux::is_session_missing_err(&err) {
+                    rollback_errors.push(format!("kill_slot {}: {}", slot.target, err.trim()));
+                }
+            }
+        } else {
+            rollback_errors.push(format!("kill_slot spawn failed for {}", slot.target));
+        }
+    }
+    if let Some(run_id) = team_run_id {
+        if let Err(e) = crate::team::delete_team_manifest(run_id) {
+            rollback_errors.push(format!("delete_manifest: {}", e));
+        }
+    }
+    if rollback_errors.is_empty() {
+        original_err
+    } else {
+        format!("ERR_CREATE_FAILED|rollback_failed|{}|{}", original_err, rollback_errors.join(", "))
+    }
 }
 
 #[tauri::command]
 pub fn create_session(opts: CreateOpts) -> Result<(), String> {
+    let _lock = crate::team::TEAM_MUTATION_LOCK
+        .lock()
+        .map_err(|_| "ERR_CREATE_FAILED|lock".to_string())?;
     let sanitized_name = sanitize_session_name(&opts.name)?;
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
@@ -339,31 +404,86 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         });
 
     let scope_id = crate::scope::generate_workspace_scope_id()?;
+    let team_run_id = crate::team::generate_team_run_id()?;
+
+    let mut pane_session_ids = Vec::with_capacity(count);
+    let mut seen_ids = std::collections::HashSet::new();
+    for _ in 0..count {
+        let mut id = crate::team::generate_session_id()?;
+        while !seen_ids.insert(id.clone()) {
+            id = crate::team::generate_session_id()?;
+        }
+        pane_session_ids.push(id);
+    }
+    let lead_session_id = pane_session_ids[0].clone();
+
+    let mut members = Vec::with_capacity(count);
+    for (idx, s_id) in pane_session_ids.iter().enumerate() {
+        members.push(crate::team::TeamMember {
+            session_id: s_id.clone(),
+            role: if idx == 0 {
+                crate::team::ROLE_LEAD.to_string()
+            } else {
+                crate::team::ROLE_WORKER.to_string()
+            },
+        });
+    }
+    let manifest = crate::team::create_team_manifest(
+        team_run_id.clone(),
+        lead_session_id.clone(),
+        members,
+    )?;
+    let manifest_path = crate::team::write_team_manifest(&manifest)?;
+    let manifest_path_str = manifest_path.to_string_lossy().to_string();
 
     if opts.terminal_id == "ghostty" && ghostty_native_available() {
-        let slots = create_native_workspace(
+        let slots_result = create_native_workspace(
             &sanitized_name,
             count,
             &work_dir_clean,
             &pane_agent_commands,
             &pane_agent_ids,
             &scope_id,
-        )?;
-        if open_native_workspace(&sanitized_name, &slots, slots.len()).is_ok() {
-            save_create_defaults(&opts);
-            return Ok(());
-        }
-        for slot in &slots {
-            let _ = run_tmux(&["kill-session", "-t", &slot.target]);
+            &team_run_id,
+            &manifest_path_str,
+            &pane_session_ids,
+        );
+        match slots_result {
+            Ok(slots) => {
+                if let Err(e) = open_native_workspace(&sanitized_name, &slots, slots.len()) {
+                    return Err(rollback_create_native_workspace(&slots, Some(&team_run_id), e));
+                }
+                save_create_defaults(&opts);
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(rollback_create_session(None, Some(&team_run_id), e));
+            }
         }
     }
 
-    let (first_agent_cmd, first_intercom_id) = panel_agent_command(
+    let (first_agent_cmd, first_intercom_id) = match panel_agent_command(
         &pane_agent_ids[0],
         &pane_agent_commands[0],
         &sanitized_name,
         1,
-    )?;
+        &pane_session_ids[0],
+    ) {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            return Err(rollback_create_session(None, Some(&team_run_id), e));
+        }
+    };
+    let first_team_envs = crate::team::build_pane_team_env(&crate::team::PaneTeamEnvOpts {
+        workspace_name: &sanitized_name,
+        pane_index: 1,
+        agent_id: &pane_agent_ids[0],
+        scope_id: &scope_id,
+        team_manifest_path: &manifest_path_str,
+        session_id: &pane_session_ids[0],
+        role: crate::team::ROLE_LEAD,
+        lead_session_id: &lead_session_id,
+    });
     let augmented_path = crate::commands::utils::build_augmented_path_for_command(&first_agent_cmd);
     let mut new_args = vec![
         "new-session".to_string(),
@@ -374,13 +494,16 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         format!("PATH={}", augmented_path),
         "-e".to_string(),
         format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
+        "-e".to_string(),
+        format!("AGENT_INTERCOM_TEAM_MANIFEST={}", manifest_path_str),
     ];
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
     }
-    new_args.push(isolated_agent_command(
+    new_args.push(crate::commands::utils::isolated_agent_command_with_team_env(
         &first_agent_cmd,
         pane_agent_ids[0] != "shell",
+        &first_team_envs,
     ));
     append_identity_env_clears(&mut new_args, &sanitized_name);
     new_args.extend([
@@ -390,16 +513,39 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         sanitized_name.clone(),
         TERMINAL_OPTION.to_string(),
         opts.terminal_id.clone(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        sanitized_name.clone(),
+        crate::team::OPTION_LEAD_ID.to_string(),
+        lead_session_id.clone(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-t".to_string(),
+        sanitized_name.clone(),
+        crate::team::OPTION_TEAM_RUN_ID.to_string(),
+        team_run_id.clone(),
     ]);
     let new_refs: Vec<&str> = new_args.iter().map(String::as_str).collect();
 
-    let output = run_tmux(&new_refs).map_err(|e| format!("ERR_CREATE_FAILED|{}", e))?;
+    let output = match run_tmux(&new_refs) {
+        Ok(out) => out,
+        Err(e) => {
+            return Err(rollback_create_session(
+                Some(&sanitized_name),
+                Some(&team_run_id),
+                format!("ERR_CREATE_FAILED|{}", e),
+            ));
+        }
+    };
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
-        if is_no_server_err(&err_msg) {
-            return Err("ERR_TMUX_NO_SERVER".to_string());
-        }
-        return Err(format!("ERR_CREATE_OUTPUT_ERR|{}", err_msg));
+        let err = if is_no_server_err(&err_msg) {
+            "ERR_TMUX_NO_SERVER".to_string()
+        } else {
+            format!("ERR_CREATE_OUTPUT_ERR|{}", err_msg)
+        };
+        return Err(rollback_create_session(Some(&sanitized_name), Some(&team_run_id), err));
     }
 
     let first_pane = run_tmux(&["list-panes", "-t", &sanitized_name, "-F", "#{pane_id}"])
@@ -407,31 +553,64 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         .filter(|result| result.status.success())
         .and_then(|result| String::from_utf8(result.stdout).ok())
         .and_then(|stdout| stdout.lines().next().map(String::from));
-    if let Some(first_pane) = first_pane {
-        let _ = run_tmux(&[
-            "set-option",
-            "-p",
-            "-t",
-            &first_pane,
-            "@tmuxdeck-agent",
-            &pane_agent_ids[0],
+    let Some(first_pane) = first_pane else {
+        return Err(rollback_create_session(
+            Some(&sanitized_name),
+            Some(&team_run_id),
+            "ERR_CREATE_OUTPUT_ERR|missing first pane id".to_string(),
+        ));
+    };
+
+    let mut pane1_opts = vec![
+        "set-option".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        first_pane.clone(),
+        "@tmuxdeck-agent".to_string(),
+        pane_agent_ids[0].clone(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        first_pane.clone(),
+        crate::team::OPTION_INTERCOM_ID.to_string(),
+        first_intercom_id.clone(),
+        ";".to_string(),
+        "set-option".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        first_pane.clone(),
+        crate::team::OPTION_ROLE.to_string(),
+        crate::team::ROLE_LEAD.to_string(),
+    ];
+    if pane_agent_ids[0] == "claude" && is_managed_cci_command(&pane_agent_commands[0]) {
+        pane1_opts.extend([
+            ";".to_string(),
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            first_pane.clone(),
+            "@tmuxdeck-claude-adapter".to_string(),
+            crate::claude_adapter::MANAGED_ADAPTER_MARKER.to_string(),
         ]);
-        if let Some(intercom_id) = first_intercom_id.as_deref() {
-            let _ = run_tmux(&[
-                "set-option",
-                "-p",
-                "-t",
-                &first_pane,
-                "@tmuxdeck-intercom-id",
-                intercom_id,
-                ";",
-                "set-option",
-                "-p",
-                "-t",
-                &first_pane,
-                "@tmuxdeck-claude-adapter",
-                crate::claude_adapter::MANAGED_ADAPTER_MARKER,
-            ]);
+    }
+    let refs: Vec<&str> = pane1_opts.iter().map(String::as_str).collect();
+    let pane1_res = run_tmux(&refs);
+    match pane1_res {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            return Err(rollback_create_session(
+                Some(&sanitized_name),
+                Some(&team_run_id),
+                format!("ERR_CREATE_OUTPUT_ERR|{}", String::from_utf8_lossy(&out.stderr)),
+            ));
+        }
+        Err(e) => {
+            return Err(rollback_create_session(
+                Some(&sanitized_name),
+                Some(&team_run_id),
+                format!("ERR_CREATE_FAILED|{}", e),
+            ));
         }
     }
 
@@ -445,62 +624,151 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
             sanitized_name.clone(),
             "-e".to_string(),
             format!("{}={}", crate::scope::SCOPE_ENV_VAR, scope_id),
+            "-e".to_string(),
+            format!("AGENT_INTERCOM_TEAM_MANIFEST={}", manifest_path_str),
         ];
         if !work_dir_clean.is_empty() && work_dir_clean != "~" {
             split_args.push("-c".to_string());
             split_args.push(work_dir_clean.clone());
         }
-        let (pane_agent_cmd, intercom_id) = panel_agent_command(
+        let (pane_agent_cmd, intercom_id) = match panel_agent_command(
             &pane_agent_ids[pane - 1],
             &pane_agent_commands[pane - 1],
             &sanitized_name,
             pane,
-        )?;
-        let isolated_agent =
-            isolated_agent_command(&pane_agent_cmd, pane_agent_ids[pane - 1] != "shell");
+            &pane_session_ids[pane - 1],
+        ) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                return Err(rollback_create_session(
+                    Some(&sanitized_name),
+                    Some(&team_run_id),
+                    e,
+                ));
+            }
+        };
+        let pane_team_envs = crate::team::build_pane_team_env(&crate::team::PaneTeamEnvOpts {
+            workspace_name: &sanitized_name,
+            pane_index: pane,
+            agent_id: &pane_agent_ids[pane - 1],
+            scope_id: &scope_id,
+            team_manifest_path: &manifest_path_str,
+            session_id: &pane_session_ids[pane - 1],
+            role: crate::team::ROLE_WORKER,
+            lead_session_id: &lead_session_id,
+        });
+        let isolated_agent = crate::commands::utils::isolated_agent_command_with_team_env(
+            &pane_agent_cmd,
+            pane_agent_ids[pane - 1] != "shell",
+            &pane_team_envs,
+        );
         split_args.push(isolated_agent);
 
         let split_refs: Vec<&str> = split_args.iter().map(String::as_str).collect();
-        if let Ok(created) = run_tmux(&split_refs) {
-            if created.status.success() {
-                if let Some(pane_id) = String::from_utf8_lossy(&created.stdout)
-                    .lines()
-                    .next()
-                    .filter(|value| value.starts_with('%'))
-                {
-                    let _ = run_tmux(&[
-                        "set-option",
-                        "-p",
-                        "-t",
-                        pane_id,
-                        "@tmuxdeck-agent",
-                        &pane_agent_ids[pane - 1],
-                    ]);
-                    if let Some(intercom_id) = intercom_id.as_deref() {
-                        let _ = run_tmux(&[
-                            "set-option",
-                            "-p",
-                            "-t",
-                            pane_id,
-                            "@tmuxdeck-intercom-id",
-                            intercom_id,
-                            ";",
-                            "set-option",
-                            "-p",
-                            "-t",
-                            pane_id,
-                            "@tmuxdeck-claude-adapter",
-                            crate::claude_adapter::MANAGED_ADAPTER_MARKER,
-                        ]);
-                    }
-                }
+        let split_output = match run_tmux(&split_refs) {
+            Ok(out) if out.status.success() => out,
+            Ok(out) => {
+                return Err(rollback_create_session(
+                    Some(&sanitized_name),
+                    Some(&team_run_id),
+                    format!("ERR_CREATE_OUTPUT_ERR|{}", String::from_utf8_lossy(&out.stderr)),
+                ));
+            }
+            Err(e) => {
+                return Err(rollback_create_session(
+                    Some(&sanitized_name),
+                    Some(&team_run_id),
+                    format!("ERR_CREATE_FAILED|{}", e),
+                ));
+            }
+        };
+
+        let Some(pane_id) = String::from_utf8_lossy(&split_output.stdout)
+            .lines()
+            .find(|value| value.starts_with('%'))
+            .map(str::to_string)
+        else {
+            return Err(rollback_create_session(
+                Some(&sanitized_name),
+                Some(&team_run_id),
+                "ERR_CREATE_OUTPUT_ERR|missing pane id".to_string(),
+            ));
+        };
+
+        let mut pane_opts = vec![
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            pane_id.clone(),
+            "@tmuxdeck-agent".to_string(),
+            pane_agent_ids[pane - 1].clone(),
+            ";".to_string(),
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            pane_id.clone(),
+            crate::team::OPTION_INTERCOM_ID.to_string(),
+            intercom_id.clone(),
+            ";".to_string(),
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            pane_id.clone(),
+            crate::team::OPTION_ROLE.to_string(),
+            crate::team::ROLE_WORKER.to_string(),
+            ";".to_string(),
+            "set-option".to_string(),
+            "-p".to_string(),
+            "-t".to_string(),
+            pane_id.clone(),
+            crate::team::OPTION_MANAGER_TARGET.to_string(),
+            lead_session_id.clone(),
+        ];
+        if pane_agent_ids[pane - 1] == "claude"
+            && is_managed_cci_command(&pane_agent_commands[pane - 1])
+        {
+            pane_opts.extend([
+                ";".to_string(),
+                "set-option".to_string(),
+                "-p".to_string(),
+                "-t".to_string(),
+                pane_id.clone(),
+                "@tmuxdeck-claude-adapter".to_string(),
+                crate::claude_adapter::MANAGED_ADAPTER_MARKER.to_string(),
+            ]);
+        }
+        let refs: Vec<&str> = pane_opts.iter().map(String::as_str).collect();
+        let pane_opt_res = run_tmux(&refs);
+        match pane_opt_res {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                return Err(rollback_create_session(
+                    Some(&sanitized_name),
+                    Some(&team_run_id),
+                    format!("ERR_CREATE_OUTPUT_ERR|{}", String::from_utf8_lossy(&out.stderr)),
+                ));
+            }
+            Err(e) => {
+                return Err(rollback_create_session(
+                    Some(&sanitized_name),
+                    Some(&team_run_id),
+                    format!("ERR_CREATE_FAILED|{}", e),
+                ));
             }
         }
+
         let _ = run_tmux(&["select-layout", "-t", &sanitized_name, "tiled"]);
     }
 
+    if let Err(e) = open_session(sanitized_name.clone(), opts.terminal_id.clone()) {
+        return Err(rollback_create_session(
+            Some(&sanitized_name),
+            Some(&team_run_id),
+            e,
+        ));
+    }
     save_create_defaults(&opts);
-    open_session(sanitized_name, opts.terminal_id)
+    Ok(())
 }
 
 fn save_create_defaults(opts: &CreateOpts) {
@@ -646,7 +914,23 @@ pub fn kill_session(session_name: String) -> Result<(), String> {
     if check_tmux_installed().is_none() {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
-    if destroy_native_workspace(&sanitized_name)? {
+
+    let _lock = crate::team::TEAM_MUTATION_LOCK
+        .lock()
+        .map_err(|_| "ERR_KILL_FAILED|lock".to_string())?;
+
+    let team_run_id = run_tmux(&[
+        "show-options",
+        "-t",
+        &sanitized_name,
+        "-v",
+        crate::team::OPTION_TEAM_RUN_ID,
+    ])
+    .ok()
+    .filter(|out| out.status.success())
+    .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string());
+
+    if destroy_native_workspace_unlocked(&sanitized_name)? {
         return Ok(());
     }
 
@@ -687,6 +971,10 @@ pub fn kill_session(session_name: String) -> Result<(), String> {
             return Err("ERR_TMUX_NO_SERVER".to_string());
         }
         return Err(format!("ERR_KILL_OUTPUT_ERR|{}", err_msg));
+    }
+    if let Some(run_id) = team_run_id.filter(|s| !s.is_empty()) {
+        crate::team::delete_team_manifest(&run_id)
+            .map_err(|e| format!("ERR_KILL_OUTPUT_ERR|manifest_delete|{}", e))?;
     }
     Ok(())
 }
@@ -808,23 +1096,23 @@ mod tests {
         let managed = crate::claude_adapter::managed_cci_path()
             .to_string_lossy()
             .to_string();
-        let (command, id) = panel_agent_command("claude", &managed, "alpha", 1).unwrap();
-        let id = id.unwrap();
-        assert!(id.starts_with("tmuxdeck-"));
+        let valid_session_id = "tmuxdeck-a0000000-0000-4000-8000-000000000001";
+        let (command, id) = panel_agent_command("claude", &managed, "alpha", 1, valid_session_id).unwrap();
+        assert_eq!(id, valid_session_id);
         assert_eq!(
             command,
             format!(
                 "'{}' --tui --safe --id '{}' --name 'alpha · Claude 01'",
-                managed, id
+                managed, valid_session_id
             )
         );
         assert_eq!(
-            panel_agent_command("claude", "/opt/bin/claude", "alpha", 1).unwrap(),
-            ("/opt/bin/claude".into(), None)
+            panel_agent_command("claude", "/opt/bin/claude", "alpha", 1, valid_session_id).unwrap(),
+            ("/opt/bin/claude".into(), valid_session_id.into())
         );
         assert_eq!(
-            panel_agent_command("custom", "cci --custom", "alpha", 1).unwrap(),
-            ("cci --custom".into(), None)
+            panel_agent_command("custom", "cci --custom", "alpha", 1, valid_session_id).unwrap(),
+            ("cci --custom".into(), valid_session_id.into())
         );
     }
 
