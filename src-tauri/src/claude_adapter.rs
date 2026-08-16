@@ -238,6 +238,7 @@ fn smoke_test_monitor(root: &Path, node: &str) -> Result<(), String> {
     }
 }
 
+#[allow(dead_code)]
 fn plugin_validation_root(root: &Path) -> PathBuf {
     let packaged = root.join("node_modules/@ctliz/agent-intercom-claude");
     if packaged.join(".claude-plugin/plugin.json").is_file() {
@@ -247,9 +248,28 @@ fn plugin_validation_root(root: &Path) -> PathBuf {
     }
 }
 
+fn require_materialized_plugin_surface(root: &Path) -> Result<(), String> {
+    // Claude receives the managed root itself through --plugin-dir. A nested
+    // npm package is useful for staging, but it is not a valid runtime plugin
+    // root and must not make an existing install appear healthy.
+    for relative in [
+        ".claude-plugin/plugin.json",
+        ".mcp.json",
+        "monitors/monitors.json",
+    ] {
+        if !root.join(relative).is_file() {
+            return Err(format!(
+                "managed Claude plugin surface is missing {relative}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_runtime(root: &Path) -> Result<(), String> {
-    let plugin_root = plugin_validation_root(root);
-    validate_plugin_chain(&plugin_root)?;
+    require_materialized_plugin_surface(root)?;
+    let plugin_root = root;
+    validate_plugin_chain(plugin_root)?;
     let node = node_binary()?;
     for relative in RUNTIME_FILES {
         let output = Command::new(&node)
@@ -595,6 +615,36 @@ mod tests {
         for relative in REQUIRED_FILES {
             assert!(root.join(relative).is_file(), "missing {relative}");
         }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn health_requires_materialized_root_plugin_surface() {
+        let root = std::env::temp_dir().join(format!(
+            "tmuxdeck-plugin-health-{}-{}",
+            std::process::id(),
+            random_hex(4).unwrap()
+        ));
+        std::fs::create_dir_all(
+            root.join("node_modules/@ctliz/agent-intercom-claude/.claude-plugin"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("node_modules/@ctliz/agent-intercom-claude/.claude-plugin/plugin.json"),
+            "{}",
+        )
+        .unwrap();
+        assert!(require_materialized_plugin_surface(&root).is_err());
+        for relative in [
+            ".claude-plugin/plugin.json",
+            ".mcp.json",
+            "monitors/monitors.json",
+        ] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "{}").unwrap();
+        }
+        assert!(require_materialized_plugin_surface(&root).is_ok());
         let _ = std::fs::remove_dir_all(root);
     }
 
