@@ -395,6 +395,45 @@ pub trait CommandRunner: Send + Sync {
 
 pub struct RealCommandRunner;
 
+fn materialize_claude_plugin_surface(root: &Path) -> Result<(), AdapterError> {
+    let package_root = root.join("node_modules/@ctliz/agent-intercom-claude");
+    for relative in [".claude-plugin", "monitors", "commands", "skills"] {
+        let source = package_root.join(relative);
+        let destination = root.join(relative);
+        if !source.is_dir() {
+            return Err(AdapterError::Verify);
+        }
+        copy_directory_without_links(&source, &destination)?;
+    }
+    let mcp_source = package_root.join(".mcp.json");
+    if !mcp_source.is_file() {
+        return Err(AdapterError::Verify);
+    }
+    fs::copy(mcp_source, root.join(".mcp.json")).map_err(|_| AdapterError::Verify)?;
+    Ok(())
+}
+
+fn copy_directory_without_links(source: &Path, destination: &Path) -> Result<(), AdapterError> {
+    fs::create_dir_all(destination).map_err(|_| AdapterError::Verify)?;
+    for entry in fs::read_dir(source).map_err(|_| AdapterError::Verify)? {
+        let entry = entry.map_err(|_| AdapterError::Verify)?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&source_path).map_err(|_| AdapterError::Verify)?;
+        if metadata.file_type().is_symlink() {
+            return Err(AdapterError::Verify);
+        }
+        if metadata.is_dir() {
+            copy_directory_without_links(&source_path, &destination_path)?;
+        } else if metadata.is_file() {
+            fs::copy(source_path, destination_path).map_err(|_| AdapterError::Verify)?;
+        } else {
+            return Err(AdapterError::Verify);
+        }
+    }
+    Ok(())
+}
+
 fn binary_exists_in_dirs<I>(binary_name: &str, dirs: I) -> bool
 where
     I: IntoIterator<Item = PathBuf>,
@@ -3812,6 +3851,9 @@ pub fn build_managed_root_staging(
     if out_tar.status != 0 {
         return Err(AdapterError::Install);
     }
+    if harness == "claude" {
+        materialize_claude_plugin_surface(staging_dir)?;
+    }
 
     // npm creates platform-dependent .bin symlink shims; remove them so the
     // managed tree remains a regular-file-only, permission-verifiable root.
@@ -4596,6 +4638,9 @@ pub mod tests {
         assert!(staging_dir
             .join("node_modules/@ctliz/agent-intercom-claude")
             .is_dir());
+        assert!(staging_dir.join(".claude-plugin/plugin.json").is_file());
+        assert!(staging_dir.join(".mcp.json").is_file());
+        assert!(staging_dir.join("monitors/monitors.json").is_file());
         let lock = fs::read_to_string(staging_dir.join("package-lock.json")).unwrap();
         assert!(!lock.contains("/tmp/") && !lock.contains("/Users/"));
 
