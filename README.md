@@ -191,7 +191,7 @@ Communicate across agent sessions using the shared broker:
 - **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
 - **Rename an OpenCode Intercom session:** Run `/intercom-name`, or choose **Rename intercom session** in the command palette; the prompt is titled **Rename this Intercom session**. The model can also call `intercom_set_name({ name: "<new-name>" })`. This changes only the discoverable name, not the stable Intercom session ID.
 
-See [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md) for complete configuration instructions.
+See [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md) for complete configuration instructions, or the [CLI communication guide](docs/GUIDE-cli-communication.md) for TmuxDeck startup, identity, MCP, terminal, and troubleshooting details.
 
 ---
 
