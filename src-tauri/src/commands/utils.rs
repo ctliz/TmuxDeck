@@ -1,5 +1,7 @@
 use crate::registry::detect_environment;
+use std::collections::BTreeMap;
 use std::process::Command;
+use std::sync::OnceLock;
 
 pub(crate) const PROCESS_SCRUB_ENV_VARS: &[&str] = &[
     "PI_SESSION_ID",
@@ -110,6 +112,62 @@ pub(crate) const SESSION_SCRUB_ENV_VARS: &[&str] = &[
 
 #[allow(dead_code)]
 pub(crate) const AGENT_IDENTITY_ENV_VARS: &[&str] = PROCESS_SCRUB_ENV_VARS;
+
+// Finder-launched Tauri processes do not read the user's shell profile. Claude
+// (and other networked agents) may therefore miss a shell-configured proxy or
+// CA bundle even though the same CLI works in Ghostty. Import only transport
+// settings, never arbitrary shell secrets.
+const NETWORK_ENV_VARS: &[&str] = &[
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "MITMPROXY_CA_CERT",
+    "TERMINFO",
+    "TERMINFO_DIRS",
+];
+
+static LOGIN_SHELL_NETWORK_ENV: OnceLock<Vec<(String, String)>> = OnceLock::new();
+
+fn login_shell_network_env() -> &'static [(String, String)] {
+    LOGIN_SHELL_NETWORK_ENV.get_or_init(|| {
+        let mut values = BTreeMap::new();
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        });
+        if let Ok(output) = Command::new(&shell).args(["-ilc", "env -0"]).output() {
+            for entry in output.stdout.split(|byte| *byte == 0) {
+                let Ok(entry) = std::str::from_utf8(entry) else {
+                    continue;
+                };
+                let Some((name, value)) = entry.split_once('=') else {
+                    continue;
+                };
+                if NETWORK_ENV_VARS.contains(&name) {
+                    values.insert(name.to_string(), value.to_string());
+                }
+            }
+        }
+        for name in NETWORK_ENV_VARS {
+            if let Ok(value) = std::env::var(name) {
+                values.insert((*name).to_string(), value);
+            }
+        }
+        values.into_iter().collect()
+    })
+}
 
 pub(crate) fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
@@ -231,6 +289,13 @@ pub(crate) fn build_augmented_path_for_command(command: &str) -> String {
     base_path
 }
 
+pub(crate) fn tmux_startup_terminal_options(target: &str) -> String {
+    let target = shell_single_quote(target);
+    format!(
+        "tmux set-option -t {target} focus-events on; tmux set-option -t {target} extended-keys on; tmux set-option -t {target} default-terminal tmux-256color; tmux set-option -t {target} -a terminal-overrides ',*:RGB';"
+    )
+}
+
 pub(crate) fn isolated_agent_command_with_team_env(
     command: &str,
     return_to_shell: bool,
@@ -249,6 +314,7 @@ pub(crate) fn isolated_agent_command_with_team_env(
         ("COLORTERM".to_string(), "truecolor".to_string()),
         ("TERM_PROGRAM".to_string(), term_program),
     ];
+    env_pairs.extend(login_shell_network_env().iter().cloned());
     for (k, v) in team_envs {
         env_pairs.push((k.clone(), v.clone()));
     }
@@ -310,12 +376,19 @@ pub(crate) fn terminal_capability_envs(terminal_id: Option<&str>) -> Vec<String>
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| terminal_id.unwrap_or("ghostty").to_string());
-    vec![
+    let mut envs = vec![
         "-e".to_string(),
         "COLORTERM=truecolor".to_string(),
         "-e".to_string(),
         format!("TERM_PROGRAM={}", term_program),
-    ]
+    ];
+    if terminal_id == Some("ghostty") && std::env::var("TERMINFO").is_err() {
+        let ghostty_terminfo = "/Applications/Ghostty.app/Contents/Resources/terminfo";
+        if std::path::Path::new(ghostty_terminfo).is_dir() {
+            envs.extend(["-e".to_string(), format!("TERMINFO={ghostty_terminfo}")]);
+        }
+    }
+    envs
 }
 
 pub(crate) fn panel_agent_command(

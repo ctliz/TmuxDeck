@@ -523,13 +523,16 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     if !work_dir_clean.is_empty() && work_dir_clean != "~" {
         new_args.extend(["-c".to_string(), work_dir_clean.clone()]);
     }
-    new_args.push(
-        crate::commands::utils::isolated_agent_command_with_team_env(
-            &first_agent_cmd,
-            pane_agent_ids[0] != "shell",
-            &first_team_envs,
-        ),
+    let isolated_first_agent = crate::commands::utils::isolated_agent_command_with_team_env(
+        &first_agent_cmd,
+        pane_agent_ids[0] != "shell",
+        &first_team_envs,
     );
+    new_args.push(format!(
+        "{} {}",
+        crate::commands::utils::tmux_startup_terminal_options(&sanitized_name),
+        isolated_first_agent
+    ));
     append_identity_env_clears(&mut new_args, &sanitized_name);
     new_args.extend([
         ";".to_string(),

@@ -254,13 +254,19 @@ fn native_slot_command_args(
     if !work_dir.is_empty() && work_dir != "~" {
         args.extend(["-c".to_string(), work_dir.to_string()]);
     }
-    args.push(
-        crate::commands::utils::isolated_agent_command_with_team_env(
-            &agent_cmd,
-            agent_id != "shell",
-            &team_envs,
-        ),
+    let isolated_agent = crate::commands::utils::isolated_agent_command_with_team_env(
+        &agent_cmd,
+        agent_id != "shell",
+        &team_envs,
     );
+    // TUI capability probing happens during process startup. Configure the
+    // target session before launching the agent, not only after new-session
+    // returns, so Codex/Claude see RGB, focus events, and extended keys.
+    args.push(format!(
+        "{} {}",
+        crate::commands::utils::tmux_startup_terminal_options(&target),
+        isolated_agent
+    ));
     args.extend([
         ";".to_string(),
         "set-option".to_string(),
