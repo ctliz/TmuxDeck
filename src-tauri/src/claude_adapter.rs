@@ -238,8 +238,18 @@ fn smoke_test_monitor(root: &Path, node: &str) -> Result<(), String> {
     }
 }
 
+fn plugin_validation_root(root: &Path) -> PathBuf {
+    let packaged = root.join("node_modules/@ctliz/agent-intercom-claude");
+    if packaged.join(".claude-plugin/plugin.json").is_file() {
+        packaged
+    } else {
+        root.to_path_buf()
+    }
+}
+
 fn validate_runtime(root: &Path) -> Result<(), String> {
-    validate_plugin_chain(root)?;
+    let plugin_root = plugin_validation_root(root);
+    validate_plugin_chain(&plugin_root)?;
     let node = node_binary()?;
     for relative in RUNTIME_FILES {
         let output = Command::new(&node)
@@ -261,7 +271,7 @@ fn validate_runtime(root: &Path) -> Result<(), String> {
     let augmented_path = crate::commands::build_augmented_path_for_command(&claude);
     let output = Command::new(&claude)
         .args(["plugin", "validate"])
-        .arg(root)
+        .arg(&plugin_root)
         .env("PATH", augmented_path)
         .output()
         .map_err(|error| format!("could not validate the Claude plugin: {error}"))?;
@@ -277,7 +287,7 @@ fn validate_runtime(root: &Path) -> Result<(), String> {
 fn healthy_root(root: &Path) -> bool {
     crate::commands::adapter::verify_managed_root_integrity(
         root,
-        "claude-intercom",
+        "claude",
         MANAGED_CLAUDE_VERSION,
         crate::commands::adapter::CLAUDE_IMMUTABLE_DIGESTS,
         "@ctliz/agent-intercom-claude",
@@ -585,6 +595,23 @@ mod tests {
         for relative in REQUIRED_FILES {
             assert!(root.join(relative).is_file(), "missing {relative}");
         }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_validation_uses_npm_packaged_root_when_present() {
+        let root = std::env::temp_dir().join(format!(
+            "tmuxdeck-plugin-root-{}-{}",
+            std::process::id(),
+            random_hex(4).unwrap()
+        ));
+        let packaged = root.join("node_modules/@ctliz/agent-intercom-claude/.claude-plugin");
+        std::fs::create_dir_all(&packaged).unwrap();
+        std::fs::write(packaged.join("plugin.json"), "{}").unwrap();
+        assert_eq!(
+            plugin_validation_root(&root),
+            root.join("node_modules/@ctliz/agent-intercom-claude")
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

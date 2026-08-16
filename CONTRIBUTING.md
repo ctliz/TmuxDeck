@@ -89,7 +89,7 @@ TmuxDeck integrates with coding agents via **Agent Intercom Protocol v4** and **
 | `@ctliz/agent-intercom-codex` | **Codex** (`codex`) | MCP server integration (`codex-server.mjs`), bridge daemon, multi-agent turns |
 | `@ctliz/agent-intercom-opencode` | **OpenCode** (`opencode`) | Managed plugin, scope isolation, live event dispatch |
 | `@ctliz/agent-intercom-orchestrator` | **Orchestrator** | Multi-agent coordination, peer roster management, team lifecycle |
-| `@ctliz/agent-intercom-agy` | **Gemini CLI** (`agy`) | *(Planned v1.15.0)* Direct Gemini CLI bridge & messaging |
+| `@ctliz/agent-intercom-agy` | **Agy** (`Antigravity CLI`) | *(Planned v1.15.0)* Direct Antigravity CLI bridge & messaging |
 
 ---
 
@@ -106,44 +106,38 @@ All adapters packaged or managed by TmuxDeck must adhere to strict provenance ru
 
 ### 3. Core 0.2.0 Team Manifest & Auto-Team Architecture
 
-Adapters participating in zero-manual-join Auto-Team must implement the Core 0.2.0 Team Manifest specification:
+Adapters participating in zero-manual-join Auto-Team must implement the Core 0.2.0 Team Manifest specification (`tmuxdeck.team.v1`):
 - **Environment Discovery**: The runner injects `AGENT_INTERCOM_TEAM_MANIFEST` pointing to an absolute path (e.g. `~/.config/tmuxdeck/teams/<teamId>/manifest.json`).
 - **Manifest JSON Schema**:
   ```json
   {
-    "schemaVersion": 1,
-    "teamId": "tmuxdeck-team-00000000-0000-4000-8000-000000000001",
+    "version": "tmuxdeck.team.v1",
+    "backend": "tmuxdeck",
+    "runId": "team_00000000-0000-4000-8000-000000000001",
     "leadId": "tmuxdeck-00000000-0000-4000-8000-000000000001",
-    "createdAt": "2026-08-15T12:00:00.000Z",
     "members": [
       {
-        "sessionName": "lead-workspace",
         "sessionId": "tmuxdeck-00000000-0000-4000-8000-000000000001",
-        "harness": "claude",
-        "role": "lead",
-        "paneIndex": 0,
-        "slotNumber": 1,
-        "cwd": "/path/to/project"
+        "role": "lead"
       },
       {
-        "sessionName": "worker-workspace",
         "sessionId": "tmuxdeck-00000000-0000-4000-8000-000000000002",
-        "harness": "codex",
-        "role": "worker",
-        "paneIndex": 1,
-        "slotNumber": 2,
-        "cwd": "/path/to/project"
+        "role": "worker"
       }
-    ]
+    ],
+    "createdAt": 1755259200,
+    "capabilities": ["intercom.team.v1"]
   }
   ```
 - **Role Validation**: Workspaces require exactly one `lead`; all other members must be `worker`.
 - **Environment Injections**:
   - `AGENT_INTERCOM_TEAM_MANIFEST`: Absolute path to manifest file (`0600` permissions).
   - `AGENT_INTERCOM_SESSION_ID`: Stable UUID-backed session ID.
-  - `AGENT_INTERCOM_ROLE`: Either `"lead"` or `"worker"`.
+  - `AGENT_INTERCOM_SESSION_NAME`: Pane session name.
+  - `AGENT_INTERCOM_ROLE`: Either `"manager"` (for lead) or `"worker"` (for worker).
   - `AGENT_INTERCOM_MANAGER_TARGET`: Target lead ID for workers.
-  - `AGENT_INTERCOM_WORKSPACE_SCOPE_ID`: Scoped workspace namespace.
+  - `AGENT_INTERCOM_MANAGER_SESSION_ID`: Target lead ID for workers.
+  - `AGENT_INTERCOM_SCOPE_ID`: Scoped workspace namespace.
 
 ---
 

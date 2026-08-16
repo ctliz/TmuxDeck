@@ -241,7 +241,18 @@ pub(crate) fn isolated_agent_command_with_team_env(
         .map(|name| format!("-u {}", name))
         .collect::<Vec<_>>()
         .join(" ");
-    let set_envs = team_envs
+    let term_program = std::env::var("TERM_PROGRAM")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "ghostty".to_string());
+    let mut env_pairs = vec![
+        ("COLORTERM".to_string(), "truecolor".to_string()),
+        ("TERM_PROGRAM".to_string(), term_program),
+    ];
+    for (k, v) in team_envs {
+        env_pairs.push((k.clone(), v.clone()));
+    }
+    let set_envs = env_pairs
         .iter()
         .map(|(k, v)| format!("{}={}", k, shell_single_quote(v)))
         .collect::<Vec<_>>()
@@ -255,22 +266,13 @@ pub(crate) fn isolated_agent_command_with_team_env(
     } else {
         command.to_string()
     };
-    if set_envs.is_empty() {
-        format!(
-            "env {} PATH={} /bin/sh -c {}",
-            unset,
-            shell_single_quote(&path),
-            shell_single_quote(&pane_command)
-        )
-    } else {
-        format!(
-            "env {} {} PATH={} /bin/sh -c {}",
-            unset,
-            set_envs,
-            shell_single_quote(&path),
-            shell_single_quote(&pane_command)
-        )
-    }
+    format!(
+        "env {} {} PATH={} /bin/sh -c {}",
+        unset,
+        set_envs,
+        shell_single_quote(&path),
+        shell_single_quote(&pane_command)
+    )
 }
 
 #[allow(dead_code)]

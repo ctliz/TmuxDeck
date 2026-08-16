@@ -395,6 +395,41 @@ pub trait CommandRunner: Send + Sync {
 
 pub struct RealCommandRunner;
 
+fn binary_exists_in_dirs<I>(binary_name: &str, dirs: I) -> bool
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    dirs.into_iter().any(|dir| dir.join(binary_name).is_file())
+}
+
+fn gui_binary_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = std::env::var("PATH")
+        .ok()
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    dirs.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        dirs.extend([
+            home.join(".local/bin"),
+            home.join(".cargo/bin"),
+            home.join(".bun/bin"),
+            home.join(".opencode/bin"),
+        ]);
+        let nvm_dir = home.join(".nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(nvm_dir) {
+            for entry in entries.flatten() {
+                dirs.push(entry.path().join("bin"));
+            }
+        }
+    }
+    dirs
+}
+
 impl CommandRunner for RealCommandRunner {
     fn run_command(
         &self,
@@ -405,6 +440,16 @@ impl CommandRunner for RealCommandRunner {
     ) -> Result<CommandOutput, AdapterError> {
         let mut cmd = std::process::Command::new(command);
         cmd.args(args).current_dir(cwd);
+        let inherited_path = env
+            .and_then(|env_vars| {
+                env_vars
+                    .iter()
+                    .find(|(key, _)| *key == "PATH")
+                    .map(|(_, value)| *value)
+            })
+            .map(str::to_string)
+            .unwrap_or_else(crate::commands::utils::build_augmented_path);
+        cmd.env("PATH", inherited_path);
         if let Some(env_vars) = env {
             for (k, v) in env_vars {
                 cmd.env(k, v);
@@ -419,15 +464,7 @@ impl CommandRunner for RealCommandRunner {
     }
 
     fn binary_exists(&self, binary_name: &str) -> bool {
-        if let Ok(path) = std::env::var("PATH") {
-            for dir in std::env::split_paths(&path) {
-                let bin = dir.join(binary_name);
-                if bin.is_file() {
-                    return true;
-                }
-            }
-        }
-        false
+        binary_exists_in_dirs(binary_name, gui_binary_search_dirs())
     }
 }
 
@@ -3520,6 +3557,8 @@ pub fn apply_workspace_install_plan_internal(
         }
     }
 
+    crate::claude_adapter::invalidate_managed_claude_health_cache();
+    crate::registry::invalidate_environment_cache();
     Ok(())
 }
 
@@ -4255,6 +4294,22 @@ pub mod tests {
             "@ctliz/agent-intercom-claude",
             CLAUDE_RESOURCE_NAME,
             CLAUDE_RESOURCE_SHA256,
+        ));
+    }
+
+    #[test]
+    fn test_12_gui_binary_search_finds_homebrew_when_path_is_minimal() {
+        let dir = tempdir().unwrap();
+        let homebrew = dir.path().join("opt/homebrew/bin");
+        fs::create_dir_all(&homebrew).unwrap();
+        fs::write(homebrew.join("codex"), b"mock").unwrap();
+        assert!(binary_exists_in_dirs(
+            "codex",
+            [dir.path().join("usr/bin"), homebrew]
+        ));
+        assert!(!binary_exists_in_dirs(
+            "claude",
+            [dir.path().join("usr/bin")]
         ));
     }
 

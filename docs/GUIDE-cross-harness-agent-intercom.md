@@ -267,8 +267,8 @@ A runtime rename only updates the `name` visible to other peers; **it does not c
 |---|---|---|
 | Pi | native `/name <new-name>`; the adapter syncs the Pi session name to Intercom automatically | resume the same Pi session |
 | OpenCode | `/intercom-name` opens a rename input, or call `intercom_set_name({ name: "<new-name>" })` | keep setting `OPENCODE_INTERCOM_NAME` |
-| Codex ordinary MCP session | `intercom_set_name({ name: "<new-name>" })` | keep setting `CODEX_INTERCOM_NAME`; use `--name` at launch for `coi` workers |
-| Claude Code ordinary MCP session | `intercom_set_name({ name: "<new-name>" })` | keep setting `CLAUDE_INTERCOM_NAME`; use `--name` at launch for `cci` / `ccim` workers |
+| Codex ordinary MCP session | configured via `CODEX_INTERCOM_NAME` / `AGENT_INTERCOM_SESSION_NAME` before launch; `--name` for `coi` workers | keep setting `CODEX_INTERCOM_NAME` |
+| Claude Code ordinary MCP session | configured via `CLAUDE_INTERCOM_NAME` / `AGENT_INTERCOM_SESSION_NAME` before launch; `--name` for `cci` / `ccim` workers | keep setting `CLAUDE_INTERCOM_NAME` |
 
 **How the OpenCode rename entry works:** `tui.mjs` registers the `/intercom-name` slash command and the **Rename intercom session** command-palette action. Selecting it opens a prompt titled **Rename this Intercom session**. After confirmation, the TUI plugin sends a private local control request (`{ type: "set_name", name }`) to the already-connected `plugin.mjs` server plugin. The server calls `runtime.setName`, updates the name published in broker presence, and keeps the existing stable Intercom session ID. The same runtime operation is exposed to the model as `intercom_set_name({ name: "<new-name>" })`; no second broker connection or identity is created.
 
@@ -280,13 +280,13 @@ cci --tui --safe --name <name> --id <stable-id> --cwd /path/to/project
 ccim --name <name> --id <stable-id> --cwd /path/to/project
 ```
 
-Headless `cci` / `ccim` have no interactive console and cannot type slash commands like `/name`; they can only be named via the `--name` launch argument. Ordinary Claude MCP sessions use `intercom_set_name` to rename.
+Headless `cci` / `ccim` and background workers are named at launch via `--name` or `CLAUDE_INTERCOM_NAME` / `CODEX_INTERCOM_NAME`.
 
 ## 5. Shortcuts and command entries
 
 | Action | Pi | OpenCode | Codex | Claude Code |
 |---|---|---|---|---|
-| Runtime rename | `/name <new-name>` | `/intercom-name` or `intercom_set_name` | ordinary MCP: `intercom_set_name`; `coi` prefers `--name` at launch | ordinary MCP: `intercom_set_name`; `cci` / `ccim` prefer `--name` at launch |
+| Runtime rename | `/name <new-name>` | `/intercom-name` or `intercom_set_name` | `coi` `--name` or `CODEX_INTERCOM_NAME` | `cci`/`ccim` `--name` or `CLAUDE_INTERCOM_NAME` |
 | Pick a peer and send | `/intercom` or Alt+M | `/intercom` or Alt+M | Alt+M in `coi` | plugin provides `/claude-intercom:intercom`; Alt+M in `cci` / `ccim` |
 | Copy the exact current contact target | `/intercom-id` or Alt+I | `/intercom-id` or Alt+I | Alt+I in `coi` | plugin provides `/claude-intercom:intercom-id`; Alt+I in `cci` / `ccim` |
 | List navigation | ↑ / ↓ | ↑ / ↓ | wrapper prompt flow | wrapper prompt flow |
@@ -300,27 +300,15 @@ Claude's `/claude-intercom:intercom` and `/claude-intercom:intercom-id` require 
 
 The content copied by `/intercom-id` or Alt+I is cross-harness: it uses the name when unique within the workspace scope, and falls back to the stable ID when names are duplicated or when addressing cross-scope.
 
-## 6. Agent tools: set name / list / send / ask / reply
+## 6. Agent tools: list / send / ask / reply
 
-`list`, `send`, `ask`, and `reply` use the same protocol concepts across all four adapters. Pi uses the native `/name`; OpenCode, Codex ordinary MCP, and Claude Code ordinary MCP expose `intercom_set_name` when supported.
+`list`, `send`, `ask`, and `reply` use the same protocol concepts across all adapters. Pi uses the native `/name` slash command; OpenCode provides `/intercom-name` and `intercom_set_name`. Codex and Claude derive session naming from environment variables (`CODEX_INTERCOM_NAME`, `CLAUDE_INTERCOM_NAME`, `AGENT_INTERCOM_SESSION_NAME`) or CLI wrapper options (`--name`).
 
-### 6.1 Set the current human-readable name
+### 6.1 Session naming and discovery
 
-OpenCode, Codex ordinary MCP, or Claude Code ordinary MCP sessions:
-
-```typescript
-intercom_set_name({
-  name: "<new-name>"
-})
-```
-
-It only updates the human-readable name; it does not change the stable session ID returned by `intercom_status({})`.
-
-Pi uses:
-
-```text
-/name <new-name>
-```
+- **OpenCode** exposes `intercom_set_name({ name: "<new-name>" })` to dynamically update the displayed name on the broker bus.
+- **Pi** uses the built-in TUI `/name <new-name>` command.
+- **Codex & Claude Code** register their display names on startup from environment variables or wrapper flags; discovery tools `intercom_whoami({})` and `intercom_list({})` allow the model to inspect its own name and discover all connected peers.
 
 ### 6.2 View connection status
 

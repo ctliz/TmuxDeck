@@ -136,8 +136,8 @@ export function CreateWorkspaceModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 transition-opacity duration-150 motion-reduce:transition-none">
-      <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-6 text-slate-100 motion-reduce:transform-none">
-        <div className="flex items-center justify-between mb-4">
+      <div className="w-full max-w-xl rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-6 text-slate-100 flex flex-col max-h-[88vh] motion-reduce:transform-none">
+        <div className="flex items-center justify-between mb-3 shrink-0">
           <div className="flex items-center space-x-2">
             <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
               <Bot className="w-5 h-5" />
@@ -155,7 +155,7 @@ export function CreateWorkspaceModal({
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0">
           {/* Workspace Name Input */}
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">
@@ -602,10 +602,10 @@ export function CreateWorkspaceModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end space-x-3 mt-6">
+        <div className="flex items-center justify-end space-x-3 mt-4 pt-3 border-t border-slate-800/80 shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
+            className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 cursor-pointer hover:bg-slate-800 transition"
           >
             {t("btn.cancel")}
           </button>
