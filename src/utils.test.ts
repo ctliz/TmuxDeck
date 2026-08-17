@@ -942,6 +942,17 @@ test("AdapterConsentModal and CreateWorkspaceModal surface zero scope leakage", 
   assert.doesNotMatch(createModalSrc, /scopeId/i);
 });
 
+test("CreateWorkspaceModal exposes a desktop notification setting", () => {
+  const createModalSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/CreateWorkspaceModal.tsx"),
+    "utf-8"
+  );
+  assert.match(createModalSrc, /desktop_notifications/);
+  assert.match(createModalSrc, /onDesktopNotificationsChange/);
+  assert.ok(dictionaries.en["modal.desktopNotificationsLabel"]);
+  assert.ok(dictionaries.zh["modal.desktopNotificationsLabel"]);
+});
+
 test("TrayPanel renders SessionList before UsageStrip in the scroll container", () => {
   const trayPanelSrc = fs.readFileSync(
     path.resolve(process.cwd(), "src/tray/TrayPanel.tsx"),

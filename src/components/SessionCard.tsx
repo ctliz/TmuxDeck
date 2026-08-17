@@ -13,6 +13,7 @@ interface SessionCardProps {
   terminalIconUrls: Record<string, string>;
   isDraggingCard?: boolean;
   isCardDragOverTarget?: boolean;
+  isHighlighted?: boolean;
   onRenameStart: (name: string) => void;
   onRenameChange: (val: string) => void;
   onRenameCommit: (oldName: string) => void;
@@ -77,6 +78,7 @@ export function SessionCard({
   terminalIconUrls,
   isDraggingCard,
   isCardDragOverTarget,
+  isHighlighted,
   onRenameStart,
   onRenameChange,
   onRenameCommit,
@@ -220,6 +222,8 @@ export function SessionCard({
           ? "opacity-40 border-cyan-500/70 scale-95 cursor-grabbing"
           : isCardDragOverTarget
           ? "border-cyan-400 bg-cyan-500/20 shadow-cyan-500/20 scale-[1.02]"
+          : isHighlighted
+          ? "border-cyan-400/80 bg-cyan-500/10 shadow-cyan-500/10"
           : "border-white/15 hover:border-cyan-500/50"
       }`}
     >

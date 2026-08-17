@@ -458,6 +458,17 @@ impl BridgeEngine {
                         self.registry.mark_awaiting_human(&from.id);
                         let conv = self.registry.get(&conv_id);
                         let title = conv.map(|c| c.title.clone()).unwrap_or_default();
+                        let workspace_name =
+                            conv.map(|c| c.workspace_name.clone()).unwrap_or_default();
+                        if let Some(app) = &self.app_handle {
+                            crate::notify::maybe_notify_awaiting_human(
+                                app,
+                                &conv_id,
+                                &workspace_name,
+                                &title,
+                                &message.content.text,
+                            );
+                        }
                         let _ = self.transport.emit(&ClientEvent::AwaitingHuman {
                             id: conv_id,
                             title,
@@ -547,6 +558,7 @@ impl BridgeEngine {
                         Ok(_) => {
                             self.pending_replies.remove(&id);
                             self.registry.clear_pane_awaiting_human(&id);
+                            crate::notify::clear_notified_pane(&id);
                             self.refresh_all();
                             record_mobile_command(
                                 peer_ip,

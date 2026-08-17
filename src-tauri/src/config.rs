@@ -10,6 +10,10 @@ fn default_panel_bypass_permissions() -> bool {
     true
 }
 
+fn default_desktop_notifications() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub default_terminal: String,
@@ -21,6 +25,8 @@ pub struct Config {
     pub use_standard_claude: bool,
     #[serde(default = "default_panel_bypass_permissions")]
     pub panel_bypass_permissions: bool,
+    #[serde(default = "default_desktop_notifications")]
+    pub desktop_notifications: bool,
 }
 
 impl Default for Config {
@@ -33,6 +39,7 @@ impl Default for Config {
             recent_dirs: Vec::new(),
             use_standard_claude: false,
             panel_bypass_permissions: true,
+            desktop_notifications: true,
         }
     }
 }
@@ -57,6 +64,15 @@ mod tests {
         let encoded = serde_json::to_string(&config).unwrap();
         let decoded: Config = serde_json::from_str(&encoded).unwrap();
         assert!(!decoded.panel_bypass_permissions);
+    }
+
+    #[test]
+    fn missing_desktop_notifications_defaults_to_enabled() {
+        let config: Config = serde_json::from_str(
+            r#"{"default_terminal":"ghostty","default_agent":"pi","default_panes":4,"custom_agent":null,"recent_dirs":[]}"#,
+        )
+        .unwrap();
+        assert!(config.desktop_notifications);
     }
 }
 

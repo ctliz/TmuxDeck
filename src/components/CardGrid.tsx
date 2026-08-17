@@ -25,6 +25,7 @@ interface CardGridProps {
     sessionTargetB?: string
   ) => void;
   onReorderCards: (sourceSessionId: string, targetSessionId: string) => void;
+  highlightedSessionId?: string | null;
 }
 
 export function CardGrid({
@@ -44,6 +45,7 @@ export function CardGrid({
   onOpenSession,
   onSwapPane,
   onReorderCards,
+  highlightedSessionId,
 }: CardGridProps) {
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [cardDragOverId, setCardDragOverId] = useState<string | null>(null);
@@ -110,6 +112,7 @@ export function CardGrid({
           terminalIconUrls={terminalIconUrls}
           isDraggingCard={draggingCardId === session.id}
           isCardDragOverTarget={cardDragOverId === session.id}
+          isHighlighted={highlightedSessionId === session.id}
           onRenameStart={onRenameStart}
           onRenameChange={onRenameChange}
           onRenameCommit={onRenameCommit}

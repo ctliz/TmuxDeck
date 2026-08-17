@@ -44,6 +44,7 @@ interface CreateWorkspaceModalProps {
   /** "managed" installs, repairs or re-selects the enhanced link; "standard" opts out. */
   onClaudeAction: (mode: ClaudeMode) => void;
   onPanelBypassChange: (enabled: boolean) => void;
+  onDesktopNotificationsChange: (enabled: boolean) => void;
   onCreate: () => void;
 }
 
@@ -77,6 +78,7 @@ export function CreateWorkspaceModal({
   onSaveCustomAgent,
   onClaudeAction,
   onPanelBypassChange,
+  onDesktopNotificationsChange,
   onCreate,
 }: CreateWorkspaceModalProps) {
   const [showClaudeMenu, setShowClaudeMenu] = useState(false);
@@ -564,6 +566,21 @@ export function CreateWorkspaceModal({
               </div>
             </div>
           )}
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
+            <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config?.desktop_notifications ?? true}
+                onChange={(e) => onDesktopNotificationsChange(e.target.checked)}
+                className="mt-0.5 accent-cyan-500"
+              />
+              <span>
+                <span className="font-medium text-slate-200">{t("modal.desktopNotificationsLabel")}</span>
+                <span className="block mt-0.5 text-[10px] text-slate-400">{t("modal.desktopNotificationsHint")}</span>
+              </span>
+            </label>
+          </div>
 
           <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 space-y-2">
             <label className="flex items-start gap-2 text-xs text-amber-200 cursor-pointer">

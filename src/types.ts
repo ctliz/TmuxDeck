@@ -23,6 +23,7 @@ export interface Config {
   recent_dirs: string[];
   use_standard_claude: boolean;
   panel_bypass_permissions?: boolean;
+  desktop_notifications?: boolean;
 }
 
 export type ManagedClaudeState =

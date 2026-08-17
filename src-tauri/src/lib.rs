@@ -10,6 +10,7 @@ mod connection;
 mod engine;
 mod intercom;
 mod models;
+mod notify;
 mod registry;
 mod scope;
 mod team;
@@ -38,6 +39,7 @@ pub use usage::*;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| match event {
             // 关闭只隐藏，App 常驻菜单栏。
@@ -226,8 +228,20 @@ pub fn run() {
             check_workspace_adapters,
             apply_workspace_install_plan
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
+                if !has_visible_windows {
+                    crate::notify::open_from_notification(app);
+                }
+            }
+        });
 }
 
 #[cfg(test)]

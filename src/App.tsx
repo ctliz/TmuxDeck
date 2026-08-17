@@ -64,6 +64,8 @@ export default function App() {
   const [adapterPlan, setAdapterPlan] = useState<WorkspaceInstallPlan | null>(null);
   const [showAdapterConsent, setShowAdapterConsent] = useState(false);
   const [adapterBusy, setAdapterBusy] = useState(false);
+  const [highlightedSessionId, setHighlightedSessionId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const effectivePaneAgentIds = resizePaneAgents(
     paneAgentIds,
     selectedPanes,
@@ -182,6 +184,28 @@ export default function App() {
       setPaneAgentIds([]);
       setShowCreateModal(true);
     });
+    const unlistenFocus = listen<string>("focus-conversation", (event) => {
+      const paneId = event.payload;
+      const match = sessionsRef.current.find((session) =>
+        session.panes.some((pane) => pane.id === paneId)
+      );
+      if (match) {
+        setSearch("");
+        const nextOrder = [
+          match.id,
+          ...cardOrderRef.current.filter((id) => id !== match.id),
+        ];
+        cardOrderRef.current = nextOrder;
+        setCardOrder(nextOrder);
+        setSessions((prev) => sortSessionsByOrder(prev, nextOrder));
+        setHighlightedSessionId(match.id);
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = setTimeout(() => {
+          setHighlightedSessionId(null);
+          highlightTimerRef.current = null;
+        }, 4000);
+      }
+    });
 
     const sessionTimer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
@@ -236,6 +260,8 @@ export default function App() {
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
+      unlistenFocus.then((unlisten) => unlisten());
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
       clearInterval(sessionTimer);
       clearInterval(captureTimer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -281,7 +307,7 @@ export default function App() {
     if (!customAgentCmd.trim()) return alert(t("val.enterCustomCmd"));
     const newCustom: CustomAgent = { name: customAgentName.trim() || t("agent.custom"), command: customAgentCmd.trim() };
     try {
-      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [], use_standard_claude: false, panel_bypass_permissions: true };
+      const currentConfig = config || { default_terminal: selectedTerminal, default_agent: "custom", default_panes: selectedPanes, recent_dirs: [], use_standard_claude: false, panel_bypass_permissions: true, desktop_notifications: true };
       const updatedConfig: Config = { ...currentConfig, custom_agent: newCustom };
       await invoke("save_config", { config: updatedConfig });
       const envData = await invoke<Environment>("detect_environment");
@@ -302,8 +328,28 @@ export default function App() {
       recent_dirs: [],
       use_standard_claude: false,
       panel_bypass_permissions: true,
+      desktop_notifications: true,
     };
     const updatedConfig = { ...currentConfig, panel_bypass_permissions: enabled };
+    try {
+      await invoke("save_config", { config: updatedConfig });
+      setConfig(updatedConfig);
+    } catch (err: any) {
+      alert(t("val.saveConfigFailed") + ": " + translateError(err));
+    }
+  };
+
+  const handleDesktopNotificationsChange = async (enabled: boolean) => {
+    const currentConfig = config || {
+      default_terminal: selectedTerminal,
+      default_agent: "custom",
+      default_panes: selectedPanes,
+      recent_dirs: [],
+      use_standard_claude: false,
+      panel_bypass_permissions: true,
+      desktop_notifications: true,
+    };
+    const updatedConfig = { ...currentConfig, desktop_notifications: enabled };
     try {
       await invoke("save_config", { config: updatedConfig });
       setConfig(updatedConfig);
@@ -550,6 +596,7 @@ export default function App() {
           onOpenSession={handleOpenSession}
           onSwapPane={handleSwapPane}
           onReorderCards={handleReorderCards}
+          highlightedSessionId={highlightedSessionId}
         />
 
         {filteredSessions.length === 0 && search && (
@@ -589,6 +636,7 @@ export default function App() {
         onSaveCustomAgent={handleSaveCustomAgent}
         onClaudeAction={handleClaudeAction}
         onPanelBypassChange={handlePanelBypassChange}
+        onDesktopNotificationsChange={handleDesktopNotificationsChange}
         onCreate={handleCreate}
       />
 
