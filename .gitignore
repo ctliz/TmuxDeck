@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local agent notes and review/build leftovers
+agent.md
+artifacts/
+package/
+
 # Editor directories and files
 .vscode/
 .idea
