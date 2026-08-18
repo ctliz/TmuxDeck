@@ -431,6 +431,26 @@ export default function App() {
     }
   };
 
+  const handleRecheckAdapters = async () => {
+    setAdapterBusy(true);
+    try {
+      const plan = await invoke<WorkspaceInstallPlan>("check_workspace_adapters", {
+        paneAgentIds: effectivePaneAgentIds,
+      });
+      if (!plan.requiresConsent) {
+        setShowAdapterConsent(false);
+        setAdapterPlan(null);
+        return;
+      }
+      setAdapterPlan(plan);
+      setShowAdapterConsent(true);
+    } catch (err: any) {
+      alert(t("val.createFailed") + ": " + translateError(err));
+    } finally {
+      setAdapterBusy(false);
+    }
+  };
+
   const handleCreateWithoutInstalling = async () => {
     setAdapterBusy(true);
     try {
@@ -652,6 +672,7 @@ export default function App() {
         }}
         onInstallAndCreate={handleInstallAndCreate}
         onCreateWithoutInstalling={handleCreateWithoutInstalling}
+        onRecheck={handleRecheckAdapters}
       />
 
       <MobilePairingModal

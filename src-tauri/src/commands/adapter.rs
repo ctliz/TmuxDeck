@@ -1873,7 +1873,11 @@ pub fn probe_opencode_json_file(
             if let Some(pos) = parts.iter().position(|&p| p == "opencode-intercom") {
                 if pos + 1 < parts.len() {
                     let ver_str = parts[pos + 1];
-                    if let Some(parsed) = SemVer::parse(ver_str) {
+                    if ver_str == OPENCODE_TARGET_VERSION {
+                        // Stale host entries that still name the current managed
+                        // version are repairable, even when the files are gone.
+                        exact_count += 1;
+                    } else if let Some(parsed) = SemVer::parse(ver_str) {
                         if parsed < target_semver {
                             older_versions.push(parsed);
                         } else {
@@ -4825,6 +4829,50 @@ pub mod tests {
 
         let (item, _) = probe_single_adapter(&ctx, "codex");
         assert_eq!(item.unwrap().state, AdapterHealthState::NeedsRepair);
+    }
+
+    #[test]
+    fn test_24b_stale_opencode_managed_path_is_repair_not_migration() {
+        let dir = tempdir().unwrap();
+        let runner = MockCommandRunner::new();
+        runner.set_bin("opencode");
+        let ctx = AdapterContext {
+            runner: &runner,
+            home_dir: dir.path().join("home"),
+            config_dir: dir.path().join("config"),
+            pi_agent_dir: dir.path().join("home/.pi/agent"),
+            is_macos: true,
+            injected_fail_point: FAIL_NONE,
+        };
+
+        let oc_dir = ctx.home_dir.join(".config/opencode");
+        fs::create_dir_all(&oc_dir).unwrap();
+        let missing_root = ctx
+            .config_dir
+            .join("managed/opencode-intercom")
+            .join(OPENCODE_TARGET_VERSION);
+        fs::write(
+            oc_dir.join("opencode.json"),
+            format!(
+                r#"{{"plugin":["{}/dist/plugin.mjs"]}}"#,
+                missing_root.display()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            oc_dir.join("tui.json"),
+            format!(
+                r#"{{"plugin":["{}/dist/tui.mjs"]}}"#,
+                missing_root.display()
+            ),
+        )
+        .unwrap();
+
+        let (item, _) = probe_single_adapter(&ctx, "opencode");
+        let item = item.unwrap();
+        assert_eq!(item.state, AdapterHealthState::NeedsRepair);
+        assert_ne!(item.state, AdapterHealthState::MigrationRequired);
+        assert_eq!(item.action_reason, AdapterActionReason::Repair);
     }
 
     #[test]

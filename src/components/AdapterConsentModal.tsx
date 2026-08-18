@@ -1,7 +1,9 @@
+import { useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
+  Copy,
   Download,
   HardDrive,
   Loader2,
@@ -20,6 +22,17 @@ export interface AdapterConsentModalProps {
   onClose: () => void;
   onInstallAndCreate: () => void;
   onCreateWithoutInstalling: () => void;
+  onRecheck?: () => void;
+}
+
+function manualKeysFor(agentId: string): { hint: string; cmd: string } | null {
+  if (agentId === "pi" || agentId === "claude" || agentId === "codex" || agentId === "opencode") {
+    return {
+      hint: `consent.manual.${agentId}`,
+      cmd: `consent.manual.${agentId}.cmd`,
+    };
+  }
+  return null;
 }
 
 export function AdapterConsentModal({
@@ -29,8 +42,20 @@ export function AdapterConsentModal({
   onClose,
   onInstallAndCreate,
   onCreateWithoutInstalling,
+  onRecheck,
 }: AdapterConsentModalProps) {
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   if (!show || !plan) return null;
+
+  const copyCommand = async (cmd: string) => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopiedCmd(cmd);
+      window.setTimeout(() => setCopiedCmd((current) => (current === cmd ? null : current)), 2000);
+    } catch {
+      setCopiedCmd(null);
+    }
+  };
 
   const hasManualMigration = plan.items.some(
     (item) => item.actionReason === "manual-migration-required"
@@ -171,6 +196,11 @@ export function AdapterConsentModal({
           </div>
         )}
 
+        <div className="mb-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+          <p className="text-[11px] font-medium text-slate-300">{t("consent.manualFallbackTitle")}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{t("consent.manualFallbackHint")}</p>
+        </div>
+
         {/* Aggregated Plan Item List */}
         <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 max-h-[46vh]">
           {plan.items.map((item, idx) => {
@@ -244,6 +274,30 @@ export function AdapterConsentModal({
                     <span>{t("consent.license", { license: item.license })}</span>
                   </div>
                 )}
+                {manualKeysFor(item.agentId) && (
+                  <div className="mt-2 pt-2 border-t border-slate-900 space-y-1.5">
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      {t(manualKeysFor(item.agentId)!.hint)}
+                    </p>
+                    <div className="flex items-start gap-2">
+                      <code className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800 px-2 py-1.5 text-[10px] font-mono text-slate-300 break-all">
+                        {t(manualKeysFor(item.agentId)!.cmd)}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyCommand(t(manualKeysFor(item.agentId)!.cmd))}
+                        className="shrink-0 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <Copy className="w-3 h-3" />
+                          {copiedCmd === t(manualKeysFor(item.agentId)!.cmd)
+                            ? t("consent.copiedCommand")
+                            : t("consent.copyCommand")}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -256,7 +310,17 @@ export function AdapterConsentModal({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end space-x-2 mt-4 pt-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 mt-4 pt-2">
+          {onRecheck && (
+            <button
+              type="button"
+              onClick={onRecheck}
+              disabled={loading}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition cursor-pointer hover:bg-slate-800 border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loading ? t("consent.rechecking") : t("consent.recheck")}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

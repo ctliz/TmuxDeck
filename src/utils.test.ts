@@ -910,6 +910,10 @@ test("adapter consent action copy, source enums and error codes in both locales"
   assert.strictEqual(t("consent.source.bundled"), "Bundled offline asset");
   assert.strictEqual(t("consent.source.npmRegistry", { pkg: "@ctliz/agent-intercom-codex" }), "npm: @ctliz/agent-intercom-codex");
   assert.strictEqual(t("consent.actionReason.manualMigration"), "Manual migration required");
+  assert.ok(t("consent.manual.pi.cmd").includes("pi install"));
+  assert.ok(t("consent.manual.claude.cmd").includes("claude-intercom"));
+  assert.ok(t("consent.manual.codex.cmd").includes("codex-intercom"));
+  assert.ok(t("consent.manual.opencode.cmd").includes(".config/opencode"));
 
   const adapterErrors = [
     "ERR_PLAN_STALE",
