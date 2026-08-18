@@ -220,6 +220,7 @@ pub fn run() {
             swap_pane,
             swap_native_slots,
             bridge_pairing,
+            refresh_bridge_pairing,
             bridge_conversations,
             get_usage_snapshot,
             panel_show_main,

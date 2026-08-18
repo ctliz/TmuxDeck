@@ -625,6 +625,8 @@ test("Static mobile HTML contains bugfixes for sendSay, WS resubscribe, ALLOWED_
   assert.match(html, /viewport-fit=cover/);
   assert.doesNotMatch(html, /user-scalable=no|maximum-scale=1\.0/);
   assert.match(html, /visualViewport/);
+  assert.match(html, /offsetTop/);
+  assert.doesNotMatch(html, /input\.scrollIntoView/);
   assert.match(html, /--app-height/);
   assert.match(html, /safe-area-inset-bottom/);
   assert.match(html, /-webkit-overflow-scrolling:\s*touch/);
@@ -767,9 +769,11 @@ test("mobile conversation view keeps a minimal persistent action set", () => {
   // hidden while a conversation is active.
   assert.match(html, /body\.in-conversation > header\s*\{\s*display:\s*none/);
   assert.match(html, /classList\.toggle\('in-conversation'/);
-  // Workspace context remains visible and accessible inside that bar.
+  // Workspace context remains visible; the session switcher defaults to Lead.
   assert.match(html, /class="stream-workspace"/);
-  assert.match(html, /aria-label="\$\{this\.escapeAttr\(workspaceName \+ ' · ' \+ title\)\}"/);
+  assert.match(html, /class="session-switch"/);
+  assert.match(html, /function leadConversation\(/);
+  assert.match(html, /openWorkspace\(/);
 
   // The control keys live in the More sheet only; no always-on key bar.
   assert.doesNotMatch(html, /class="controls-bar"/);

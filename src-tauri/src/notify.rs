@@ -68,6 +68,25 @@ fn ensure_permission(app: &tauri::AppHandle) -> bool {
 /// Show a system notification when a pane starts waiting for a human reply.
 /// No-ops when notifications are disabled, the main window is focused, or this
 /// pane already has an unread notification.
+fn awaiting_count() -> usize {
+    notified_panes().as_ref().map(|set| set.len()).unwrap_or(0)
+}
+
+fn refresh_tray_awaiting(app: &tauri::AppHandle) {
+    let count = awaiting_count();
+    let tip = if count == 0 {
+        "TmuxDeck".to_string()
+    } else if count == 1 {
+        "TmuxDeck · 1 waiting".to_string()
+    } else {
+        format!("TmuxDeck · {count} waiting")
+    };
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(&tip));
+    }
+    let _ = app.emit("awaiting-human-changed", count);
+}
+
 pub fn maybe_notify_awaiting_human(
     app: &tauri::AppHandle,
     pane_id: &str,
@@ -130,10 +149,12 @@ pub fn maybe_notify_awaiting_human(
         if let Some(set) = guard.as_mut() {
             set.remove(pane_id);
         }
+        return;
     }
+    refresh_tray_awaiting(app);
 }
 
-pub fn clear_notified_pane(pane_id: &str) {
+pub fn clear_notified_pane(app: &tauri::AppHandle, pane_id: &str) {
     let mut guard = notified_panes();
     if let Some(set) = guard.as_mut() {
         set.remove(pane_id);
@@ -143,6 +164,8 @@ pub fn clear_notified_pane(pane_id: &str) {
             *last = None;
         }
     }
+    drop(guard);
+    refresh_tray_awaiting(app);
 }
 
 /// macOS/Windows desktop notifications activate the app but do not return a payload.

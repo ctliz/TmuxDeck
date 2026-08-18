@@ -18,10 +18,10 @@
 
 ### 1.2 How the phone connects (key decision)
 
-The desktop derives its primary LAN IPv4 through the system routing table and exposes a QR/copy URL:
+The desktop enumerates trusted IPv4 addresses (default-route LAN, other private interfaces, then Tailscale `100.64/10`) and exposes one QR/copy URL per host:
 
 ```
-http://<LAN-IP>:<dynamic-port>/v1/?token=<per-launch-token>
+http://<LAN-or-tailnet-IP>:<dynamic-port>/v1/?token=<per-launch-token>
 ```
 
 This is the minimal discovery mechanism: no multicast daemon, fixed port or second service. The desktop pairing panel is the discovery surface. The page keeps the token in memory, immediately removes it from the address bar, loads no third-party resources, and opens the same-port WebSocket.

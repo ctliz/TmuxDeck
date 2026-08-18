@@ -17,7 +17,7 @@ use crate::bridge::{ClientCommand, ClientEvent, Transport};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -150,7 +150,7 @@ pub struct InboundCommand {
 pub struct WsTransport {
     /// 监听地址（0.0.0.0:<动态端口>）；配对时只对外展示具体 LAN IP。
     addr: SocketAddr,
-    token: String,
+    token: Arc<RwLock<String>>,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
     cmd_tx: mpsc::UnboundedSender<InboundCommand>,
     client_count_rx: mpsc::UnboundedReceiver<usize>,
@@ -167,7 +167,7 @@ impl WsTransport {
         let addr = listener
             .local_addr()
             .map_err(|e| format!("ERR_WS_ADDR|{}", e))?;
-        let token = generate_token();
+        let token = Arc::new(RwLock::new(generate_token()));
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (client_count_tx, client_count_rx) = mpsc::unbounded_channel();
 
@@ -182,13 +182,12 @@ impl WsTransport {
         let clients = transport.clients.clone();
         let next_id = Arc::new(AtomicU64::new(1));
         let cmd_tx = transport.cmd_tx.clone();
-        let token_cmp = token;
         tokio::spawn(async move {
             let _ = crate::connection::accept_loop(
                 listener,
                 clients,
                 next_id,
-                token_cmp,
+                token,
                 cmd_tx,
                 client_count_tx,
             )
@@ -199,8 +198,24 @@ impl WsTransport {
     }
 
     /// 配对信息：动态端口与一次性 token（供桌面端展示二维码/文本）。
-    pub fn pairing(&self) -> (u16, &str) {
-        (self.addr.port(), &self.token)
+    pub fn pairing(&self) -> (u16, String) {
+        let token = self
+            .token
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        (self.addr.port(), token)
+    }
+
+    pub fn rotate_token(&self) -> String {
+        let next = generate_token();
+        if let Ok(mut guard) = self.token.write() {
+            *guard = next.clone();
+        }
+        if let Ok(mut clients) = self.clients.lock() {
+            clients.clear();
+        }
+        next
     }
 
     /// 取出下一个 connect/disconnect 产生的在线数变化。
@@ -361,6 +376,19 @@ mod integration_tests {
             .enable_all()
             .build()
             .unwrap()
+    }
+
+    #[test]
+    fn test_rotate_token_changes_pairing_value() {
+        let rt = tokio_runtime();
+        rt.block_on(async {
+            let (transport, _cmd_rx) = WsTransport::bind().await.unwrap();
+            let (_, first) = transport.pairing();
+            let rotated = transport.rotate_token();
+            let (_, second) = transport.pairing();
+            assert_ne!(first, rotated);
+            assert_eq!(rotated, second);
+        });
     }
 
     #[test]

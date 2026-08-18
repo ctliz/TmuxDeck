@@ -20,6 +20,8 @@ pub struct BridgeState {
     pub lan_hosts: Mutex<Vec<String>>,
     /// 当前已认证 WebSocket 手机连接数
     pub connected_clients: Mutex<usize>,
+    /// Desktop asked to mint a new pairing token.
+    pub rotate_token: Mutex<bool>,
 }
 
 impl Default for BridgeState {
@@ -32,6 +34,7 @@ impl Default for BridgeState {
             port: Mutex::new(None),
             lan_hosts: Mutex::new(Vec::new()),
             connected_clients: Mutex::new(0),
+            rotate_token: Mutex::new(false),
         }
     }
 }
@@ -47,6 +50,25 @@ pub fn spawn_bridge(app_handle: tauri::AppHandle) -> Arc<BridgeState> {
 /// 桌面端 UI 读取配对信息（WebSocket 地址 + token）。
 #[tauri::command]
 pub fn bridge_pairing(state: tauri::State<Arc<BridgeState>>) -> serde_json::Value {
+    pairing_json(&state)
+}
+
+#[tauri::command]
+pub fn refresh_bridge_pairing(state: tauri::State<Arc<BridgeState>>) -> serde_json::Value {
+    if let Ok(mut flag) = state.rotate_token.lock() {
+        *flag = true;
+    }
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        if state
+            .rotate_token
+            .lock()
+            .map(|flag| !*flag)
+            .unwrap_or(true)
+        {
+            break;
+        }
+    }
     pairing_json(&state)
 }
 

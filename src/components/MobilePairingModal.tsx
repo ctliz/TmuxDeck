@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { QrCode, Copy, Check, Smartphone, Wifi, WifiOff, X, ShieldAlert } from "lucide-react";
+import { QrCode, Copy, Check, RefreshCw, Smartphone, Wifi, WifiOff, X, ShieldAlert } from "lucide-react";
 import { t, tPlural } from "../i18n";
 import { BridgePairingStatus } from "../types";
 import { QRCodeView } from "./QRCodeView";
@@ -60,6 +60,31 @@ export function MobilePairingModal({ show, onClose }: MobilePairingModalProps) {
   const urls = status?.httpUrls || (status?.httpUrl ? [status.httpUrl] : []);
   const currentUrl = urls[selectedUrlIndex] || urls[0] || "";
 
+  const urlKind = (url: string) => {
+    try {
+      const host = new URL(url).hostname;
+      if (host === "127.0.0.1" || host === "localhost") return t("mobile.ipLocal");
+      if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) || host.endsWith(".ts.net")) {
+        return t("mobile.ipTailscale");
+      }
+      return t("mobile.ipLan");
+    } catch {
+      return t("mobile.ipLan");
+    }
+  };
+
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      const res = await invoke<BridgePairingStatus>("refresh_bridge_pairing");
+      setStatus(res);
+    } catch {
+      setStatus(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCopy = () => {
     if (!currentUrl) return;
     navigator.clipboard.writeText(currentUrl);
@@ -80,12 +105,23 @@ export function MobilePairingModal({ show, onClose }: MobilePairingModalProps) {
               {t("mobile.trustedLanOnly")}
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-1">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={loading}
+              title={t("mobile.refreshPairing")}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition disabled:opacity-40"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -144,7 +180,7 @@ export function MobilePairingModal({ show, onClose }: MobilePairingModalProps) {
                           : "bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-slate-200"
                       }`}
                     >
-                      IP {idx + 1}
+                      {urlKind(urls[idx])}
                     </button>
                   ))}
                 </div>

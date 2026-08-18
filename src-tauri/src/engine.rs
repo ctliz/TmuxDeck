@@ -23,9 +23,9 @@ use crate::bridge_state::BridgeState;
 use crate::intercom::{broker_available, IntercomClient, IntercomEvent};
 use crate::tmux::{list_all_panes, send_key_name, validate_pane_id, PaneDetail, ALLOWED_KEYS};
 use crate::transcript::CompositeTranscriptSource;
-use crate::transport::{InboundCommand, WsTransport};
+use crate::transport::{is_tailnet_ip, trusted_client_ip, InboundCommand, WsTransport};
 use std::collections::HashMap;
-use std::net::UdpSocket;
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,19 +36,68 @@ pub const POLL_NORMAL: Duration = Duration::from_secs(2);
 pub const POLL_FAST: Duration = Duration::from_millis(500);
 /// intercom 事件与手机指令的阻塞等待上限（保证周期刷新不被饿死）。
 pub const POLL_TICK: Duration = Duration::from_millis(200);
+/// Recent turns pushed when a phone opens a conversation.
+pub const SUBSCRIBE_SNAPSHOT_TURNS: usize = 12;
 
-/// 最小 LAN 发现：通过系统路由选择取得当前主 IPv4；无需 mDNS/额外端口。
-fn discover_lan_hosts() -> Vec<String> {
-    let mut hosts = Vec::new();
-    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-        if socket.connect("8.8.8.8:80").is_ok() {
-            if let Ok(addr) = socket.local_addr() {
-                if !addr.ip().is_loopback() {
-                    hosts.push(addr.ip().to_string());
+/// Pairing URLs: default-route LAN first, then other private IPv4s, then Tailscale.
+fn default_route_ipv4() -> Option<IpAddr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let ip = socket.local_addr().ok()?.ip();
+    (!ip.is_loopback()).then_some(ip)
+}
+
+#[cfg(unix)]
+fn interface_ipv4s() -> Vec<IpAddr> {
+    let mut out = Vec::new();
+    unsafe {
+        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifap) != 0 {
+            return out;
+        }
+        let mut ptr = ifap;
+        while !ptr.is_null() {
+            let ifa = &*ptr;
+            if !ifa.ifa_addr.is_null() && i32::from((*ifa.ifa_addr).sa_family) == libc::AF_INET {
+                let sin = &*(ifa.ifa_addr as *const libc::sockaddr_in);
+                let ip = IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr)));
+                if trusted_client_ip(ip) && !ip.is_loopback() {
+                    out.push(ip);
                 }
             }
+            ptr = ifa.ifa_next;
+        }
+        libc::freeifaddrs(ifap);
+    }
+    out
+}
+
+#[cfg(not(unix))]
+fn interface_ipv4s() -> Vec<IpAddr> {
+    Vec::new()
+}
+
+fn host_rank(ip: IpAddr) -> u8 {
+    if is_tailnet_ip(ip) {
+        2
+    } else {
+        1
+    }
+}
+
+fn discover_lan_hosts() -> Vec<String> {
+    let mut ips = interface_ipv4s();
+    if let Some(primary) = default_route_ipv4() {
+        if trusted_client_ip(primary) && !ips.contains(&primary) {
+            ips.insert(0, primary);
+        } else if let Some(pos) = ips.iter().position(|ip| *ip == primary) {
+            ips.remove(pos);
+            ips.insert(0, primary);
         }
     }
+    ips.sort_by_key(|ip| host_rank(*ip));
+    ips.dedup();
+    let mut hosts: Vec<String> = ips.into_iter().map(|ip| ip.to_string()).collect();
     hosts.push("127.0.0.1".to_string());
     hosts
 }
@@ -129,7 +178,7 @@ impl BridgeEngine {
             *a = hosts.first().map(|host| format!("{}:{}", host, port));
         }
         if let Ok(mut t) = state.ws_token.lock() {
-            *t = Some(token.to_string());
+            *t = Some(token);
         }
         if let Ok(mut p) = state.port.lock() {
             *p = Some(port);
@@ -179,6 +228,25 @@ impl BridgeEngine {
             // 2) 手机指令
             while let Ok(cmd) = self.cmd_rx.try_recv() {
                 self.on_command(cmd);
+            }
+
+            let rotate = self
+                .state
+                .rotate_token
+                .lock()
+                .map(|flag| *flag)
+                .unwrap_or(false);
+            if rotate {
+                let token = self.transport.rotate_token();
+                if let Ok(mut t) = self.state.ws_token.lock() {
+                    *t = Some(token);
+                }
+                if let Ok(mut count) = self.state.connected_clients.lock() {
+                    *count = 0;
+                }
+                if let Ok(mut flag) = self.state.rotate_token.lock() {
+                    *flag = false;
+                }
             }
 
             // 3) 发布已认证手机连接数；桌面端轮询 pairing 即可取到实时值。
@@ -379,8 +447,8 @@ impl BridgeEngine {
         };
         match self.transcript.poll(&conv, 0) {
             Ok(turns) => {
-                // 只推尾部（最多 40 条），让手机端一进来就有内容
-                for t in turns.iter().rev().take(40).rev() {
+                // Recent tail only — long histories stall the phone list.
+                for t in turns.iter().rev().take(SUBSCRIBE_SNAPSHOT_TURNS).rev() {
                     let _ = self
                         .transport
                         .emit_to(conn_id, &ClientEvent::Turn { turn: t.clone() });
@@ -558,7 +626,9 @@ impl BridgeEngine {
                         Ok(_) => {
                             self.pending_replies.remove(&id);
                             self.registry.clear_pane_awaiting_human(&id);
-                            crate::notify::clear_notified_pane(&id);
+                            if let Some(app) = &self.app_handle {
+                                crate::notify::clear_notified_pane(app, &id);
+                            }
                             self.refresh_all();
                             record_mobile_command(
                                 peer_ip,
@@ -807,7 +877,7 @@ mod tests {
         runtime.block_on(async {
             let (transport, mut cmd_rx) = WsTransport::bind().await.unwrap();
             let (port, token) = transport.pairing();
-            let (mut sink, mut stream) = connect_client(port, token).await;
+            let (mut sink, mut stream) = connect_client(port, &token).await;
             sink.send(Message::Text(r#"{"type":"refresh"}"#.into()))
                 .await
                 .unwrap();
@@ -841,8 +911,8 @@ mod tests {
         runtime.block_on(async {
             let (transport, mut cmd_rx) = WsTransport::bind().await.unwrap();
             let (port, token) = transport.pairing();
-            let (mut sink_a, mut stream_a) = connect_client(port, token).await;
-            let (mut sink_b, mut stream_b) = connect_client(port, token).await;
+            let (mut sink_a, mut stream_a) = connect_client(port, &token).await;
+            let (mut sink_b, mut stream_b) = connect_client(port, &token).await;
 
             sink_a
                 .send(Message::Text(
@@ -1112,5 +1182,19 @@ mod tests {
         assert!(needs_fast(&mk(ConversationStatus::Thinking)));
         assert!(!needs_fast(&mk(ConversationStatus::Idle)));
         assert!(!needs_fast(&mk(ConversationStatus::Unknown)));
+    }
+
+    #[test]
+    fn test_pairing_hosts_rank_lan_before_tailnet() {
+        assert!(host_rank("192.168.1.62".parse().unwrap()) < host_rank("100.84.138.1".parse().unwrap()));
+        assert!(trusted_client_ip("100.84.138.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_subscribe_snapshot_keeps_a_short_tail() {
+        assert_eq!(SUBSCRIBE_SNAPSHOT_TURNS, 12);
+        let turns: Vec<usize> = (0..40).collect();
+        let kept: Vec<usize> = turns.iter().rev().take(SUBSCRIBE_SNAPSHOT_TURNS).rev().copied().collect();
+        assert_eq!(kept, (28..40).collect::<Vec<_>>());
     }
 }

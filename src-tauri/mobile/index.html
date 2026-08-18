@@ -10,10 +10,14 @@
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { width: 100%; height: 100%; }
+    html { height: var(--app-height); overflow: hidden; }
     body {
       background-color: #090d16;
       color: #e2e8f0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      position: fixed;
+      inset: 0 auto auto 0;
+      width: 100%;
       height: var(--app-height);
       display: flex;
       flex-direction: column;
@@ -255,13 +259,13 @@
     .stream-bar {
       background: #0f172a;
       border-bottom: 1px solid #1e293b;
-      padding: 8px 12px;
+      padding: 4px 8px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      font-size: 12px;
+      font-size: 11px;
       flex-shrink: 0;
-      gap: 8px;
+      gap: 6px;
     }
     .stream-title {
       min-width: 0;
@@ -280,31 +284,70 @@
     }
     .stream-agent { font-size: 12px; }
     .stream-workspace {
-      margin-top: 2px;
+      margin-top: 1px;
       color: #64748b;
       font-size: 9px;
       font-weight: 500;
+    }
+    .session-switch {
+      appearance: none;
+      width: 100%;
+      max-width: 100%;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+      text-overflow: ellipsis;
+      padding: 0 18px 0 4px;
+      min-height: 28px;
+    }
+    .session-switch-wrap {
+      position: relative;
+      min-width: 0;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 0 2px;
+    }
+    .session-switch-wrap::after {
+      content: "";
+      position: absolute;
+      right: 7px;
+      top: 50%;
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid #7dd3fc;
+      transform: translateY(-40%);
+      pointer-events: none;
     }
     .back-btn {
       background: #1e293b;
       border: none;
       color: #e2e8f0;
-      padding: 8px 12px;
-      min-width: 44px;
-      min-height: 44px;
+      padding: 4px 8px;
+      min-width: 36px;
+      min-height: 28px;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 11px;
       cursor: pointer;
     }
     .more-btn {
       background: #1e293b;
       color: #e2e8f0;
       border: none;
-      padding: 8px 12px;
-      min-width: 44px;
-      min-height: 44px;
+      padding: 4px 8px;
+      min-width: 36px;
+      min-height: 28px;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 11px;
       cursor: pointer;
     }
 
@@ -905,6 +948,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           interrupt: "中断",
           eof: "EOF",
           ungrouped: "未分组",
+          leadBadge: "Lead",
+          switchSession: "切换会话",
           awaitingBadge: "待回复",
           awaitingReply: "对方正在等你回复",
           offline: "连接已断开",
@@ -951,6 +996,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           interrupt: "Interrupt",
           eof: "EOF",
           ungrouped: "Ungrouped",
+          leadBadge: "Lead",
+          switchSession: "Switch session",
           awaitingBadge: "NEEDS REPLY",
           awaitingReply: "Waiting for your reply",
           offline: "Disconnected",
@@ -1147,6 +1194,28 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         return groups;
       }
 
+      function isLeadTitle(title) {
+        return /\s0?1$/.test(String(title || '').trim());
+      }
+
+      function leadConversation(items) {
+        return (items || []).find(function(item) { return isLeadTitle(item.title); })
+          || (items || [])[0]
+          || null;
+      }
+
+      function peersInWorkspace(conversations, conv) {
+        if (!conv) return [];
+        const groups = groupConversations(conversations);
+        const group = groups.find(function(entry) {
+          return entry.items.some(function(item) { return item.id === conv.id; });
+        });
+        if (!group) return [conv];
+        const lead = leadConversation(group.items);
+        const rest = group.items.filter(function(item) { return !lead || item.id !== lead.id; });
+        return lead ? [lead].concat(rest) : group.items.slice();
+      }
+
       const ROLE_LABELS = {
         human: 'roleHuman',
         agent: 'roleAgent',
@@ -1205,6 +1274,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           this.conversations = [];
           this.activeConvId = null;
           this.turns = {}; // convId -> array of turns
+          this.maxTurns = 12;
           this.token = token;
           this.reconnectTimer = null;
           // Manual expand/collapse choices, in memory only and keyed by
@@ -1340,6 +1410,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
                 if (cid) {
                   if (!this.turns[cid]) this.turns[cid] = [];
                   this.turns[cid].push(msg.turn);
+                  if (this.turns[cid].length > this.maxTurns) {
+                    this.turns[cid] = this.turns[cid].slice(-this.maxTurns);
+                  }
                   if (this.activeConvId === cid) {
                     this.renderStreamTurns();
                   }
@@ -1363,9 +1436,21 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         }
 
         selectConv(id) {
+          if (this.activeConvId === id) return;
+          if (this.activeConvId) this.sendCmd({ type: 'unsubscribe' });
           this.activeConvId = id;
           this.sendCmd({ type: 'subscribe', id });
           this.render();
+        }
+
+        openWorkspace(convId) {
+          const conv = this.conversations.find(c => c.id === convId);
+          const lead = leadConversation(peersInWorkspace(this.conversations, conv));
+          this.selectConv(lead ? lead.id : convId);
+        }
+
+        switchSession(id) {
+          this.selectConv(id);
         }
 
         backToList() {
@@ -1474,7 +1559,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
               html += '<div class="ws-items">';
               group.items.forEach(c => {
                 const isAwaiting = c.status === 'awaiting-human';
-                html += `<div class="conv-card${isAwaiting ? ' awaiting' : ''}" onclick="app.selectConv('${this.escapeAttr(c.id)}')">
+                html += `<div class="conv-card${isAwaiting ? ' awaiting' : ''}" onclick="app.openWorkspace('${this.escapeAttr(c.id)}')">
                   <div class="conv-header">
                     <div class="conv-title">${this.escapeHtml(c.title)}</div>
                     ${isAwaiting ? `<span class="badge-awaiting">${t('awaitingBadge')}</span>` : ''}
@@ -1528,11 +1613,19 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           const awaiting = conv && conv.status === 'awaiting-human';
           const offline = this.status !== 'connected';
 
+          const peers = peersInWorkspace(this.conversations, conv);
+          const options = peers.map(peer => {
+            const label = isLeadTitle(peer.title) ? peer.title + ' · ' + t('leadBadge') : peer.title;
+            const selected = peer.id === this.activeConvId ? ' selected' : '';
+            return `<option value="${this.escapeAttr(peer.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+          }).join('');
           let html = `<div class="view-stream">
             <div class="stream-bar">
               <button class="back-btn" onclick="app.backToList()">${t('back')}</button>
-              <div class="stream-title" aria-label="${this.escapeAttr(workspaceName + ' · ' + title)}">
-                <span class="stream-agent">${this.escapeHtml(title)}</span>
+              <div class="stream-title">
+                <div class="session-switch-wrap">
+                  <select class="session-switch" aria-label="${this.escapeAttr(t('switchSession'))}" onchange="app.switchSession(this.value)">${options}</select>
+                </div>
                 <span class="stream-workspace">${this.escapeHtml(workspaceName)}</span>
               </div>
               <button class="more-btn" onclick="app.openMoreSheet()" aria-haspopup="dialog">${t('more')}</button>
@@ -1562,9 +1655,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             input.addEventListener('focus', function() {
               setTimeout(function() {
                 updateViewportHeight();
-                try { input.scrollIntoView({ block: 'nearest' }); }
-                catch (e) { input.scrollIntoView(false); }
-              }, 50);
+                const list = document.getElementById('turns-list');
+                if (list) list.scrollTop = list.scrollHeight;
+              }, 80);
             });
             // Enter sends; Shift+Enter keeps the newline for multi-line input.
             input.addEventListener('keydown', event => {
@@ -1710,7 +1803,11 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       function updateViewportHeight() {
         const viewport = window.visualViewport;
         const height = viewport ? viewport.height : window.innerHeight;
-        if (height) document.documentElement.style.setProperty('--app-height', Math.round(height) + 'px');
+        const offsetTop = viewport ? viewport.offsetTop : 0;
+        if (height) {
+          document.documentElement.style.setProperty('--app-height', Math.round(height) + 'px');
+        }
+        document.body.style.top = Math.round(offsetTop) + 'px';
       }
       updateViewportHeight();
       window.addEventListener('resize', updateViewportHeight);

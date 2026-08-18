@@ -21,6 +21,7 @@ export function TrayPanel() {
   const [env, setEnv] = useState<Environment | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [pairing, setPairing] = useState<BridgePairingStatus | null>(null);
+  const [awaiting, setAwaiting] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const inFlight = useRef(false);
@@ -62,10 +63,14 @@ export function TrayPanel() {
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
       void refresh();
     });
+    const unlistenAwaiting = listen<number>("awaiting-human-changed", (event) => {
+      if (typeof event.payload === "number") setAwaiting(event.payload);
+    });
 
     return () => {
       void unlistenUsage.then((fn) => fn());
       void unlistenOpen.then((fn) => fn());
+      void unlistenAwaiting.then((fn) => fn());
     };
   }, [refresh]);
 
@@ -122,9 +127,16 @@ export function TrayPanel() {
         <h1 className="text-[12px] font-semibold tracking-tight text-white/95">
           {t("app.title")}
         </h1>
-        <span className="text-[10px] tabular-nums text-white/40">
-          {tPlural("stats.total", sessions.length)}
-        </span>
+        <div className="flex items-center gap-2">
+          {awaiting > 0 && (
+            <span className="rounded-full bg-amber-400/20 px-1.5 py-px text-[10px] font-medium text-amber-200">
+              {tPlural("panel.awaiting", awaiting)}
+            </span>
+          )}
+          <span className="text-[10px] tabular-nums text-white/40">
+            {tPlural("stats.total", sessions.length)}
+          </span>
+        </div>
       </header>
 
       {/* 单一滚动区：工作区与用量一起滚，避免嵌套滚动容器互相抢高度、

@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -30,7 +30,7 @@ pub(crate) async fn accept_loop(
     listener: TcpListener,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
     next_id: Arc<AtomicU64>,
-    token: String,
+    token: Arc<RwLock<String>>,
     cmd_tx: mpsc::UnboundedSender<InboundCommand>,
     client_count_tx: mpsc::UnboundedSender<usize>,
 ) -> Result<(), String> {
@@ -58,7 +58,10 @@ pub(crate) async fn accept_loop(
         recent.push(now);
 
         let clients = clients.clone();
-        let token = token.clone();
+        let token = token
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_default();
         let cmd_tx = cmd_tx.clone();
         let client_count_tx = client_count_tx.clone();
         let conn_id = next_id.fetch_add(1, Ordering::Relaxed);

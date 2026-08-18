@@ -65,8 +65,16 @@ pub(crate) fn ghostty_native_available() -> bool {
 
 pub(crate) fn list_native_slots(workspace: &str) -> Result<Vec<NativeSlot>, String> {
     let workspace = sanitize_session_name(workspace)?;
-    let output = run_tmux(&["list-sessions", "-F", NATIVE_SESSION_FORMAT])
-        .map_err(|e| format!("ERR_TMUX_LIST_FAILED|{}", e))?;
+    let output = match run_tmux(&["list-sessions", "-F", NATIVE_SESSION_FORMAT]) {
+        Ok(output) => output,
+        Err(e) => {
+            // No tmux binary or no socket is “no native slots”, not a destroy failure.
+            if e.kind() == std::io::ErrorKind::NotFound || is_no_server_err(&e.to_string()) {
+                return Ok(Vec::new());
+            }
+            return Err(format!("ERR_TMUX_LIST_FAILED|{}", e));
+        }
+    };
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
         if is_no_server_err(&error) {

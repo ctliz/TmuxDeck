@@ -217,6 +217,8 @@ const en: Record<string, string> = {
   "panel.mobileConnected_other": "Mobile: {n} clients",
   "panel.mobileIdle": "Mobile: waiting",
   "panel.trustedLan": "Trusted LAN",
+  "panel.awaiting_one": "{n} waiting",
+  "panel.awaiting_other": "{n} waiting",
 
   // Confirmations
   "confirm.destroy_one": "Destroy workspace \"{name}\"? This will terminate its {n} tmux pane.\n\nIf you only want to leave temporarily, close the terminal window (Cmd+W). Any Close Window warning comes from the terminal and refers to the terminal connection, not this tmux workspace; choosing Close should only detach while the workspace keeps running in the background.",
@@ -304,8 +306,11 @@ const en: Record<string, string> = {
 
   // Mobile & Pairing
   "mobile.pairingTitle": "Mobile Pairing",
-  "mobile.pairingDesc": "Scan QR code or open link on your mobile device (same LAN)",
-  "mobile.lanUrls": "LAN Access URLs",
+  "mobile.pairingDesc": "Scan the QR or open the matching link. Use LAN on the same Wi-Fi, or the Tailscale address when the phone is on the tailnet.",
+  "mobile.lanUrls": "Access URLs",
+  "mobile.ipLan": "LAN",
+  "mobile.ipTailscale": "Tailscale",
+  "mobile.ipLocal": "This Mac",
   "mobile.connectedClients_one": "{n} mobile device connected",
   "mobile.connectedClients_other": "{n} mobile devices connected",
   "mobile.noClients": "No mobile devices connected",
@@ -314,6 +319,7 @@ const en: Record<string, string> = {
   "mobile.token": "Access Token",
   "mobile.copyLink": "Copy Link",
   "mobile.copiedLink": "Copied!",
+  "mobile.refreshPairing": "New QR",
   "mobile.openPairing": "Mobile Pairing",
   "mobile.trustedLanOnly": "Trusted LAN Only",
 };
@@ -537,6 +543,8 @@ const zh: Record<string, string> = {
   "panel.mobileConnected_other": "手机端：{n} 个连接",
   "panel.mobileIdle": "手机端：等待连接",
   "panel.trustedLan": "仅可信局域网",
+  "panel.awaiting_one": "{n} 个待回复",
+  "panel.awaiting_other": "{n} 个待回复",
 
   // Confirmations
   "confirm.destroy_one": "确定要销毁工作区「{name}」吗？这会终止其中的 {n} 个 tmux 分屏。\n\n若只是暂时离开，请关闭终端窗口（Cmd+W）。此时出现的 Close Window 提示来自终端，指的是终端连接而非该 tmux 工作区；确认关闭应只断开连接，工作区继续后台运行。",
@@ -624,8 +632,11 @@ const zh: Record<string, string> = {
 
   // Mobile & Pairing
   "mobile.pairingTitle": "手机配对",
-  "mobile.pairingDesc": "在同一局域网下用手机扫码或浏览器访问链接",
-  "mobile.lanUrls": "局域网访问地址",
+  "mobile.pairingDesc": "扫码或打开对应链接。同一 Wi-Fi 用局域网地址；手机走 Tailscale 时选 Tailscale 地址。",
+  "mobile.lanUrls": "访问地址",
+  "mobile.ipLan": "局域网",
+  "mobile.ipTailscale": "Tailscale",
+  "mobile.ipLocal": "本机",
   "mobile.connectedClients_one": "已连接 {n} 台手机",
   "mobile.connectedClients_other": "已连接 {n} 台手机",
   "mobile.noClients": "暂无手机在线",
@@ -634,6 +645,7 @@ const zh: Record<string, string> = {
   "mobile.token": "访问 Token",
   "mobile.copyLink": "复制链接",
   "mobile.copiedLink": "已复制！",
+  "mobile.refreshPairing": "刷新二维码",
   "mobile.openPairing": "手机配对",
   "mobile.trustedLanOnly": "仅可信局域网使用",
 };

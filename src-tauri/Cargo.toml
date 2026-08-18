@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "1.14.9"
+version = "1.14.10"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -33,6 +33,7 @@ tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread",
 tokio-tungstenite = "0.30"
 futures-util = "0.3"
 getrandom = "0.2"
+libc = "0.2"
 sha2 = "0.10"
 toml_edit = "=0.25.13"
 tauri-plugin-notification = "2"
