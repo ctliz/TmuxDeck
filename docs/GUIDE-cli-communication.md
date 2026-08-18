@@ -77,17 +77,19 @@ These options apply only to TmuxDeck-generated default commands. They do not alt
 
 ### 3.1 Pi
 
-Pi loads Agent Intercom as an extension. The recommended fixed-tag installation is:
+Pi loads Agent Intercom as an extension. Install only the official npm package:
 
 ```text
-pi install git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1
+pi install npm:@ctliz/pi-intercom@0.12.1
 ```
+
+Do not also install `git:github.com/ctliz/agent-intercom-pi`. Two copies register the same tools and Pi exits on launch.
 
 Properties:
 
 - The extension runs inside the Pi process;
 - it uses the Core 0.2.0 v4 protocol and team manifest;
-- Pi provides native `/intercom` and `/name` commands;
+- Pi provides `/intercom`, `/name`, `/intercom-join`, and `/intercom-status`;
 - after updating the extension, run this in every open Pi session:
 
 ```text

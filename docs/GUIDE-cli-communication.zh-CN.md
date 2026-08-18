@@ -77,17 +77,19 @@ TmuxDeck 面板默认对支持的 CLI 使用 bypass 模式，可在创建面板�
 
 ### 3.1 Pi
 
-Pi 通过扩展加载 Agent Intercom。推荐使用固定 Git tag：
+Pi 通过扩展加载 Agent Intercom。只安装官方 npm 包：
 
 ```text
-pi install git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1
+pi install npm:@ctliz/pi-intercom@0.12.1
 ```
+
+不要同时再装 `git:github.com/ctliz/agent-intercom-pi`。两份插件会注册同一套工具，Pi 启动即退出。
 
 通信特点：
 
 - 扩展在 Pi 进程内运行；
 - 使用 Core v0.2.0 的 v4 协议和 team manifest；
-- 可使用 Pi 原生 `/intercom`、`/name` 等命令；
+- 可使用 `/intercom`、`/name`、`/intercom-join`、`/intercom-status`；
 - 更新扩展后，在每个已打开的 Pi 会话执行：
 
 ```text

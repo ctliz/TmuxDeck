@@ -34,10 +34,10 @@ Display name: {name}
 **工作区与通话圈说明**
 1. **工作区名**：就是卡片标题，也是底层的 tmux 会话名。用于指定你要加入哪一个通话圈。
 2. **圈内昵称 (/name)**：使用 `/name` 只修改你在该通话圈内的显示名，不会改动工作区名，也不会修改会话 ID。
-3. **加入通话圈 (join)**：通过 `join` 加入对应工作区的通话圈，作为外部协作者收发消息，不会成为 Team Worker。
+3. **加入通话圈 (`/intercom-join`)**：独立 Pi 用 `/intercom-join` 加入对应工作区的通话圈，作为外部协作者收发消息，不会成为 Team Worker。不要同时安装 `git:github.com/ctliz/agent-intercom-pi` 和 `npm:@ctliz/pi-intercom`。
 
 ### English
 **Workspace & Intercom Circle Guide**
 1. **Workspace Name**: The card title and the underlying tmux session name, used to specify which intercom circle you want to join.
 2. **In-Circle Nickname (/name)**: `/name` only sets your display name inside that intercom circle; it does not rename the workspace or change your session ID.
-3. **Join Intercom Circle (join)**: `join` adds you to that workspace’s intercom circle to send and receive messages as an external collaborator; it does not make you a Team Worker.
+3. **Join Intercom Circle (`/intercom-join`)**: a standalone Pi uses `/intercom-join` to join that workspace’s intercom circle as an external collaborator; it does not make you a Team Worker. Do not install both `git:github.com/ctliz/agent-intercom-pi` and `npm:@ctliz/pi-intercom`.

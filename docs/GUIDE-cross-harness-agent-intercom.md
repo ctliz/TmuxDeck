@@ -48,15 +48,15 @@ After installing or upgrading any adapter, run `/reload` in **every still-open P
 Recommended install and update command:
 
 ```bash
-pi install git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1
+pi install npm:@ctliz/pi-intercom@0.12.1
 ```
 
-The Git fixed-tag install is recommended for Pi (requires registry Core 0.2.0 availability for package-lock resolution). The official npm package `@ctliz/agent-intercom-pi@connect` is also published.
+Use only this npm package. Do not also install `git:github.com/ctliz/agent-intercom-pi`; two copies register the same Intercom tools and Pi exits on launch. A standalone Pi can join an existing TmuxDeck workspace circle with `/intercom-join` without becoming a Team Worker.
 
 Provenance:
 
-- Release tag: [`v0.12.0-connect.1`](https://github.com/ctliz/agent-intercom-pi/releases/tag/v0.12.0-connect.1)
-- Upstream base: `@dataforxyz/agent-intercom-pi` provenance
+- npm: [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom)
+- Source: [ctliz/agent-intercom-pi](https://github.com/ctliz/agent-intercom-pi)
 
 After install or update, run this in every open Pi session:
 
@@ -419,7 +419,7 @@ Recommended troubleshooting order:
 1. Run `intercom_status({})` on the current side.
 2. Confirm all sides use the same `PI_CODING_AGENT_DIR`.
 3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers.
-4. Confirm Pi is installed from `git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1`; re-run that fixed `pi install` command if repair is needed.
+4. Confirm Pi has exactly one Intercom package: `npm:@ctliz/pi-intercom@0.12.1`. Remove any leftover `git:github.com/ctliz/agent-intercom-pi` entry before rechecking.
 5. Run `/reload` in every open Pi session; fully restart Claude (`cci`), Codex (`coi`), and OpenCode companion adapters so the protocol-v4 broker can restart cleanly.
 6. Run `intercom_list({})` for the current workspace. Use the exact full ID for intentional cross-workspace routing.
 7. If an existing workspace fails closed on add/rename, recreate the workspace under v4.
@@ -440,8 +440,8 @@ Recommended troubleshooting order:
 Verified on this machine for v1.14.0:
 
 ```text
-Pi package source: git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1 (or @ctliz/agent-intercom-pi@connect)
-Pi package version: @ctliz/agent-intercom-pi 0.12.0-connect.1
+Pi package source: npm:@ctliz/pi-intercom@0.12.1
+Pi package version: @ctliz/pi-intercom 0.12.1
 Claude package:     @ctliz/agent-intercom-claude@connect (0.13.0-connect.1, --tui --safe)
 Codex package:      @ctliz/agent-intercom-codex@connect (0.12.0-connect.1)
 OpenCode package:   @ctliz/agent-intercom-opencode@connect (0.12.0-connect.1)

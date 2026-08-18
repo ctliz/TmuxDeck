@@ -112,7 +112,16 @@ pub const OPENCODE_IMMUTABLE_DIGESTS: &[(&str, &str)] = &[
 
 pub const PI_CANONICAL_GIT_TARGET: &str =
     "git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1";
+pub const PI_NPM_PACKAGE_PREFIX: &str = "npm:@ctliz/pi-intercom@";
 pub const PI_TARGET_VERSION: &str = "0.12.0-connect.1";
+
+fn is_pi_intercom_settings_entry(value: &str) -> bool {
+    value.contains("agent-intercom-pi") || value.contains("@ctliz/pi-intercom")
+}
+
+fn pi_npm_package_version(value: &str) -> Option<&str> {
+    value.strip_prefix(PI_NPM_PACKAGE_PREFIX).filter(|version| !version.is_empty())
+}
 
 pub const CODEX_MCP_SERVER_KEY: &str = "codex-intercom";
 
@@ -2461,16 +2470,32 @@ pub fn probe_single_adapter(
                                 let mut has_legacy = false;
                                 let mut has_target = false;
                                 let mut older = Vec::new();
+                                let mut npm_current: Option<String> = None;
+                                let mut intercom_count = 0;
 
                                 if let Some(packages) =
                                     json.get("packages").and_then(|v| v.as_array())
                                 {
                                     for p in packages {
                                         if let Some(s) = p.as_str() {
+                                            if is_pi_intercom_settings_entry(s) {
+                                                intercom_count += 1;
+                                            }
                                             if s.contains("dataforxyz") {
                                                 has_legacy = true;
                                             } else if s == PI_CANONICAL_GIT_TARGET {
                                                 has_target = true;
+                                            } else if let Some(ver_str) = pi_npm_package_version(s)
+                                            {
+                                                if let Some(sem) = SemVer::parse(ver_str) {
+                                                    let target_sem =
+                                                        SemVer::parse(PI_TARGET_VERSION).unwrap();
+                                                    if sem < target_sem {
+                                                        older.push(ver_str.to_string());
+                                                    } else {
+                                                        npm_current = Some(ver_str.to_string());
+                                                    }
+                                                }
                                             } else if s.starts_with(
                                                 "git:github.com/ctliz/agent-intercom-pi@v",
                                             ) {
@@ -2491,6 +2516,11 @@ pub fn probe_single_adapter(
 
                                 if has_legacy {
                                     state = AdapterHealthState::MigrationRequired;
+                                } else if intercom_count > 1 {
+                                    state = AdapterHealthState::NeedsRepair;
+                                } else if let Some(ver) = npm_current {
+                                    state = AdapterHealthState::HealthyExistingGlobal;
+                                    installed_ver = Some(ver);
                                 } else if has_target && older.is_empty() {
                                     state = AdapterHealthState::Healthy;
                                     installed_ver = Some(PI_TARGET_VERSION.to_string());
@@ -2533,7 +2563,11 @@ pub fn probe_single_adapter(
                 state,
                 target_version: PI_TARGET_VERSION.to_string(),
                 installed_version: installed_ver,
-                source_kind: AdapterSourceKind::PiGit,
+                source_kind: if state == AdapterHealthState::HealthyExistingGlobal {
+                    AdapterSourceKind::ExistingGlobal
+                } else {
+                    AdapterSourceKind::PiGit
+                },
                 package_name: Some(CanonicalAdapterPackage::Pi),
                 config_change_kind: ConfigChangeKind::None,
                 network_required: true,
@@ -3302,17 +3336,27 @@ pub fn apply_workspace_install_plan_internal(
                         None => Vec::new(),
                     };
 
+                    let keep_npm = pkgs.iter().find_map(|p| {
+                        p.as_str().and_then(pi_npm_package_version).and_then(|ver| {
+                            let parsed = SemVer::parse(ver)?;
+                            let target = SemVer::parse(PI_TARGET_VERSION)?;
+                            (parsed >= target).then(|| ver.to_string())
+                        })
+                    });
+
                     pkgs.retain(|p| {
                         if let Some(s) = p.as_str() {
-                            !s.contains("agent-intercom-pi")
+                            !is_pi_intercom_settings_entry(s)
                         } else {
                             true
                         }
                     });
 
-                    pkgs.push(serde_json::Value::String(
-                        PI_CANONICAL_GIT_TARGET.to_string(),
-                    ));
+                    pkgs.push(serde_json::Value::String(if let Some(ver) = keep_npm {
+                        format!("{}{}", PI_NPM_PACKAGE_PREFIX, ver)
+                    } else {
+                        PI_CANONICAL_GIT_TARGET.to_string()
+                    }));
                     json_obj.insert("packages".to_string(), serde_json::Value::Array(pkgs));
 
                     let out_bytes =
@@ -3470,7 +3514,9 @@ pub fn apply_workspace_install_plan_internal(
             let Some(post_item) = post_item_opt else {
                 return Err(AdapterError::Verify);
             };
-            if post_item.state != AdapterHealthState::Healthy {
+            if post_item.state != AdapterHealthState::Healthy
+                && post_item.state != AdapterHealthState::HealthyExistingGlobal
+            {
                 return Err(AdapterError::Verify);
             }
         }
@@ -4278,6 +4324,72 @@ pub mod tests {
         let settings_file = ctx.pi_agent_dir.join("settings.json");
         let content = fs::read_to_string(settings_file).unwrap();
         assert!(content.contains(PI_CANONICAL_GIT_TARGET));
+    }
+
+    #[test]
+    fn test_8b_current_npm_pi_intercom_is_healthy_existing_global() {
+        let dir = tempdir().unwrap();
+        let runner = MockCommandRunner::new();
+        runner.set_bin("pi");
+        let pi_agent_dir = dir.path().join("home/.pi/agent");
+        fs::create_dir_all(&pi_agent_dir).unwrap();
+        fs::write(
+            pi_agent_dir.join("settings.json"),
+            r#"{"packages":["npm:@ctliz/pi-intercom@0.12.1"]}"#,
+        )
+        .unwrap();
+        let ctx = AdapterContext {
+            runner: &runner,
+            home_dir: dir.path().join("home"),
+            config_dir: dir.path().join("config"),
+            pi_agent_dir,
+            is_macos: true,
+            injected_fail_point: FAIL_NONE,
+        };
+        let (item, _) = probe_single_adapter(&ctx, "pi");
+        let item = item.unwrap();
+        assert_eq!(item.state, AdapterHealthState::HealthyExistingGlobal);
+        assert_eq!(item.installed_version.as_deref(), Some("0.12.1"));
+        assert_eq!(item.source_kind, AdapterSourceKind::ExistingGlobal);
+    }
+
+    #[test]
+    fn test_8c_npm_and_git_pi_intercom_is_repair_not_duplicate_install() {
+        let dir = tempdir().unwrap();
+        let runner = MockCommandRunner::new();
+        runner.set_bin("pi");
+        let pi_agent_dir = dir.path().join("home/.pi/agent");
+        fs::create_dir_all(&pi_agent_dir).unwrap();
+        let settings_path = pi_agent_dir.join("settings.json");
+        fs::write(
+            &settings_path,
+            format!(
+                r#"{{"packages":["npm:@ctliz/pi-intercom@0.12.1","{}"]}}"#,
+                PI_CANONICAL_GIT_TARGET
+            ),
+        )
+        .unwrap();
+        let ctx = AdapterContext {
+            runner: &runner,
+            home_dir: dir.path().join("home"),
+            config_dir: dir.path().join("config"),
+            pi_agent_dir,
+            is_macos: true,
+            injected_fail_point: FAIL_NONE,
+        };
+        let (item, _) = probe_single_adapter(&ctx, "pi");
+        assert_eq!(item.unwrap().state, AdapterHealthState::NeedsRepair);
+        let plan = check_workspace_adapters_internal(Some(&ctx), vec!["pi".to_string()]).unwrap();
+        apply_workspace_install_plan_internal(
+            None,
+            Some(&ctx),
+            &plan.plan_id,
+            &plan.plan_fingerprint,
+        )
+        .unwrap();
+        let content = fs::read_to_string(settings_path).unwrap();
+        assert!(content.contains("npm:@ctliz/pi-intercom@0.12.1"));
+        assert!(!content.contains(PI_CANONICAL_GIT_TARGET));
     }
 
     #[test]
