@@ -19,7 +19,7 @@ TmuxDeck 是专为多 AI Coding Agent 打造的并行工作区控制台。每个
 - **多 Agent 并行编排。** 每个工作区即为一张卡片，实时展示分屏状态、运行命令与静默时长。
 - **Native Ghostty 原生分屏。** 支持 1/2/4/6 屏无缝网格，每个 Agent 在独立的 tmux session 中运行 — 关闭终端窗口，Agent 在后台持续工作。
 - **兼容经典终端工作流。** 完美支持经典单/多分屏 tmux 布局与系统各类常用终端。
-- **开箱即用常用 Agent。** 运行时自动检测已安装的 Pi、Claude Code、Codex、OpenCode、Gemini CLI、Aider、自定义命令或纯 Shell。
+- **开箱即用常用 Agent。** 运行时自动检测已安装的 Pi、Claude Code、Codex、OpenCode、Grok、Agy、Gemini CLI、Aider、自定义命令或纯 Shell。
 - **一键掌控全局。** 在控制面板上一键新建、启动、恢复或销毁整套工作区与单 Agent 槽位。
 - **常驻系统菜单栏。** 关闭主窗口后继续后台运行 — 状态监测、预览与控制随时一键拉起。
 - **Agent 跨平台通信。** 自动注册至 Agent Intercom 消息总线，实现跨 Harness 发现、实时状态同步与定向消息交互。
@@ -105,7 +105,7 @@ flowchart LR
 
 ## Agent 之间已建立通信。你才是唯一的缺失参与者。
 
-AI Coding Agent 正在形成它们自己的协作层 — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) 为 Pi、Codex、Claude Code 和 OpenCode 提供本地共享 Broker，使它们可以互相发现和发消息。对于 Pi，TmuxDeck 推荐官方 npm 包 [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom)。不要同时再装旧的 `git:github.com/ctliz/agent-intercom-pi`；两份插件会注册同一套工具，Pi 启动即退出。
+AI Coding Agent 正在形成它们自己的协作层 — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) 为 Pi、Codex、Claude Code、OpenCode、Grok 和 Agy 提供本地共享 Broker，使它们可以互相发现和发消息。对于 Pi，TmuxDeck 推荐官方 npm 包 [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom)。不要同时再装旧的 `git:github.com/ctliz/agent-intercom-pi`；两份插件会注册同一套工具，Pi 启动即退出。
 
 但这个总线此前唯独缺少**人类接口**。
 
@@ -136,7 +136,7 @@ TmuxDeck 在该 Broker 上注册为名为 `me` 的会话。Agent 需要决策时
 
 - **会话全局视图。** 每个 tmux 会话展示为卡片，标明窗口数、分屏数、各分屏指令及最后活跃时间。
 - **一键新建工作区。** 指定名称、工作目录、Agent 引擎、分屏数与终端，自动创建分屏并拉起终端。
-- **适配现有环境。** 运行时自动检测已安装的终端与 Agent，未安装的自动隐藏。终端支持：Ghostty、iTerm2、WezTerm、kitty、Alacritty、系统 Terminal。Agent 支持：Claude Code、Codex、OpenCode、Gemini CLI、Aider、Pi 或纯 Shell。
+- **适配现有环境。** 运行时自动检测已安装的终端与 Agent，未安装的自动隐藏。终端支持：Ghostty、iTerm2、WezTerm、kitty、Alacritty、系统 Terminal。Agent 支持：Claude Code、Codex、OpenCode、Grok、Agy、Gemini CLI、Aider、Pi 或纯 Shell。
 - **常驻系统菜单栏。** 关闭窗口后 TmuxDeck 仍在后台运行 — 无需重新打开主窗口即可快捷管理会话或创建工作区。
 - **分屏格精细控制。** 支持独立终止单个分屏/槽位，或一次原子新增 1、2、4 个分屏；Native 工作区只重建一次布局。
 - **按工作区组织移动端对话。** 可信局域网移动端使用后端权威工作区元数据分组 Agent，并提供紧凑的 Markdown 对话、待人工回复置顶、上下文操作与可靠的内容来源标识。
@@ -171,6 +171,8 @@ npm install -g opencode-ai
 | **Claude Code** | macOS 可在“创建工作区”弹窗安装 TmuxDeck 固定版本的托管适配器 (`0.13.0-connect.1`，npm 对应 `@ctliz/agent-intercom-claude@connect`)；不会修改全局 npm。 | 可选“使用托管 Claude”（以 `--tui --safe` 运行）或持久切换为“标准 Claude”。已有全局 `cci` 保持不变，仍可作为自定义命令使用。 |
 | **Codex** | `npm install -g @ctliz/agent-intercom-codex@connect` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @ctliz/agent-intercom-opencode@connect` | 在 `opencode.json` 与 `tui.json` 中配置 `plugin.mjs` 和 `tui.mjs`；`tui.mjs` 提供 `/intercom`、`/intercom-name` 和 `/intercom-id` |
+| **Grok** | 确认 `PATH` 中可执行 `claude-intercom-mcp`，再安装插件。 | 要加入 Auto-Team，MCP child 需要含具体身份/scope 的每 pane 配置；插件没有唤醒桥接，请轮询 `intercom_pending`。 |
+| **AGY** | 确认 `PATH` 中可执行 `claude-intercom-mcp`，再安装插件。 | 宿主必须把每 pane 身份传给 MCP child；插件没有唤醒桥接，请轮询 `intercom_pending`。 |
 
 ### 3. 使用 Intercom 指令
 
@@ -185,6 +187,7 @@ npm install -g opencode-ai
 - **批量回复上下文：** 跨 provider/tool 循环保留回复上下文。同一发送者的普通消息批次默认回复最新消息；多个发送者共存时，需在 `intercom_reply({ to, message })` 中使用精确发送者名称或完整 Session ID。
 - **Claude Code 接入说明：** macOS 可直接在“创建工作区”弹窗离线安装或修复固定版本的 **托管 Claude Intercom** (`0.13.0-connect.1`)。安装器会校验内置资源 SHA-256、拒绝不安全归档项、验证 Claude plugin → Monitor → runtime 完整链路，且不修改全局 npm。每个新建的托管 pane 或 Ghostty native slot 都会显式使用安全模式 (`--tui --safe`) 启动 Claude，并生成密码学随机的 Intercom ID，该 ID 随现有 pane/slot 生命周期保留，并附带可读的工作区/分屏名称；它只是路由元数据，不是认证凭据。“使用标准 Claude”会持久保存；安装/修复或选择“使用托管 Claude”会切回托管模式。Windows/WSL 保持原标准 Claude 行为。已有全局 `cci` 不会被自动视为 Managed，也不会被修改或删除；确有需要可用自定义 Agent 命令启动。自定义命令不会被改写。
 - **OpenCode 接入说明：** 需要同时注册 `plugin.mjs`（服务端插件在 `opencode.json` 中）与 `tui.mjs`（TUI 插件在 `tui.json` 中）。
+- **Grok 与 AGY 接入说明：** 它们是经由 `claude-intercom-mcp` 桥接的外部手动安装插件，必须确保该命令在 `PATH` 中可用。两者没有唤醒桥接；Grok 要加入 Auto-Team 还需要含具体身份和 scope 的隔离每 pane MCP 配置，请主动调用 `intercom_pending` 检查任务。
 - **重命名 OpenCode Intercom 会话：** 执行 `/intercom-name`，或在命令面板选择 **Rename intercom session**；弹窗标题为 **Rename this Intercom session**。模型也可以调用 `intercom_set_name({ name: "<新名称>" })`。该操作只修改其他 Agent 可见的名称，不改变稳定的 Intercom Session ID。
 
 详细配置说明请参阅 [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md)；TmuxDeck 面板启动、身份、MCP、终端能力与故障排查请参阅[CLI 通信指南](docs/GUIDE-cli-communication.zh-CN.md)。
@@ -257,7 +260,7 @@ xattr -cr /Applications/TmuxDeck.app
 
 ## 开发者指南
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发配置、代码规范以及贡献 Communication Connector / Adapter（Pi、Claude、Codex、OpenCode、Orchestrator、Agy）的指南；参见 [docs/](docs/README.md) 了解架构设计、协议参考与决策记录。
+参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发配置、代码规范以及贡献 Communication Connector / Adapter（Pi、Claude、Codex、OpenCode、Grok、Agy、Orchestrator）的指南；参见 [docs/](docs/README.md) 了解架构设计、协议参考与决策记录。
 
 ## 贡献者
 

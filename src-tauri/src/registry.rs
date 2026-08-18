@@ -131,6 +131,7 @@ fn agent_candidate_paths(home: &str, bin: &str) -> Vec<String> {
         format!("/usr/bin/{}", bin),
         format!("{}/.cargo/bin/{}", home, bin),
         format!("{}/.local/bin/{}", home, bin),
+        format!("{}/.grok/bin/{}", home, bin),
         format!("{}/.opencode/bin/{}", home, bin),
     ]
 }
@@ -271,6 +272,8 @@ fn detect_environment_uncached() -> Environment {
         ("codex", "Codex", "codex"),
         ("opencode", "OpenCode", "opencode"),
         ("gemini", "Gemini CLI", "gemini"),
+        ("grok", "Grok Build", "grok"),
+        ("agy", "AGY", "agy"),
         ("aider", "Aider", "aider"),
     ];
 
@@ -381,6 +384,9 @@ mod tests {
 
         let opencode = agent_candidate_paths("/Users/test", "opencode");
         assert!(opencode.contains(&"/Users/test/.opencode/bin/opencode".to_string()));
+
+        let grok = agent_candidate_paths("/Users/test", "grok");
+        assert!(grok.contains(&"/Users/test/.grok/bin/grok".to_string()));
 
         let node = agent_candidate_paths("/Users/test", "node");
         assert!(node.contains(&"/Users/test/.local/bin/node".to_string()));

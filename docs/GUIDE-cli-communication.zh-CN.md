@@ -2,15 +2,17 @@
 
 > 适用版本：TmuxDeck v1.14.3；Agent Intercom Protocol v4。
 >
-> 本文说明 Pi、Claude Code、Codex、OpenCode 如何通过 TmuxDeck 进入同一个本地通信团队，以及每个 CLI 的启动方式、身份、环境变量、故障排查和安全边界。
+> 本文说明 Pi、Claude Code、Codex、OpenCode、Grok、Agy 如何接入本地 Broker，以及各 CLI 的启动方式、身份、环境变量、故障排查和安全边界。
 
 ## 1. 通信架构
 
 ```text
 Pi ───────────┐
 Claude Code ──┤
-Codex ────────┼── 本地 Agent Intercom broker ── Unix socket / named pipe
-OpenCode ─────┘
+Codex ────────┤
+OpenCode ─────┼── 本地 Agent Intercom broker ── Unix socket / named pipe
+Grok ─────────┤
+Agy ──────────┘
                      ▲
                      │
                  TmuxDeck
@@ -68,8 +70,9 @@ TmuxDeck 面板默认对支持的 CLI 使用 bypass 模式，可在创建面板�
 | Claude | `--dangerously-skip-permissions` | 跳过权限确认 |
 | Codex | `--dangerously-bypass-approvals-and-sandbox` | 同时绕过 approvals 和 sandbox，风险最高 |
 | OpenCode | `--auto` | 自动执行模式 |
-| Pi | 无通用 bypass flag | 不注入伪造选项 |
-| Aider / shell | 无通用等价选项 | 自定义命令原样保留 |
+| Grok | `--permission-mode bypassPermissions` | 跳过权限提示 |
+| AGY | `--dangerously-skip-permissions` | 跳过权限确认 |
+| Pi / Aider / shell | 无通用 bypass flag | 不注入伪造选项 |
 
 这些选项只作用于 TmuxDeck 面板生成的默认命令，不会修改用户自定义命令，也不会影响直接在 Ghostty 中启动的 CLI。
 
@@ -164,7 +167,27 @@ MCP 健康检查应至少验证 JSON-RPC `initialize` 响应。若 Codex TUI 没
 3. prompt 是否已经在 ANSI capture 中绘制；
 4. `TERM=tmux-256color` 与直接 Ghostty 的 `TERM=xterm-ghostty` 是否不同。
 
-### 3.4 OpenCode
+### 3.4 Grok 与 Agy
+
+Grok 和 Agy 使用经 Claude MCP bridge 连接的外部手动安装 Intercom 插件；TmuxDeck 不会内置、安装或配置它们。安装前先确认 `PATH` 中可执行 `claude-intercom-mcp`：
+
+```bash
+command -v claude-intercom-mcp
+```
+
+再安装插件提供方给出的插件：
+
+```bash
+# Grok
+grok plugin install <agent-intercom-grok plugin path> --trust
+
+# Agy
+agy plugin install <agent-intercom-agy plugin path>
+```
+
+Grok 的 MCP child 不会继承任意 pane 环境变量。多 pane Auto-Team 需要包含具体身份和 scope 的隔离每 pane MCP 配置；否则 Grok 只使用 live-only fallback 身份。AGY 同样要求宿主把每 pane 身份传给 MCP child。TmuxDeck 无法唤醒它们；请主动调用 `intercom_pending`。
+
+### 3.5 OpenCode
 
 OpenCode 使用两个配置面：
 
@@ -188,7 +211,7 @@ TmuxDeck managed OpenCode 使用 bundled adapter 和 SDK dependency closure，�
 
 ## 4. 常用通信操作
 
-不同 CLI 的 UI 命令略有差异，但协议概念一致：
+不同 CLI 的 UI 命令略有差异，但协议概念一致。Grok 和 AGY 使用插件提供的 Intercom 界面且无法被唤醒，因此应主动调用 `intercom_pending`；Grok 要加入 TmuxDeck Auto-Team 还需要 materialize 的每 pane MCP 配置：
 
 | 操作 | Pi | Claude | Codex | OpenCode |
 |---|---|---|---|---|
@@ -217,7 +240,10 @@ env | egrep '^(PATH|TERM|COLORTERM|TERM_PROGRAM|LANG)='
 which claude
 which codex
 which opencode
+which grok
+which agy
 which pi
+which claude-intercom-mcp
 which npm
 which node
 ```
@@ -278,8 +304,9 @@ tmux capture-pane -p -e -J -t <pane> -S -60
 ## 6. 安全与 provenance
 
 - Codex bypass 会同时绕过 approvals 和 sandbox；只在可信项目目录使用。
-- OpenCode `--auto` 和 Claude bypass 也会降低人工确认；可在 TmuxDeck 创建面板时关闭 bypass。
-- 自定义命令原样保留，TmuxDeck 不为 Aider/shell 猜测危险 flag。
+- OpenCode `--auto`、Grok bypass、AGY bypass 和 Claude bypass 也会降低人工确认；可在 TmuxDeck 创建面板时关闭 bypass。
+- 自定义命令原样保留，TmuxDeck 不为 Pi、Aider 或 shell 猜测危险 flag。
+- Grok 和 AGY 插件仅支持外部手动安装。它们要求 `PATH` 中存在 `claude-intercom-mcp`，由 TmuxDeck 注入每 pane 身份，必须轮询 `intercom_pending`，不能依赖唤醒机制。
 - managed adapter 使用 bundled artifact、固定版本和 SHA-256；不要用未经授权的 registry 或网络包替换 release resource。
-- Core、Pi、Claude、Codex、OpenCode 必须使用相容的 protocol-v4 版本；混用旧 Core 或旧 adapter 可能形成互不可见的 broker island。
+- Core、Pi、Claude、Codex、OpenCode 与 Grok/Agy bridge 插件必须使用相容的 protocol-v4 版本；混用旧 Core 或旧 adapter 可能形成互不可见的 broker island。
 - 不要把 session ID、team manifest 或 broker token 当作公开凭据；它们属于本地同用户运行时身份和路由数据。

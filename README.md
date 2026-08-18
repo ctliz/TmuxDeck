@@ -19,7 +19,7 @@ Built with [Tauri](https://tauri.app/). macOS is the primary platform; Windows w
 - **Orchestrate many agents at once.** Every workspace is a card; every pane shows what's running and how long it has been quiet.
 - **Native Ghostty splits.** 1/2/4/6-pane grids, each agent in its own tmux session — close the window, the agent keeps working.
 - **Plays well with classic setups.** Plain terminals and tmux multi-pane layouts are fully supported.
-- **Runs what you already use.** Pi, Claude Code, Codex, OpenCode, Gemini CLI, Aider, custom commands, or a plain shell — detected at runtime.
+- **Runs what you already use.** Pi, Claude Code, Codex, OpenCode, Grok, Agy, Gemini CLI, Aider, custom commands, or a plain shell — detected at runtime.
 - **One-click control.** Create, start, resume, kill a single agent, or destroy a whole workspace from the dashboard.
 - **Lives in the menu bar.** Close the window and it keeps running — status, previews, and control stay one click away.
 - **Agents find each other.** Registers on the Agent Intercom broker for cross-harness discovery, live status, and directed messaging.
@@ -105,7 +105,7 @@ flowchart LR
 
 ## Agents already talk to each other. You were the missing participant.
 
-Coding agents are growing their own coordination layer — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) gives Pi, Codex, Claude Code, and OpenCode sessions a shared local broker so they can find and message each other. For Pi, TmuxDeck recommends the official npm package [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom). Do not also install the older `git:github.com/ctliz/agent-intercom-pi` source; two copies register the same tools and Pi exits on launch.
+Coding agents are growing their own coordination layer — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) gives Pi, Codex, Claude Code, OpenCode, Grok, and Agy sessions a shared local broker so they can find and message each other. For Pi, TmuxDeck recommends the official npm package [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom). Do not also install the older `git:github.com/ctliz/agent-intercom-pi` source; two copies register the same tools and Pi exits on launch.
 
 What that bus has no adapter for is **the human**.
 
@@ -138,7 +138,7 @@ Shipped today:
 
 - **Session overview.** Every tmux session is a card with window count, pane count, per-pane commands, and last-activity time.
 - **One-click workspace creation.** Name a session, pick a directory, choose an agent, a pane count, and a terminal. Panes are created and the terminal opens automatically.
-- **Works with what you have.** Terminals and agents are detected at runtime; uninstalled ones are hidden. Terminals: Ghostty, iTerm2, WezTerm, kitty, Alacritty, system Terminal. Agents: Claude Code, Codex, OpenCode, Gemini CLI, Aider, Pi, or a plain shell.
+- **Works with what you have.** Terminals and agents are detected at runtime; uninstalled ones are hidden. Terminals: Ghostty, iTerm2, WezTerm, kitty, Alacritty, system Terminal. Agents: Claude Code, Codex, OpenCode, Grok, Agy, Gemini CLI, Aider, Pi, or a plain shell.
 - **Lives in the menu bar.** Close the window and TmuxDeck keeps running — open a session, add a pane, or create a workspace without reopening the main window.
 - **Pane-level control.** Hover a pane preview to kill just that pane, or add 1, 2, or 4 panes in one atomic action; native workspaces rebuild their layout only once.
 - **Workspace-aware mobile conversations.** The trusted-LAN mobile view groups Agents by authoritative workspace metadata and offers compact Markdown chat, awaiting-human prioritization, context actions, and safe transcript-source labeling.
@@ -175,6 +175,8 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 | **Claude Code** | On macOS, install TmuxDeck's pinned Managed Adapter (`0.13.0-connect.1`) from the Create Workspace modal (npm `@ctliz/agent-intercom-claude@connect` = `0.13.0-connect.1`); global npm is not changed. | Choose **Use Managed** (runs with `--tui --safe`) or persistently switch to **Standard Claude**. A global `cci` is left untouched and may still be used as a custom command. |
 | **Codex** | `npm install -g @ctliz/agent-intercom-codex@connect` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @ctliz/agent-intercom-opencode@connect` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json`; `tui.mjs` adds `/intercom`, `/intercom-name`, and `/intercom-id` |
+| **Grok** | Ensure `claude-intercom-mcp` is on `PATH`, then install the plugin. | The MCP child needs a per-pane config with concrete identity/scope values to join Auto-Team; it has no wake bridge, so poll `intercom_pending`. |
+| **AGY** | Ensure `claude-intercom-mcp` is on `PATH`, then install the plugin. | The host must pass each pane's identity to its MCP child; it has no wake bridge, so poll `intercom_pending`. |
 
 ### 3. Use Intercom
 
@@ -189,6 +191,7 @@ Communicate across agent sessions using the shared broker:
 - **Reply batches:** Reply context is preserved across provider/tool loops. Same-sender ordinary batches reply to the latest message; batches from multiple senders require the exact sender name or full session ID in `intercom_reply({ to, message })`.
 - **Claude Code integration:** On macOS, TmuxDeck can install or repair its offline, pinned **Managed Claude Intercom** adapter (`0.13.0-connect.1`) from the Create Workspace modal. The installer verifies the bundled SHA-256, rejects unsafe archive entries, validates the Claude plugin → Monitor → runtime chain, and never modifies global npm. Each newly created managed pane or Ghostty native slot starts Claude in explicit safe permission mode (`--tui --safe`) and gets a cryptographically random Intercom ID that remains attached to that pane/slot for its lifetime, plus a readable workspace/pane name. This ID is routing metadata, not an authentication credential. **Use Standard Claude** is persistent; installing/repairing or choosing **Use Managed** switches back. Windows/WSL keeps Standard Claude behavior. Existing global `cci` installations are not selected as Managed, changed, or removed; use a custom Agent command if you intentionally want one. Custom commands are never rewritten.
 - **OpenCode integration:** Requires registering both `plugin.mjs` (in `opencode.json`) and `tui.mjs` (in `tui.json`).
+- **Grok and AGY integrations:** These are external, manually installed plugins that bridge through `claude-intercom-mcp`, which must be on `PATH`. Neither has a wake bridge. Grok additionally requires an isolated per-pane MCP config with concrete identity and scope values for Auto-Team; use `intercom_pending` proactively to check for work.
 - **Rename an OpenCode Intercom session:** Run `/intercom-name`, or choose **Rename intercom session** in the command palette; the prompt is titled **Rename this Intercom session**. The model can also call `intercom_set_name({ name: "<new-name>" })`. This changes only the discoverable name, not the stable Intercom session ID.
 
 See [docs/GUIDE-cross-harness-agent-intercom.md](docs/GUIDE-cross-harness-agent-intercom.md) for complete configuration instructions, or the [CLI communication guide](docs/GUIDE-cli-communication.md) for TmuxDeck startup, identity, MCP, terminal, and troubleshooting details.
@@ -261,7 +264,7 @@ Linux is not supported yet. Windows works through WSL and ships the same install
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code conventions, and guidelines on contributing communication connectors / adapters (Pi, Claude, Codex, OpenCode, Orchestrator, Agy). See [docs/](docs/README.md) for architecture, protocol reference, and decision records.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code conventions, and guidelines on contributing communication connectors / adapters (Pi, Claude, Codex, OpenCode, Grok, Agy, Orchestrator). See [docs/](docs/README.md) for architecture, protocol reference, and decision records.
 
 ## Contributors
 

@@ -152,7 +152,8 @@ export type CommunicationAdapterKind =
   | "pi-extension"
   | "claude-plugin-monitor"
   | "codex-mcp"
-  | "opencode-plugin";
+  | "opencode-plugin"
+  | "claude-mcp";
 
 export type AdapterSourceKind =
   | "bundled"

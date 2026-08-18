@@ -403,7 +403,8 @@ pub(crate) fn panel_agent_command(
         "claude" => "--dangerously-skip-permissions",
         "codex" => "--dangerously-bypass-approvals-and-sandbox",
         "opencode" => "--auto",
-        // agy/Gemini are intentionally deferred to v1.15.0.
+        "agy" => "--dangerously-skip-permissions",
+        "grok" => "--permission-mode bypassPermissions",
         _ => return command.to_string(),
     };
     if shell_words(command).iter().any(|token| token == flag) {
@@ -640,7 +641,14 @@ mod tests {
             "opencode --auto"
         );
         assert_eq!(panel_agent_command("pi", "pi", true), "pi");
-        assert_eq!(panel_agent_command("agy", "agy", true), "agy");
+        assert_eq!(
+            panel_agent_command("agy", "agy", true),
+            "agy --dangerously-skip-permissions"
+        );
+        assert_eq!(
+            panel_agent_command("grok", "grok", true),
+            "grok --permission-mode bypassPermissions"
+        );
         assert_eq!(
             panel_agent_command("custom", "claude --custom", true),
             "claude --custom"

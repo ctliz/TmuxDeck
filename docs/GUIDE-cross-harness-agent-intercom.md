@@ -1,16 +1,18 @@
 # Cross-Harness Agent Intercom Usage Guide
 
-> Scope: Pi, OpenCode, Codex, and Claude Code on the same machine, under the same OS user.
+> Scope: Pi, OpenCode, Codex, Claude Code, Grok, and Agy on the same machine, under the same OS user.
 >
-> The four adapters share Agent Intercom protocol v4, the local broker, and the runtime directory, so they can perform targeted `list` / `send` / `ask` / `reply` across harnesses. It is not a public-internet messaging service, nor a broadcast chat room.
+> The six integrations share Agent Intercom protocol v4, the local broker, and the runtime directory, so they can perform targeted `list` / `send` / `ask` / `reply` across harnesses. It is not a public-internet messaging service, nor a broadcast chat room.
 
 ## 1. Core model
 
 ```text
 Pi ───────────┐
-OpenCode ─────┼── ~/.pi/agent/intercom/broker.sock ── local broker
+OpenCode ─────┤
 Codex ────────┤
-Claude Code ──┘
+Claude Code ──┼── ~/.pi/agent/intercom/broker.sock ── local broker
+Grok ─────────┤
+Agy ──────────┘
 ```
 
 - The first adapter to connect starts the broker automatically, so Pi does not have to start first.
@@ -35,7 +37,7 @@ It contains `broker.sock`, `broker.pid`, `broker.owner`, `broker-asks.json`, `in
 
 ## 2. Version and installation principles
 
-All active sides must use protocol-v4-compatible `agent-intercom-*` adapters (`ctliz` ecosystem, with `@dataforxyz` provenance). Mixing incompatible protocol versions can form broker "islands" that cannot see each other.
+All active sides must use protocol-v4-compatible `agent-intercom-*` adapters or their supported bridge plugins (`ctliz` ecosystem, with `@dataforxyz` provenance). Mixing incompatible protocol versions can form broker "islands" that cannot see each other.
 
 **Installed adapters only:** Coordinated upgrades apply only to the adapters currently installed and in use on your machine. You do not need to install adapters for uninstalled harnesses.
 
@@ -105,7 +107,27 @@ Notes:
 - After config or package changes, fully quit and restart OpenCode; the TUI plugin cannot be hot-reloaded the way Pi's `/reload` does.
 - Plain workers need no wrapper; run `opencode` directly.
 
-### 2.3 Codex
+### 2.3 Grok and Agy
+
+Grok and Agy use external, manually installed plugins through the Claude MCP bridge. Before installing either plugin, verify that `claude-intercom-mcp` is available on `PATH`:
+
+```bash
+command -v claude-intercom-mcp
+```
+
+Install the plugin supplied by its provider:
+
+```bash
+# Grok
+grok plugin install <agent-intercom-grok plugin path> --trust
+
+# Agy
+agy plugin install <agent-intercom-agy plugin path>
+```
+
+Grok's MCP child does not inherit arbitrary pane identity variables. To join Auto-Team it needs an isolated per-pane MCP config containing concrete `CLAUDE_INTERCOM_SESSION_ID`, `CLAUDE_INTERCOM_NAME`, and scope values; the default plugin runs with a live-only fallback identity. AGY likewise needs its host to pass the pane identity into its MCP child. Neither is wakeable by TmuxDeck, so poll `intercom_pending` proactively.
+
+### 2.4 Codex
 
 Install the global adapter:
 
@@ -133,7 +155,7 @@ The package also provides:
 
 After updating, restart ordinary Codex sessions and all `coi` workers.
 
-### 2.4 Claude Code
+### 2.5 Claude Code
 
 On macOS, select Claude Code in TmuxDeck's **Create Workspace** modal and choose **Install Managed Adapter**. TmuxDeck installs its pinned adapter from the app bundle without contacting npm or changing any global npm package. The same control becomes **Repair Managed Adapter** if health verification fails.
 
@@ -220,7 +242,11 @@ codex mcp add <mcp-name> \
 
 Do not let two concurrent Codex processes share one pinned ID; in a multi-worker scenario, give each worker its own `coi --id`.
 
-### 3.4 Claude Code
+### 3.4 Grok and AGY
+
+TmuxDeck passes per-pane identity into the plugin hosts, but Grok requires a materialized, isolated MCP config to carry concrete identity and scope values into its child. Until that per-pane config is supplied, use Grok only as a standalone peer. Neither plugin is wakeable: call `intercom_pending` periodically to read inbound work.
+
+### 3.5 Claude Code
 
 Start wakeable workers with `cci` or `ccim`:
 
@@ -269,6 +295,7 @@ A runtime rename only updates the `name` visible to other peers; **it does not c
 | OpenCode | `/intercom-name` opens a rename input, or call `intercom_set_name({ name: "<new-name>" })` | keep setting `OPENCODE_INTERCOM_NAME` |
 | Codex ordinary MCP session | configured via `CODEX_INTERCOM_NAME` / `AGENT_INTERCOM_SESSION_NAME` before launch; `--name` for `coi` workers | keep setting `CODEX_INTERCOM_NAME` |
 | Claude Code ordinary MCP session | configured via `CLAUDE_INTERCOM_NAME` / `AGENT_INTERCOM_SESSION_NAME` before launch; `--name` for `cci` / `ccim` workers | keep setting `CLAUDE_INTERCOM_NAME` |
+| Grok / AGY plugin | Per-pane MCP configuration / host environment | No runtime rename command; Grok needs a materialized config to receive its launch identity |
 
 **How the OpenCode rename entry works:** `tui.mjs` registers the `/intercom-name` slash command and the **Rename intercom session** command-palette action. Selecting it opens a prompt titled **Rename this Intercom session**. After confirmation, the TUI plugin sends a private local control request (`{ type: "set_name", name }`) to the already-connected `plugin.mjs` server plugin. The server calls `runtime.setName`, updates the name published in broker presence, and keeps the existing stable Intercom session ID. The same runtime operation is exposed to the model as `intercom_set_name({ name: "<new-name>" })`; no second broker connection or identity is created.
 
@@ -381,7 +408,7 @@ intercom_reply({
 
 ## 7. `PI_CODING_AGENT_DIR`
 
-All four adapters read `PI_CODING_AGENT_DIR`, which replaces the default `~/.pi/agent` base directory entirely:
+Pi, OpenCode, Codex, and Claude Code adapters read `PI_CODING_AGENT_DIR`, which replaces the default `~/.pi/agent` base directory entirely:
 
 ```bash
 export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
@@ -418,7 +445,7 @@ Recommended troubleshooting order:
 
 1. Run `intercom_status({})` on the current side.
 2. Confirm all sides use the same `PI_CODING_AGENT_DIR`.
-3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers.
+3. Confirm the adapter is loaded: Pi extension, OpenCode's two plugins, Codex/Claude MCP or wrappers; Grok/Agy require their manually installed plugin and `claude-intercom-mcp` on `PATH`.
 4. Confirm Pi has exactly one Intercom package: `npm:@ctliz/pi-intercom@0.12.1`. Remove any leftover `git:github.com/ctliz/agent-intercom-pi` entry before rechecking.
 5. Run `/reload` in every open Pi session; fully restart Claude (`cci`), Codex (`coi`), and OpenCode companion adapters so the protocol-v4 broker can restart cleanly.
 6. Run `intercom_list({})` for the current workspace. Use the exact full ID for intentional cross-workspace routing.
@@ -446,6 +473,7 @@ Claude package:     @ctliz/agent-intercom-claude@connect (0.13.0-connect.1, --tu
 Codex package:      @ctliz/agent-intercom-codex@connect (0.12.0-connect.1)
 OpenCode package:   @ctliz/agent-intercom-opencode@connect (0.12.0-connect.1)
 Core internal:      @ctliz/agent-intercom-core@0.2.0
+Grok / AGY:         manual bridge plugins; claude-intercom-mcp on PATH; TmuxDeck injects per-pane identity
 Protocol:           v4 (broker-enforced workspace scoping & Zero-Manual-Join Auto-Team)
 ```
 

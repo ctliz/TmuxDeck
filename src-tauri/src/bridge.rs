@@ -29,6 +29,8 @@ pub enum AgentKind {
     ClaudeCode,
     Codex,
     OpenCode,
+    Grok,
+    Agy,
     Gemini,
     Aider,
     Shell,
@@ -47,6 +49,8 @@ impl AgentKind {
             "claude" | "claude-code" | "cci" | "ccim" => AgentKind::ClaudeCode,
             "codex" | "coi" => AgentKind::Codex,
             "opencode" => AgentKind::OpenCode,
+            "grok" => AgentKind::Grok,
+            "agy" => AgentKind::Agy,
             "gemini" => AgentKind::Gemini,
             "aider" => AgentKind::Aider,
             "bash" | "zsh" | "fish" | "sh" => AgentKind::Shell,
@@ -62,7 +66,12 @@ impl AgentKind {
     pub fn intercom_capable(self) -> bool {
         matches!(
             self,
-            AgentKind::Pi | AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::OpenCode
+            AgentKind::Pi
+                | AgentKind::ClaudeCode
+                | AgentKind::Codex
+                | AgentKind::OpenCode
+                | AgentKind::Grok
+                | AgentKind::Agy
         )
     }
 }
@@ -761,6 +770,10 @@ mod tests {
             AgentKind::from_command("/usr/local/bin/codex"),
             AgentKind::Codex
         );
+        assert_eq!(AgentKind::from_command("grok"), AgentKind::Grok);
+        assert_eq!(AgentKind::from_command("agy"), AgentKind::Agy);
+        assert!(AgentKind::Grok.intercom_capable());
+        assert!(AgentKind::Agy.intercom_capable());
         assert_eq!(AgentKind::from_command("zsh"), AgentKind::Shell);
         assert_eq!(AgentKind::from_command("vim"), AgentKind::Unknown);
     }

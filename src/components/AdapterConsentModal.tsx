@@ -26,7 +26,14 @@ export interface AdapterConsentModalProps {
 }
 
 function manualKeysFor(agentId: string): { hint: string; cmd: string } | null {
-  if (agentId === "pi" || agentId === "claude" || agentId === "codex" || agentId === "opencode") {
+  if (
+    agentId === "pi" ||
+    agentId === "claude" ||
+    agentId === "codex" ||
+    agentId === "opencode" ||
+    agentId === "grok" ||
+    agentId === "agy"
+  ) {
     return {
       hint: `consent.manual.${agentId}`,
       cmd: `consent.manual.${agentId}.cmd`,

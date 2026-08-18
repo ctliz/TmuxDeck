@@ -89,7 +89,8 @@ TmuxDeck integrates with coding agents via **Agent Intercom Protocol v4** and **
 | `@ctliz/agent-intercom-codex` | **Codex** (`codex`) | MCP server integration (`codex-server.mjs`), bridge daemon, multi-agent turns |
 | `@ctliz/agent-intercom-opencode` | **OpenCode** (`opencode`) | Managed plugin, scope isolation, live event dispatch |
 | `@ctliz/agent-intercom-orchestrator` | **Orchestrator** | Multi-agent coordination, peer roster management, team lifecycle |
-| `@ctliz/agent-intercom-agy` | **Agy** (`Antigravity CLI`) | *(Planned v1.15.0)* Direct Antigravity CLI bridge & messaging |
+| `agent-intercom-grok` | **Grok Build** (`grok`) | Manual MCP bridge plugin using `claude-intercom-mcp`; receives per-pane identity from TmuxDeck |
+| `agent-intercom-agy` | **AGY** (`agy`) | Manual MCP bridge plugin using `claude-intercom-mcp`; receives per-pane identity from TmuxDeck |
 
 ---
 
@@ -180,7 +181,7 @@ When submitting a PR for a new or updated connector/adapter, include the followi
 ```markdown
 ### Connector / Adapter Contribution Details
 
-- [ ] **Target Harness**: [e.g., Pi / Claude / Codex / OpenCode / Orchestrator / Agy]
+- [ ] **Target Harness**: [e.g., Pi / Claude / Codex / OpenCode / Grok / AGY / Orchestrator]
 - [ ] **Canonical Source Repository**: [URL]
 - [ ] **Release Tag & Commit SHA**: `vX.Y.Z` (`<commit-hash>`)
 - [ ] **Tarball Digest**: SHA-256 `<sha256>`

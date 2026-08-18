@@ -2,15 +2,17 @@
 
 > Applies to TmuxDeck v1.14.3 and Agent Intercom Protocol v4.
 >
-> This guide explains how Pi, Claude Code, Codex, and OpenCode join a TmuxDeck workspace, communicate through the local broker, expose identity, and troubleshoot installation, MCP, terminal, and TUI issues.
+> This guide explains how Pi, Claude Code, Codex, OpenCode, Grok, and Agy join the local broker, expose identity, and troubleshoot installation, MCP, terminal, and TUI issues.
 
 ## 1. Communication architecture
 
 ```text
 Pi ───────────┐
 Claude Code ──┤
-Codex ────────┼── local Agent Intercom broker ── Unix socket / named pipe
-OpenCode ─────┘
+Codex ────────┤
+OpenCode ─────┼── local Agent Intercom broker ── Unix socket / named pipe
+Grok ─────────┤
+Agy ──────────┘
                      ▲
                      │
                  TmuxDeck
@@ -68,8 +70,9 @@ TmuxDeck enables bypass mode by default for supported Agents and exposes a creat
 | Claude | `--dangerously-skip-permissions` | Skips permission prompts |
 | Codex | `--dangerously-bypass-approvals-and-sandbox` | Bypasses approvals and the sandbox; highest risk |
 | OpenCode | `--auto` | Automatic execution mode |
-| Pi | No generic bypass flag | No fabricated option is injected |
-| Aider / shell | No generic equivalent | Custom commands remain unchanged |
+| Grok | `--permission-mode bypassPermissions` | Bypasses permission prompts |
+| AGY | `--dangerously-skip-permissions` | Skips permission prompts |
+| Pi / Aider / shell | No generic bypass flag | No fabricated option is injected |
 
 These options apply only to TmuxDeck-generated default commands. They do not alter custom commands or CLIs launched directly in Ghostty.
 
@@ -164,7 +167,27 @@ A healthy MCP path should pass a JSON-RPC `initialize` handshake. If the Codex T
 3. a prompt that is already present in ANSI capture;
 4. a terminal identity difference between `TERM=tmux-256color` and direct Ghostty `TERM=xterm-ghostty`.
 
-### 3.4 OpenCode
+### 3.4 Grok and Agy
+
+Grok and Agy use external, manually installed Intercom plugins through the Claude MCP bridge; TmuxDeck does not bundle, install, or configure them. Before installing, confirm that `claude-intercom-mcp` is on `PATH`:
+
+```bash
+command -v claude-intercom-mcp
+```
+
+Then install the plugin supplied by its provider:
+
+```bash
+# Grok
+grok plugin install <agent-intercom-grok plugin path> --trust
+
+# Agy
+agy plugin install <agent-intercom-agy plugin path>
+```
+
+Grok's MCP child does not inherit arbitrary pane environment variables. A multi-pane Auto-Team needs an isolated per-pane MCP config with concrete identity and scope values; without it Grok uses a live-only fallback identity. AGY likewise requires its host to propagate each pane identity to its MCP child. TmuxDeck cannot wake either plugin; call `intercom_pending` proactively.
+
+### 3.5 OpenCode
 
 OpenCode has two plugin surfaces:
 
@@ -188,7 +211,7 @@ Managed OpenCode uses the bundled adapter and SDK dependency closure. Installati
 
 ## 4. Common communication operations
 
-The UI command names differ slightly, but the protocol operations are shared:
+The UI command names differ slightly, but the protocol operations are shared. Grok and AGY expose their plugin-provided Intercom interface and cannot be woken, so call `intercom_pending` proactively. Grok needs a materialized per-pane MCP config before it can join a TmuxDeck Auto-Team:
 
 | Operation | Pi | Claude | Codex | OpenCode |
 |---|---|---|---|---|
@@ -217,7 +240,10 @@ env | egrep '^(PATH|TERM|COLORTERM|TERM_PROGRAM|LANG)='
 which claude
 which codex
 which opencode
+which grok
+which agy
 which pi
+which claude-intercom-mcp
 which npm
 which node
 ```
@@ -278,8 +304,9 @@ If `capture-pane -p -e` already contains `›`, `>`, or another prompt ANSI sequ
 ## 6. Security and provenance
 
 - Codex bypass disables both approvals and its sandbox; use it only in trusted project directories.
-- OpenCode `--auto` and Claude bypass also reduce human confirmation; disable bypass when safer prompting is required.
-- Custom commands are preserved; TmuxDeck does not guess dangerous flags for Aider or shell.
+- OpenCode `--auto`, Grok bypass, AGY bypass, and Claude bypass also reduce human confirmation; disable bypass when safer prompting is required.
+- Custom commands are preserved; TmuxDeck does not guess dangerous flags for Pi, Aider, or shell.
+- Grok and AGY plugins are external/manual only. They require `claude-intercom-mcp` on `PATH`, receive their per-pane identity from TmuxDeck, and must poll `intercom_pending` rather than rely on a wake-up.
 - Managed adapters use bundled artifacts, fixed versions, and SHA-256 verification. Do not replace release resources with unauthorized registry or network packages.
-- Core, Pi, Claude, Codex, and OpenCode must use compatible protocol-v4 versions. Mixing an older Core or adapter can create broker islands that cannot see one another.
+- Core, Pi, Claude, Codex, OpenCode, and the Grok/Agy bridge plugins must use compatible protocol-v4 versions. Mixing an older Core or adapter can create broker islands that cannot see one another.
 - Session IDs, team manifests, and broker data are local runtime routing data, not public credentials.

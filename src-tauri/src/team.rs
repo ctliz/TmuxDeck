@@ -651,6 +651,8 @@ pub fn build_pane_team_env(opts: &PaneTeamEnvOpts) -> Vec<(String, String)> {
         "pi" => "Pi",
         "codex" => "Codex",
         "opencode" => "OpenCode",
+        "grok" => "Grok Build",
+        "agy" => "AGY",
         "shell" => "Shell",
         other => other,
     };
@@ -681,7 +683,7 @@ pub fn build_pane_team_env(opts: &PaneTeamEnvOpts) -> Vec<(String, String)> {
                 opts.session_id.to_string(),
             ));
         }
-        "claude" => {
+        "claude" | "grok" | "agy" => {
             envs.push((
                 "CLAUDE_INTERCOM_SESSION_ID".to_string(),
                 opts.session_id.to_string(),
@@ -1108,6 +1110,8 @@ mod tests {
             ("codex", "CODEX_INTERCOM_SESSION_ID", Some("CODEX_INTERCOM_NAME")),
             ("opencode", "OPENCODE_INTERCOM_SESSION_ID", Some("OPENCODE_INTERCOM_NAME")),
             ("claude", "CLAUDE_INTERCOM_SESSION_ID", Some("CLAUDE_INTERCOM_NAME")),
+            ("grok", "CLAUDE_INTERCOM_SESSION_ID", Some("CLAUDE_INTERCOM_NAME")),
+            ("agy", "CLAUDE_INTERCOM_SESSION_ID", Some("CLAUDE_INTERCOM_NAME")),
             ("pi", "PI_INTERCOM_SESSION_ID", None),
         ] {
             let opts = PaneTeamEnvOpts {
@@ -1129,6 +1133,8 @@ mod tests {
                     "codex" => "Codex",
                     "opencode" => "OpenCode",
                     "claude" => "Claude",
+                    "grok" => "Grok Build",
+                    "agy" => "AGY",
                     _ => "",
                 }));
             }
