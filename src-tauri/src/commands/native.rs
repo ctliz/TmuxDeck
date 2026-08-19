@@ -636,7 +636,9 @@ pub(crate) fn swap_native_slots(target_a: &str, target_b: &str) -> Result<(), St
     let number_b = slot_b
         .parse::<usize>()
         .map_err(|_| "ERR_PANE_INVALID".to_string())?;
-    validate_visible_slot_swap(&visible, number_a, number_b)?;
+    if !visible.is_empty() {
+        validate_visible_slot_swap(&visible, number_a, number_b)?;
+    }
 
     for (target, slot) in [(target_a, slot_b.as_str()), (target_b, slot_a.as_str())] {
         let output = run_tmux(&[
@@ -661,19 +663,22 @@ pub(crate) fn swap_native_slots(target_a: &str, target_b: &str) -> Result<(), St
         }
     }
 
-    let swapped = list_native_slots(workspace_a)?;
-    // 元数据交换后按 slot 升序重建；get_tmux_sessions 同样按 slot 排序，
-    // 因此 Ghostty 视觉位置与刷新后的卡片 pane 顺序保持一致。
-    let target_slots: Vec<_> = visible
-        .iter()
-        .filter_map(|number| {
-            swapped
-                .iter()
-                .find(|slot| slot.slot.parse::<usize>().ok() == Some(*number))
-                .cloned()
-        })
-        .collect();
-    rebuild_native_workspace(workspace_a, &target_slots)
+    if !visible.is_empty() {
+        let swapped = list_native_slots(workspace_a)?;
+        // 元数据交换后按 slot 升序重建；get_tmux_sessions 同样按 slot 排序，
+        // 因此 Ghostty 视觉位置与刷新后的卡片 pane 顺序保持一致。
+        let target_slots: Vec<_> = visible
+            .iter()
+            .filter_map(|number| {
+                swapped
+                    .iter()
+                    .find(|slot| slot.slot.parse::<usize>().ok() == Some(*number))
+                    .cloned()
+            })
+            .collect();
+        rebuild_native_workspace(workspace_a, &target_slots)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn rename_native_workspace(old_name: &str, new_name: &str) -> Result<bool, String> {

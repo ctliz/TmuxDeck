@@ -65,6 +65,12 @@ export interface AgentTerminalCanvasProps {
   selectedTerminal?: string;
   onOpenExternalTerminal?: (sessionName: string, termId?: string) => void;
   onAddPane?: (name: string, agentId: string, count: number) => Promise<void>;
+  onSwapPane?: (
+    paneIdA: string,
+    paneIdB: string,
+    sessionTargetA?: string,
+    sessionTargetB?: string
+  ) => Promise<void>;
 }
 
 interface SelectionRange {
@@ -163,6 +169,14 @@ interface SinglePaneCanvasProps {
   onFocus: () => void;
   onMaximize?: () => void;
   onStatusChange?: (status: "connecting" | "attached" | "exited" | "error") => void;
+  isDraggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
 }
 
 function SinglePaneCanvas({
@@ -174,6 +188,14 @@ function SinglePaneCanvas({
   onFocus,
   onMaximize,
   onStatusChange,
+  isDraggable,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+  isDragging,
+  isDragOver,
 }: SinglePaneCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -940,8 +962,27 @@ function SinglePaneCanvas({
     >
       {/* Mini Pane Titlebar for Grid & List modes */}
       {!isFocusLayout && (
-        <div className="flex items-center justify-between px-3.5 py-1.5 bg-black/40 border-b border-white/10 select-none shrink-0">
-          <div className="flex items-center space-x-2 min-w-0">
+        <div
+          draggable={isDraggable}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
+          className={`flex items-center justify-between px-3.5 py-1.5 bg-black/40 border-b border-white/10 select-none shrink-0 transition-colors ${
+            isDraggable ? "cursor-grab active:cursor-grabbing" : ""
+          } ${
+            isDragging
+              ? "opacity-30 border-cyan-400 border-dashed"
+              : isDragOver
+              ? "bg-cyan-500/20"
+              : ""
+          }`}
+        >
+          <div className="flex items-center space-x-2 min-w-0 pointer-events-none">
+            {isDraggable && (
+              <span className="text-[10px] text-slate-500">⠿</span>
+            )}
             <span className="font-mono text-[10px] text-slate-400 font-semibold shrink-0">
               {pane.slot ? `Slot ${pane.slot}` : `#${paneIndex + 1}`}
             </span>
@@ -954,7 +995,7 @@ function SinglePaneCanvas({
             </span>
           </div>
 
-          <div className="flex items-center space-x-1.5 shrink-0">
+          <div className="flex items-center space-x-1.5 shrink-0 pointer-events-auto">
             {onMaximize && (
               <button
                 type="button"
@@ -1017,6 +1058,7 @@ export function AgentTerminalCanvas({
   selectedTerminal,
   onOpenExternalTerminal,
   onAddPane,
+  onSwapPane,
 }: AgentTerminalCanvasProps) {
   const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
   const [termStatus, setTermStatus] = useState<"connecting" | "attached" | "exited" | "error">("connecting");
@@ -1026,6 +1068,76 @@ export function AgentTerminalCanvas({
   const [showAddPaneMenu, setShowAddPaneMenu] = useState(false);
   const [addPaneCount, setAddPaneCount] = useState(1);
   const [addingPanes, setAddingPanes] = useState(false);
+
+  // Tab/Pane drag & drop swap state
+  const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null);
+  const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
+  const isPaneDraggingRef = useRef(false);
+
+  const handlePaneDragStart = (e: React.DragEvent, pane: TmuxPane) => {
+    if (session.panes.length <= 1) return;
+    e.stopPropagation();
+    isPaneDraggingRef.current = true;
+    setDraggingPaneId(pane.id);
+    e.dataTransfer.setData(
+      "application/x-tmuxdeck-pane",
+      JSON.stringify({
+        sessionId: session.id,
+        paneId: pane.id,
+        sessionTarget: pane.session_target,
+      })
+    );
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handlePaneDragOver = (e: React.DragEvent, pane: TmuxPane) => {
+    if (!isPaneDraggingRef.current || session.panes.length <= 1) return;
+    if (draggingPaneId && draggingPaneId !== pane.id) {
+      e.stopPropagation();
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOverPaneId(pane.id);
+    }
+  };
+
+  const handlePaneDragLeave = (e: React.DragEvent, pane: TmuxPane) => {
+    e.stopPropagation();
+    if (dragOverPaneId === pane.id) {
+      setDragOverPaneId(null);
+    }
+  };
+
+  const handlePaneDrop = (e: React.DragEvent, targetPane: TmuxPane) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDragOverPaneId(null);
+    setDraggingPaneId(null);
+    isPaneDraggingRef.current = false;
+
+    const rawData = e.dataTransfer.getData("application/x-tmuxdeck-pane");
+    if (!rawData || !onSwapPane) return;
+
+    try {
+      const data = JSON.parse(rawData);
+      if (data.paneId !== targetPane.id) {
+        onSwapPane(
+          data.paneId,
+          targetPane.id,
+          data.sessionTarget,
+          targetPane.session_target
+        );
+      }
+    } catch (err) {
+      console.error("Pane drag drop swap error", err);
+    }
+  };
+
+  const handlePaneDragEnd = (e: React.DragEvent) => {
+    e.stopPropagation();
+    setDraggingPaneId(null);
+    setDragOverPaneId(null);
+    isPaneDraggingRef.current = false;
+  };
 
   const runningAgentIds = session.panes
     .map((pane) => resolvePaneAgentId(pane, env?.agents ?? []))
@@ -1107,19 +1219,34 @@ export function AgentTerminalCanvas({
             <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-xl border border-white/10 ml-2">
               {session.panes.map((pane, idx) => {
                 const isSelected = pane.id === activePaneId;
+                const isDragging = draggingPaneId === pane.id;
+                const isDragOver = dragOverPaneId === pane.id;
                 const paneAgent = resolvePaneAgentId(pane, env?.agents ?? []);
                 const label = pane.slot ? `Slot ${pane.slot}` : `#${idx + 1}`;
                 return (
                   <button
                     key={pane.id}
                     type="button"
+                    draggable={session.panes.length > 1}
+                    onDragStart={(e) => handlePaneDragStart(e, pane)}
+                    onDragOver={(e) => handlePaneDragOver(e, pane)}
+                    onDragLeave={(e) => handlePaneDragLeave(e, pane)}
+                    onDrop={(e) => handlePaneDrop(e, pane)}
+                    onDragEnd={handlePaneDragEnd}
                     onClick={() => onSelectPane(pane.id)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer flex items-center space-x-1 ${
-                      isSelected
+                      isDragging
+                        ? "opacity-30 border border-dashed border-cyan-400 scale-95"
+                        : isDragOver
+                        ? "bg-cyan-500/30 border border-cyan-400 scale-105"
+                        : isSelected
                         ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
                         : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                     }`}
                   >
+                    <span className="cursor-grab active:cursor-grabbing text-[9px] opacity-40 hover:opacity-100 mr-0.5">
+                      ⠿
+                    </span>
                     <span>{label}</span>
                     {paneAgent && <span className="opacity-75">· {paneAgent}</span>}
                   </button>
@@ -1340,6 +1467,8 @@ export function AgentTerminalCanvas({
               <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5 pt-1">
                 {session.panes.map((pane, idx) => {
                   const isSelected = pane.id === activePaneId;
+                  const isDragging = draggingPaneId === pane.id;
+                  const isDragOver = dragOverPaneId === pane.id;
                   const paneAgentId = resolvePaneAgentId(pane, env?.agents ?? []);
                   const matchedAgent = paneAgentId
                     ? env?.agents.find((a) => a.id === paneAgentId)
@@ -1354,15 +1483,28 @@ export function AgentTerminalCanvas({
                     <button
                       key={pane.id}
                       type="button"
+                      draggable={session.panes.length > 1}
+                      onDragStart={(e) => handlePaneDragStart(e, pane)}
+                      onDragOver={(e) => handlePaneDragOver(e, pane)}
+                      onDragLeave={(e) => handlePaneDragLeave(e, pane)}
+                      onDrop={(e) => handlePaneDrop(e, pane)}
+                      onDragEnd={handlePaneDragEnd}
                       onClick={() => onSelectPane(pane.id)}
                       className={`w-full text-left p-2.5 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col space-y-1.5 ${
-                        isSelected
+                        isDragging
+                          ? "opacity-30 border-cyan-500 border-dashed scale-95"
+                          : isDragOver
+                          ? "bg-cyan-500/25 border-cyan-400 shadow-md scale-[1.02]"
+                          : isSelected
                           ? "bg-cyan-500/15 border-cyan-500/50 shadow-md shadow-cyan-950/40 text-cyan-200"
                           : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/15 text-slate-300"
                       }`}
                     >
                       <div className="flex items-center justify-between w-full">
                         <div className="flex items-center space-x-1.5 min-w-0">
+                          <span className="cursor-grab active:cursor-grabbing text-[10px] text-slate-500 mr-0.5">
+                            ⠿
+                          </span>
                           <span
                             className={`font-mono text-[10px] font-semibold ${
                               isSelected ? "text-cyan-300" : "text-slate-400"
@@ -1441,6 +1583,14 @@ export function AgentTerminalCanvas({
                     setTermStatus(status);
                   }
                 }}
+                isDraggable={session.panes.length > 1}
+                isDragging={draggingPaneId === pane.id}
+                isDragOver={dragOverPaneId === pane.id}
+                onDragStart={(e) => handlePaneDragStart(e, pane)}
+                onDragOver={(e) => handlePaneDragOver(e, pane)}
+                onDragLeave={(e) => handlePaneDragLeave(e, pane)}
+                onDrop={(e) => handlePaneDrop(e, pane)}
+                onDragEnd={handlePaneDragEnd}
               />
             ))}
           </div>

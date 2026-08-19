@@ -565,7 +565,12 @@ export default function App() {
     sessionTargetB?: string
   ) => {
     try {
-      if (sessionTargetA && sessionTargetB) {
+      if (
+        sessionTargetA &&
+        sessionTargetB &&
+        sessionTargetA.includes("__td_slot_") &&
+        sessionTargetB.includes("__td_slot_")
+      ) {
         await invoke("swap_native_slots", {
           sessionTargetA,
           sessionTargetB,
@@ -640,6 +645,7 @@ export default function App() {
             selectedTerminal={selectedTerminal}
             onOpenExternalTerminal={handleOpenSession}
             onAddPane={handleAddPane}
+            onSwapPane={handleSwapPane}
           />
         </Suspense>
       ) : (
