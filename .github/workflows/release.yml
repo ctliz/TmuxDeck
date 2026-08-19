@@ -115,6 +115,10 @@ jobs:
           cache: npm
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -141,10 +145,68 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" "${files[0]}" --repo "$GITHUB_REPOSITORY"
 
+  build-windows:
+    needs: create-release
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Verify release source
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.create-release.outputs.source_sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$EXPECTED_SOURCE_SHA" ] || [ "$(git rev-parse "$RELEASE_TAG^{commit}")" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "Windows checkout does not match the release source" >&2
+            exit 1
+          fi
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run tauri build
+      - name: Upload Windows installer to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(src-tauri/target/release/bundle/nsis/*.exe src-tauri/target/release/bundle/msi/*.msi)
+          version="${RELEASE_TAG#v}"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Expected at least one Windows installer (.exe or .msi)" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            if [ -s "$file" ] && [[ "$(basename "$file")" == *"$version"* ]]; then
+              name="$(basename "$file")"
+              if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+                echo "Uploading Windows asset: $name"
+                gh release upload "$RELEASE_TAG" "$file" --repo "$GITHUB_REPOSITORY"
+              fi
+            fi
+          done
+
   publish-release:
-    needs: [create-release, build-macos]
+    needs: [create-release, build-macos, build-windows]
     if: >-
-      ${{ always() && needs.create-release.result == 'success' && needs.build-macos.result == 'success' }}
+      ${{ always() && needs.create-release.result == 'success' && needs.build-macos.result == 'success' && needs.build-windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -173,10 +235,13 @@ jobs:
 
           assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | map({name, size})')"
           version="${RELEASE_TAG#v}"
-          if [ "$(jq 'length' <<<"$assets")" -ne 1 ] || \
-             [ "$(jq '[.[] | select(.name | endswith(".dmg"))] | length' <<<"$assets")" -ne 1 ] || \
-             [ "$(jq --arg version "$version" '[.[] | select(.size <= 0 or (.name | contains($version) | not))] | length' <<<"$assets")" -ne 0 ]; then
-            echo "Release must contain exactly one non-empty versioned DMG" >&2
+          dmg_count="$(jq '[.[] | select(.name | endswith(".dmg"))] | length' <<<"$assets")"
+          win_count="$(jq '[.[] | select(.name | (endswith(".exe") or endswith(".msi")))] | length' <<<"$assets")"
+          invalid_count="$(jq --arg version "$version" '[.[] | select(.size <= 0 or (.name | contains($version) | not))] | length' <<<"$assets")"
+
+          if [ "$dmg_count" -lt 1 ] || [ "$win_count" -lt 1 ] || [ "$invalid_count" -ne 0 ]; then
+            echo "Release must contain non-empty versioned DMG and Windows installer assets" >&2
+            echo "Assets: $assets" >&2
             exit 1
           fi
 
