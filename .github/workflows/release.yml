@@ -116,9 +116,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.15.2
+        run: node scripts/setup-zig.cjs
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -170,9 +168,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.15.2
+        run: node scripts/setup-zig.cjs
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
