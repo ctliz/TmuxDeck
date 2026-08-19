@@ -128,10 +128,11 @@ fn generate_token() -> String {
     out
 }
 
-/// 一个在线连接的注册表条目：下行通道 + 订阅的对话（None = 未订阅）。
+/// 一个在线连接的注册表条目：下行通道 + 订阅的对话（None = 未订阅） + 是否桌面端。
 pub struct ConnState {
     pub(crate) tx: mpsc::UnboundedSender<String>,
     pub(crate) subscribed: Option<String>,
+    pub(crate) is_desktop: bool,
 }
 
 /// 带来源连接的入站指令，供引擎定向返回请求结果。
@@ -199,11 +200,7 @@ impl WsTransport {
 
     /// 配对信息：动态端口与一次性 token（供桌面端展示二维码/文本）。
     pub fn pairing(&self) -> (u16, String) {
-        let token = self
-            .token
-            .read()
-            .map(|g| g.clone())
-            .unwrap_or_default();
+        let token = self.token.read().map(|g| g.clone()).unwrap_or_default();
         (self.addr.port(), token)
     }
 
@@ -541,6 +538,88 @@ mod integration_tests {
                 }
             }
             assert!(!got_other, "其他对话的 turn 不应送达");
+
+            drop(transport);
+        });
+    }
+
+    #[test]
+    fn test_desktop_ws_client_does_not_increment_mobile_client_count() {
+        let rt = tokio_runtime();
+        rt.block_on(async {
+            let (mut transport, _cmd_rx) = WsTransport::bind().await.unwrap();
+            let (port, token) = transport.pairing();
+
+            // 1. 桌面端以 client=desktop 接入
+            let desktop_url = format!(
+                "ws://127.0.0.1:{}/v1/ws?token={}&client=desktop",
+                port, token
+            );
+            let mut desktop_req = desktop_url.into_client_request().unwrap();
+            desktop_req.headers_mut().insert(
+                "sec-websocket-protocol",
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_static(WS_SUBPROTOCOL),
+            );
+            let (desktop_ws, _) = tokio_tungstenite::connect_async(desktop_req).await.unwrap();
+
+            // 等待连接并确认 client_count 变化为 0（非 mobile 不计数）
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            while let Some(count) = transport.try_client_count_change() {
+                assert_eq!(count, 0, "桌面端连接时不应计入 mobile 数量");
+            }
+            // 但 has_clients 必须为 true（包含桌面端）
+            assert!(
+                transport.has_clients(),
+                "桌面端在线时 has_clients 必须为 true"
+            );
+
+            // 2. 手机端普通接入（无 client=desktop）
+            let mobile_url = format!("ws://127.0.0.1:{}/v1/ws?token={}", port, token);
+            let mut mobile_req = mobile_url.into_client_request().unwrap();
+            mobile_req.headers_mut().insert(
+                "sec-websocket-protocol",
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_static(WS_SUBPROTOCOL),
+            );
+            let (mobile_ws, _) = tokio_tungstenite::connect_async(mobile_req).await.unwrap();
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let mut last_count = None;
+            while let Some(count) = transport.try_client_count_change() {
+                last_count = Some(count);
+            }
+            assert_eq!(last_count, Some(1), "手机端接入后 mobile count 应为 1");
+
+            // 3. 手机端断开，计数降回 0，但桌面端仍在
+            drop(mobile_ws);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            while let Some(count) = transport.try_client_count_change() {
+                last_count = Some(count);
+            }
+            assert_eq!(last_count, Some(0), "手机端断开后 mobile count 恢复为 0");
+            assert!(transport.has_clients(), "桌面端仍在，has_clients 仍为 true");
+
+            // 4. 广播事件桌面端仍可接收
+            let (_mut_sink, mut stream) = desktop_ws.split();
+            transport
+                .emit(&ClientEvent::Error {
+                    message: "test_desktop_receive".into(),
+                })
+                .unwrap();
+            let received = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    match stream.next().await {
+                        Some(Ok(Message::Text(text))) if text.contains("test_desktop_receive") => {
+                            return text;
+                        }
+                        Some(Ok(_)) => continue,
+                        Some(Err(e)) => panic!("ws read error: {}", e),
+                        None => panic!("ws stream ended"),
+                    }
+                }
+            })
+            .await
+            .expect("timed out waiting for Error event on desktop ws");
+            assert!(received.contains("test_desktop_receive"));
 
             drop(transport);
         });

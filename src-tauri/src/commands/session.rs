@@ -7,7 +7,7 @@ use crate::commands::native::{
     list_native_slots, open_native_workspace, rename_native_workspace, NativeSlot, TERMINAL_OPTION,
 };
 use crate::commands::utils::{append_identity_env_clears, shell_single_quote, to_wsl_path};
-use crate::config::{load_config, save_config};
+use crate::config::{load_config, save_config_preserving_environment_cache};
 use crate::models::{CreateOpts, TmuxSession};
 use crate::registry::{detect_environment, ToolInfo};
 use crate::tmux::{
@@ -457,12 +457,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         );
         match slots_result {
             Ok(slots) => {
-                if let Err(e) = open_native_workspace(&sanitized_name, &slots, slots.len()) {
-                    return Err(rollback_create_native_workspace(
-                        &slots,
-                        Some(&team_run_id),
-                        e,
-                    ));
+                if !opts.headless {
+                    if let Err(e) = open_native_workspace(&sanitized_name, &slots, slots.len()) {
+                        return Err(rollback_create_native_workspace(
+                            &slots,
+                            Some(&team_run_id),
+                            e,
+                        ));
+                    }
                 }
                 save_create_defaults(&opts);
                 return Ok(());
@@ -525,7 +527,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     }
     let isolated_first_agent = crate::commands::utils::isolated_agent_command_with_team_env(
         &first_agent_cmd,
-        pane_agent_ids[0] != "shell",
+        !opts.headless && pane_agent_ids[0] != "shell",
         &first_team_envs,
     );
     new_args.push(format!(
@@ -709,7 +711,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         });
         let isolated_agent = crate::commands::utils::isolated_agent_command_with_team_env(
             &pane_agent_cmd,
-            pane_agent_ids[pane - 1] != "shell",
+            !opts.headless && pane_agent_ids[pane - 1] != "shell",
             &pane_team_envs,
         );
         split_args.push(isolated_agent);
@@ -816,12 +818,14 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         let _ = run_tmux(&["select-layout", "-t", &sanitized_name, "tiled"]);
     }
 
-    if let Err(e) = open_session(sanitized_name.clone(), opts.terminal_id.clone()) {
-        return Err(rollback_create_session(
-            Some(&sanitized_name),
-            Some(&team_run_id),
-            e,
-        ));
+    if !opts.headless {
+        if let Err(e) = open_session(sanitized_name.clone(), opts.terminal_id.clone()) {
+            return Err(rollback_create_session(
+                Some(&sanitized_name),
+                Some(&team_run_id),
+                e,
+            ));
+        }
     }
     save_create_defaults(&opts);
     Ok(())
@@ -839,7 +843,7 @@ fn save_create_defaults(opts: &CreateOpts) {
             cfg.recent_dirs.truncate(5);
         }
     }
-    let _ = save_config(cfg);
+    let _ = save_config_preserving_environment_cache(&cfg);
 }
 
 fn terminal_id_from_metadata(native: bool, value: &str) -> Option<String> {
@@ -1184,5 +1188,38 @@ mod tests {
             terminal_id_from_metadata(false, "iterm2"),
             Some("iterm2".to_string())
         );
+    }
+
+    #[test]
+    fn create_opts_supports_headless_field() {
+        let opts = CreateOpts {
+            name: "test-headless-session".to_string(),
+            dir: None,
+            agent_id: "shell".to_string(),
+            pane_agent_ids: vec!["shell".to_string()],
+            panes: 1,
+            terminal_id: "ghostty".to_string(),
+            headless: true,
+        };
+        assert!(opts.headless);
+    }
+
+    #[test]
+    fn headless_mode_disables_return_to_shell_fallback() {
+        let team_envs = vec![("AGENT_INTERCOM_SESSION_ID".to_string(), "id1".to_string())];
+        let normal_cmd = crate::commands::utils::isolated_agent_command_with_team_env(
+            "pi",
+            !false && "pi" != "shell",
+            &team_envs,
+        );
+        assert!(normal_cmd.contains("exec \"${SHELL:-/bin/sh}\""));
+
+        let headless_cmd = crate::commands::utils::isolated_agent_command_with_team_env(
+            "pi",
+            !true && "pi" != "shell",
+            &team_envs,
+        );
+        assert!(!headless_cmd.contains("exec \"${SHELL:-/bin/sh}\""));
+        assert!(!headless_cmd.contains("@tmuxdeck-agent shell"));
     }
 }

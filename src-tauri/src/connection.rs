@@ -58,10 +58,7 @@ pub(crate) async fn accept_loop(
         recent.push(now);
 
         let clients = clients.clone();
-        let token = token
-            .read()
-            .map(|g| g.clone())
-            .unwrap_or_default();
+        let token = token.read().map(|g| g.clone()).unwrap_or_default();
         let cmd_tx = cmd_tx.clone();
         let client_count_tx = client_count_tx.clone();
         let conn_id = next_id.fetch_add(1, Ordering::Relaxed);
@@ -253,6 +250,13 @@ async fn write_http(
         .map_err(|e| format!("ERR_HTTP_WRITE|{}", e))
 }
 
+pub(crate) fn is_desktop_query(query: Option<&str>) -> bool {
+    query
+        .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("client=")))
+        .map(|c| c.eq_ignore_ascii_case("desktop"))
+        .unwrap_or(false)
+}
+
 /// 单 WebSocket 连接：握手校验 → 事件下行 + 指令上行双向循环。
 async fn handle_websocket(
     stream: TcpStream,
@@ -263,6 +267,7 @@ async fn handle_websocket(
     cmd_tx: mpsc::UnboundedSender<InboundCommand>,
     client_count_tx: mpsc::UnboundedSender<usize>,
 ) -> Result<(), String> {
+    let mut is_desktop = false;
     #[allow(clippy::result_large_err)] // tungstenite 的 ErrorResponse 是 Response 类型，API 强制
     let ws = accept_hdr_async(
         stream,
@@ -296,6 +301,7 @@ async fn handle_websocket(
                     tokio_tungstenite::tungstenite::handshake::server::ErrorResponse::new(None),
                 );
             }
+            is_desktop = peer_ip.is_loopback() && is_desktop_query(req.uri().query());
             let mut resp = resp;
             resp.headers_mut().insert(
                 "sec-websocket-protocol",
@@ -318,9 +324,11 @@ async fn handle_websocket(
             ConnState {
                 tx: ev_tx.clone(),
                 subscribed: None,
+                is_desktop,
             },
         );
-        let _ = client_count_tx.send(guard.len());
+        let mobile_count = guard.values().filter(|c| !c.is_desktop).count();
+        let _ = client_count_tx.send(mobile_count);
     }
 
     let mut last_activity = Instant::now();
@@ -403,7 +411,8 @@ async fn handle_websocket(
     // 清理连接
     if let Ok(mut guard) = clients.lock() {
         guard.remove(&conn_id);
-        let _ = client_count_tx.send(guard.len());
+        let mobile_count = guard.values().filter(|c| !c.is_desktop).count();
+        let _ = client_count_tx.send(mobile_count);
     }
     Ok(())
 }
@@ -601,5 +610,15 @@ mod tests {
             parse_command(unsub).unwrap(),
             ClientCommand::Unsubscribe
         ));
+    }
+
+    #[test]
+    fn test_is_desktop_query() {
+        assert!(is_desktop_query(Some("client=desktop")));
+        assert!(is_desktop_query(Some("token=xyz&client=desktop")));
+        assert!(is_desktop_query(Some("client=DESKTOP&token=xyz")));
+        assert!(!is_desktop_query(Some("token=xyz")));
+        assert!(!is_desktop_query(Some("client=mobile")));
+        assert!(!is_desktop_query(None));
     }
 }

@@ -408,7 +408,9 @@ fn collect_file_agent(spec: &FileAgentSpec, cache: &mut UsageCache) -> AgentUsag
 
         let mut file_window_tokens = 0u64;
         for (day, tok) in &daily {
-            let Ok(day) = day.parse::<i64>() else { continue };
+            let Ok(day) = day.parse::<i64>() else {
+                continue;
+            };
             if day < window_start || day > today {
                 continue;
             }
@@ -463,7 +465,11 @@ fn collect_opencode() -> AgentUsage {
     };
     let Some(sqlite) = crate::registry::find_binary(
         "sqlite3",
-        &["/usr/bin/sqlite3", "/opt/homebrew/bin/sqlite3", "/usr/local/bin/sqlite3"],
+        &[
+            "/usr/bin/sqlite3",
+            "/opt/homebrew/bin/sqlite3",
+            "/usr/local/bin/sqlite3",
+        ],
     ) else {
         return AgentUsage::unavailable(ID, NAME);
     };
@@ -693,7 +699,10 @@ mod tests {
         assert_eq!(parse_iso_secs("1970-01-01T00:00:00.000Z"), Some(0));
         // 2026-08-12T04:26:31Z
         let ts = parse_iso_secs("2026-08-12T04:26:31.928Z").unwrap();
-        assert_eq!(ts, days_from_civil(2026, 8, 12) * DAY_SECS + 4 * 3600 + 26 * 60 + 31);
+        assert_eq!(
+            ts,
+            days_from_civil(2026, 8, 12) * DAY_SECS + 4 * 3600 + 26 * 60 + 31
+        );
         // 闰日
         assert_eq!(
             parse_iso_secs("2024-02-29T00:00:00Z"),
@@ -704,7 +713,10 @@ mod tests {
 
     #[test]
     fn finds_substrings() {
-        assert!(contains_sub(b"{\"type\":\"token_count\"}", b"\"token_count\""));
+        assert!(contains_sub(
+            b"{\"type\":\"token_count\"}",
+            b"\"token_count\""
+        ));
         assert!(!contains_sub(b"{\"type\":\"other\"}", b"\"token_count\""));
         // 首字节反复命中但整体不匹配时不应误判
         assert!(!contains_sub(b"aaaab", b"aaac"));

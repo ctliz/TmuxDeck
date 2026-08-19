@@ -1,6 +1,6 @@
+use crate::registry::find_binary;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use crate::registry::find_binary;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TmuxPane {
@@ -37,7 +37,11 @@ pub fn check_tmux_installed() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 pub fn run_tmux(args: &[&str]) -> std::io::Result<std::process::Output> {
-    Command::new("wsl.exe").arg("--").arg("tmux").args(args).output()
+    Command::new("wsl.exe")
+        .arg("--")
+        .arg("tmux")
+        .args(args)
+        .output()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -51,7 +55,8 @@ pub fn is_no_server_err(stderr: &str) -> bool {
     lower.contains("no server running")
         || lower.contains("error connecting")
         || lower.contains("failed to connect")
-        || (lower.contains("no such file or directory") && (lower.contains("tmux") || lower.contains("socket") || lower.contains("/tmp/")))
+        || (lower.contains("no such file or directory")
+            && (lower.contains("tmux") || lower.contains("socket") || lower.contains("/tmp/")))
 }
 
 /// 判定 stderr 是否为「目标 session 不存在」类错误（server 在，但找不到指定 session）。
@@ -73,7 +78,13 @@ pub fn sanitize_session_name(raw: &str) -> Result<String, String> {
 
     let sanitized: String = trimmed
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
 
     let mut result = String::new();
@@ -135,7 +146,13 @@ pub(crate) fn has_attached_clients(value: &str) -> bool {
 }
 
 pub fn is_session_attached(session_name: &str) -> bool {
-    if let Ok(out) = run_tmux(&["list-sessions", "-F", "#{session_attached}", "-t", session_name]) {
+    if let Ok(out) = run_tmux(&[
+        "list-sessions",
+        "-F",
+        "#{session_attached}",
+        "-t",
+        session_name,
+    ]) {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
             return has_attached_clients(&stdout);
@@ -145,10 +162,21 @@ pub fn is_session_attached(session_name: &str) -> bool {
 }
 
 pub fn get_session_first_pane_dir(session_name: &str) -> Option<String> {
-    let output = run_tmux(&["list-panes", "-t", session_name, "-F", "#{pane_current_path}"]);
+    let output = run_tmux(&[
+        "list-panes",
+        "-t",
+        session_name,
+        "-F",
+        "#{pane_current_path}",
+    ]);
     if let Ok(out) = output {
         if out.status.success() {
-            let line = String::from_utf8_lossy(&out.stdout).trim().lines().next().unwrap_or("").to_string();
+            let line = String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
             if !line.is_empty() {
                 return Some(line);
             }
@@ -198,7 +226,10 @@ pub fn get_session_panes(session_name: &str, attached: bool, slot: Option<&str>)
                     panes.push(TmuxPane {
                         id: parts[0].to_string(),
                         command: parts[1].to_string(),
-                        agent_id: parts.get(3).filter(|value| !value.is_empty()).map(|value| (*value).to_string()),
+                        agent_id: parts
+                            .get(3)
+                            .filter(|value| !value.is_empty())
+                            .map(|value| (*value).to_string()),
                         active: parts[2] == "1",
                         session_target: session_name.to_string(),
                         slot: slot.map(String::from),
@@ -342,9 +373,8 @@ pub fn send_keys(pane_id: &str, text: &str, submit: bool) -> Result<(), String> 
 
 /// 允许发送的控制键白名单。不开放任意键名，避免把 send-keys 变成通用键盘注入口。
 pub const ALLOWED_KEYS: &[&str] = &[
-    "Enter", "Escape", "Tab", "BSpace", "Space",
-    "Up", "Down", "Left", "Right",
-    "C-c", "C-d", "C-l", "C-u", "C-r", "C-p", "C-n",
+    "Enter", "Escape", "Tab", "BSpace", "Space", "Up", "Down", "Left", "Right", "C-c", "C-d",
+    "C-l", "C-u", "C-r", "C-p", "C-n",
 ];
 
 /// 发送一个具名控制键（Escape / C-c / 方向键等）。
@@ -360,8 +390,8 @@ pub fn send_key_name(pane_id: &str, key: &str) -> Result<(), String> {
         return Err("ERR_TMUX_NOT_FOUND".to_string());
     }
 
-    let output = run_tmux(&["send-keys", "-t", pane, key])
-        .map_err(|e| format!("ERR_SEND_FAILED|{}", e))?;
+    let output =
+        run_tmux(&["send-keys", "-t", pane, key]).map_err(|e| format!("ERR_SEND_FAILED|{}", e))?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         if is_no_server_err(&err) {

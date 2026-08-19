@@ -148,10 +148,18 @@ fn add_pane_agent_menu_id(workspace: &str, agent_id: &str) -> String {
 fn agent_display_name(name: &str) -> String {
     match name {
         "agent.shell" => {
-            if is_zh_locale() { "纯 Shell".to_string() } else { "Plain Shell".to_string() }
+            if is_zh_locale() {
+                "纯 Shell".to_string()
+            } else {
+                "Plain Shell".to_string()
+            }
         }
         "agent.custom" => {
-            if is_zh_locale() { "自定义 Agent".to_string() } else { "Custom Agent".to_string() }
+            if is_zh_locale() {
+                "自定义 Agent".to_string()
+            } else {
+                "Custom Agent".to_string()
+            }
         }
         _ => name.to_string(),
     }
@@ -161,7 +169,12 @@ fn resolve_pane_agent_id(
     pane: &crate::tmux::TmuxPane,
     agents: &[crate::registry::ToolInfo],
 ) -> Option<String> {
-    if let Some(declared) = pane.agent_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+    if let Some(declared) = pane
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
         return (declared != "shell").then(|| declared.to_string());
     }
     agents.iter().find_map(|agent| {
@@ -256,11 +269,8 @@ pub fn build_tray_menu<R: tauri::Runtime>(
             display_name
         };
         add_pane_menu = add_pane_menu.item(
-            &MenuItemBuilder::with_id(
-                add_pane_agent_menu_id(&primary.name, &agent.id),
-                title,
-            )
-            .build(app)?,
+            &MenuItemBuilder::with_id(add_pane_agent_menu_id(&primary.name, &agent.id), title)
+                .build(app)?,
         );
     }
     let add_pane_menu = add_pane_menu.build()?;
@@ -281,14 +291,16 @@ pub fn build_tray_menu<R: tauri::Runtime>(
     }
 
     if sorted_sessions.len() > limit {
-        let more_title = tr("View All ({} total)...").replace("{}", &sorted_sessions.len().to_string());
+        let more_title =
+            tr("View All ({} total)...").replace("{}", &sorted_sessions.len().to_string());
         let view_more_item = MenuItemBuilder::with_id("show-main", more_title).build(app)?;
         menu = menu.item(&view_more_item);
     }
 
     let menu = menu.separator();
 
-    let new_item = MenuItemBuilder::with_id("new-workspace", tr("+ New Workspace...")).build(app)?;
+    let new_item =
+        MenuItemBuilder::with_id("new-workspace", tr("+ New Workspace...")).build(app)?;
     let show_item = MenuItemBuilder::with_id("show-main", tr("TmuxDeck Main Window")).build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", tr("Quit TmuxDeck")).build(app)?;
 
@@ -319,9 +331,24 @@ mod tests {
 
     fn agents() -> Vec<crate::registry::ToolInfo> {
         vec![
-            crate::registry::ToolInfo { id: "pi".into(), name: "Pi".into(), path: "/bin/pi".into(), icon_path: None },
-            crate::registry::ToolInfo { id: "claude".into(), name: "Claude Code".into(), path: "/bin/claude".into(), icon_path: None },
-            crate::registry::ToolInfo { id: "shell".into(), name: "agent.shell".into(), path: "/bin/zsh".into(), icon_path: None },
+            crate::registry::ToolInfo {
+                id: "pi".into(),
+                name: "Pi".into(),
+                path: "/bin/pi".into(),
+                icon_path: None,
+            },
+            crate::registry::ToolInfo {
+                id: "claude".into(),
+                name: "Claude Code".into(),
+                path: "/bin/claude".into(),
+                icon_path: None,
+            },
+            crate::registry::ToolInfo {
+                id: "shell".into(),
+                name: "agent.shell".into(),
+                path: "/bin/zsh".into(),
+                icon_path: None,
+            },
         ]
     }
 
@@ -335,10 +362,16 @@ mod tests {
         ];
         assert_eq!(dominant_agent_id(&panes, &agents()), Some("pi".into()));
         assert_eq!(
-            dominant_agent_id(&[pane(Some("claude"), "x"), pane(Some("pi"), "x")], &agents()),
+            dominant_agent_id(
+                &[pane(Some("claude"), "x"), pane(Some("pi"), "x")],
+                &agents()
+            ),
             Some("claude".into())
         );
-        assert_eq!(dominant_agent_id(&[pane(Some("shell"), "zsh")], &agents()), None);
+        assert_eq!(
+            dominant_agent_id(&[pane(Some("shell"), "zsh")], &agents()),
+            None
+        );
     }
 
     /// 这几个时序守卫是纯粹的状态机，值得钉死——它们坏掉的表现是「面板一闪就没」

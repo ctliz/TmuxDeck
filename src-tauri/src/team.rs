@@ -281,7 +281,11 @@ pub fn validate_live_team_members(
         if !seen_ids.insert(member_info.session_id.clone()) {
             return Err(ERR_TEAM_CONFLICT.to_string());
         }
-        let Some(member) = manifest.members.iter().find(|m| m.session_id == member_info.session_id) else {
+        let Some(member) = manifest
+            .members
+            .iter()
+            .find(|m| m.session_id == member_info.session_id)
+        else {
             return Err(ERR_TEAM_CONFLICT.to_string());
         };
         if member.role != member_info.role {
@@ -318,7 +322,8 @@ pub fn write_team_manifest_in_dir(dir: &Path, manifest: &TeamManifest) -> Result
     validate_team_manifest(manifest)?;
 
     if dir.exists() {
-        let meta = fs::symlink_metadata(dir).map_err(|e| format!("ERR_MANIFEST_DIR|lstat|{}", e))?;
+        let meta =
+            fs::symlink_metadata(dir).map_err(|e| format!("ERR_MANIFEST_DIR|lstat|{}", e))?;
         if !meta.file_type().is_dir() {
             return Err("ERR_MANIFEST_DIR|not_a_directory".to_string());
         }
@@ -352,8 +357,8 @@ pub fn write_team_manifest_in_dir(dir: &Path, manifest: &TeamManifest) -> Result
     let temp_file_name = format!("tmp.{}.{}.json", std::process::id(), nonce);
     let temp_path = dir.join(temp_file_name);
 
-    let json_bytes = serde_json::to_vec_pretty(manifest)
-        .map_err(|e| format!("ERR_MANIFEST_JSON|{}", e))?;
+    let json_bytes =
+        serde_json::to_vec_pretty(manifest).map_err(|e| format!("ERR_MANIFEST_JSON|{}", e))?;
 
     let mut open_options = OpenOptions::new();
     open_options.write(true).create_new(true);
@@ -392,8 +397,11 @@ pub fn write_team_manifest_in_dir(dir: &Path, manifest: &TeamManifest) -> Result
 
     #[cfg(unix)]
     {
-        let dir_file = fs::File::open(dir).map_err(|e| format!("ERR_MANIFEST_WRITE|dir_open|{}", e))?;
-        dir_file.sync_all().map_err(|e| format!("ERR_MANIFEST_WRITE|dir_sync|{}", e))?;
+        let dir_file =
+            fs::File::open(dir).map_err(|e| format!("ERR_MANIFEST_WRITE|dir_open|{}", e))?;
+        dir_file
+            .sync_all()
+            .map_err(|e| format!("ERR_MANIFEST_WRITE|dir_sync|{}", e))?;
     }
 
     Ok(final_path)
@@ -716,7 +724,11 @@ mod tests {
 
     fn create_test_temp_dir() -> PathBuf {
         let nonce: u64 = rand_nonce();
-        let dir = std::env::temp_dir().join(format!("tmuxdeck-test-teams-{}-{}", std::process::id(), nonce));
+        let dir = std::env::temp_dir().join(format!(
+            "tmuxdeck-test-teams-{}-{}",
+            std::process::id(),
+            nonce
+        ));
         let mut dir_builder = DirBuilder::new();
         dir_builder.recursive(true);
         #[cfg(unix)]
@@ -742,8 +754,16 @@ mod tests {
             let run_id = generate_team_run_id().unwrap();
             let session_id = generate_session_id().unwrap();
 
-            assert!(is_valid_team_run_id(&run_id), "run_id should be valid: {}", run_id);
-            assert!(is_valid_session_id(&session_id), "session_id should be valid: {}", session_id);
+            assert!(
+                is_valid_team_run_id(&run_id),
+                "run_id should be valid: {}",
+                run_id
+            );
+            assert!(
+                is_valid_session_id(&session_id),
+                "session_id should be valid: {}",
+                session_id
+            );
 
             // Test run_id format: "team_" (5 chars) + uuid (36 chars) = 41 chars
             assert_eq!(run_id.len(), 41);
@@ -787,7 +807,8 @@ mod tests {
             },
         ];
 
-        let manifest = create_team_manifest(run_id.clone(), lead_id.clone(), members.clone()).unwrap();
+        let manifest =
+            create_team_manifest(run_id.clone(), lead_id.clone(), members.clone()).unwrap();
         assert_eq!(manifest.version, "tmuxdeck.team.v1");
         assert_eq!(manifest.backend, "tmuxdeck");
         assert_eq!(manifest.lead_id, lead_id);
@@ -855,16 +876,31 @@ mod tests {
 
         assert_eq!(obj.get("version").unwrap(), "tmuxdeck.team.v1");
         assert_eq!(obj.get("backend").unwrap(), "tmuxdeck");
-        assert_eq!(obj.get("runId").unwrap(), "team_11223344-5566-4778-8899-aabbccddeeff");
-        assert_eq!(obj.get("leadId").unwrap(), "tmuxdeck-a0000000-0000-4000-8000-000000000001");
+        assert_eq!(
+            obj.get("runId").unwrap(),
+            "team_11223344-5566-4778-8899-aabbccddeeff"
+        );
+        assert_eq!(
+            obj.get("leadId").unwrap(),
+            "tmuxdeck-a0000000-0000-4000-8000-000000000001"
+        );
         assert_eq!(obj.get("createdAt").unwrap(), 1723680000000u64);
-        assert_eq!(obj.get("capabilities").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(
+            obj.get("capabilities").unwrap().as_array().unwrap().len(),
+            0
+        );
 
         let members_arr = obj.get("members").unwrap().as_array().unwrap();
         assert_eq!(members_arr.len(), 2);
-        assert_eq!(members_arr[0].get("sessionId").unwrap(), "tmuxdeck-a0000000-0000-4000-8000-000000000001");
+        assert_eq!(
+            members_arr[0].get("sessionId").unwrap(),
+            "tmuxdeck-a0000000-0000-4000-8000-000000000001"
+        );
         assert_eq!(members_arr[0].get("role").unwrap(), "lead");
-        assert_eq!(members_arr[1].get("sessionId").unwrap(), "tmuxdeck-b0000000-0000-4000-8000-000000000002");
+        assert_eq!(
+            members_arr[1].get("sessionId").unwrap(),
+            "tmuxdeck-b0000000-0000-4000-8000-000000000002"
+        );
         assert_eq!(members_arr[1].get("role").unwrap(), "worker");
 
         // Strict validator checks
@@ -926,7 +962,8 @@ mod tests {
                 role: ROLE_WORKER.to_string(),
             });
         }
-        let manifest_64 = create_team_manifest(run_id.clone(), lead_id.clone(), members.clone()).unwrap();
+        let manifest_64 =
+            create_team_manifest(run_id.clone(), lead_id.clone(), members.clone()).unwrap();
         assert_eq!(manifest_64.members.len(), 64);
         assert!(validate_team_manifest(&manifest_64).is_ok());
 
@@ -1089,9 +1126,7 @@ mod tests {
             "tmuxdeck-a0000000-0000-4000-8000-000000000001"
         );
         assert_eq!(
-            worker_map
-                .get("AGENT_INTERCOM_MANAGER_SESSION_ID")
-                .unwrap(),
+            worker_map.get("AGENT_INTERCOM_MANAGER_SESSION_ID").unwrap(),
             "tmuxdeck-a0000000-0000-4000-8000-000000000001"
         );
         assert_eq!(
@@ -1107,11 +1142,31 @@ mod tests {
     #[test]
     fn test_all_harness_env_mappings() {
         for (agent, harness_id_key, harness_name_key) in [
-            ("codex", "CODEX_INTERCOM_SESSION_ID", Some("CODEX_INTERCOM_NAME")),
-            ("opencode", "OPENCODE_INTERCOM_SESSION_ID", Some("OPENCODE_INTERCOM_NAME")),
-            ("claude", "CLAUDE_INTERCOM_SESSION_ID", Some("CLAUDE_INTERCOM_NAME")),
-            ("grok", "CLAUDE_INTERCOM_SESSION_ID", Some("CLAUDE_INTERCOM_NAME")),
-            ("agy", "CLAUDE_INTERCOM_SESSION_ID", Some("CLAUDE_INTERCOM_NAME")),
+            (
+                "codex",
+                "CODEX_INTERCOM_SESSION_ID",
+                Some("CODEX_INTERCOM_NAME"),
+            ),
+            (
+                "opencode",
+                "OPENCODE_INTERCOM_SESSION_ID",
+                Some("OPENCODE_INTERCOM_NAME"),
+            ),
+            (
+                "claude",
+                "CLAUDE_INTERCOM_SESSION_ID",
+                Some("CLAUDE_INTERCOM_NAME"),
+            ),
+            (
+                "grok",
+                "CLAUDE_INTERCOM_SESSION_ID",
+                Some("CLAUDE_INTERCOM_NAME"),
+            ),
+            (
+                "agy",
+                "CLAUDE_INTERCOM_SESSION_ID",
+                Some("CLAUDE_INTERCOM_NAME"),
+            ),
             ("pi", "PI_INTERCOM_SESSION_ID", None),
         ] {
             let opts = PaneTeamEnvOpts {
@@ -1127,16 +1182,25 @@ mod tests {
             let envs = build_pane_team_env(&opts);
             let map: std::collections::HashMap<_, _> = envs.into_iter().collect();
 
-            assert_eq!(map.get(harness_id_key).unwrap(), "tmuxdeck-c0000000-0000-4000-8000-000000000003");
+            assert_eq!(
+                map.get(harness_id_key).unwrap(),
+                "tmuxdeck-c0000000-0000-4000-8000-000000000003"
+            );
             if let Some(name_key) = harness_name_key {
-                assert_eq!(map.get(name_key).unwrap(), &format!("harness_ws · {} 03", match agent {
-                    "codex" => "Codex",
-                    "opencode" => "OpenCode",
-                    "claude" => "Claude",
-                    "grok" => "Grok Build",
-                    "agy" => "AGY",
-                    _ => "",
-                }));
+                assert_eq!(
+                    map.get(name_key).unwrap(),
+                    &format!(
+                        "harness_ws · {} 03",
+                        match agent {
+                            "codex" => "Codex",
+                            "opencode" => "OpenCode",
+                            "claude" => "Claude",
+                            "grok" => "Grok Build",
+                            "agy" => "AGY",
+                            _ => "",
+                        }
+                    )
+                );
             }
         }
     }
@@ -1256,7 +1320,10 @@ mod tests {
             fs::set_permissions(&temp_dir, fs::Permissions::from_mode(0o700)).unwrap();
 
             // Directory symlink rejection on both read and write
-            let symlink_dir = temp_dir.parent().unwrap().join(format!("symlink-teams-{}", rand_nonce()));
+            let symlink_dir = temp_dir
+                .parent()
+                .unwrap()
+                .join(format!("symlink-teams-{}", rand_nonce()));
             let _ = symlink(&temp_dir, &symlink_dir);
             assert!(matches!(
                 read_team_manifest_in_dir(&symlink_dir, &run_id),
@@ -1384,13 +1451,11 @@ mod tests {
         // Lead with non-empty manager target -> conflict
         assert!(validate_live_team_members(
             &manifest,
-            &[
-                LiveTeamMemberInfo {
-                    session_id: lead_id.clone(),
-                    role: ROLE_LEAD.to_string(),
-                    manager_target: worker_id.clone(),
-                }
-            ]
+            &[LiveTeamMemberInfo {
+                session_id: lead_id.clone(),
+                role: ROLE_LEAD.to_string(),
+                manager_target: worker_id.clone(),
+            }]
         )
         .is_err());
 

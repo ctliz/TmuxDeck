@@ -1186,7 +1186,9 @@ mod tests {
 
     #[test]
     fn test_pairing_hosts_rank_lan_before_tailnet() {
-        assert!(host_rank("192.168.1.62".parse().unwrap()) < host_rank("100.84.138.1".parse().unwrap()));
+        assert!(
+            host_rank("192.168.1.62".parse().unwrap()) < host_rank("100.84.138.1".parse().unwrap())
+        );
         assert!(trusted_client_ip("100.84.138.1".parse().unwrap()));
     }
 
@@ -1194,7 +1196,13 @@ mod tests {
     fn test_subscribe_snapshot_keeps_a_short_tail() {
         assert_eq!(SUBSCRIBE_SNAPSHOT_TURNS, 12);
         let turns: Vec<usize> = (0..40).collect();
-        let kept: Vec<usize> = turns.iter().rev().take(SUBSCRIBE_SNAPSHOT_TURNS).rev().copied().collect();
+        let kept: Vec<usize> = turns
+            .iter()
+            .rev()
+            .take(SUBSCRIBE_SNAPSHOT_TURNS)
+            .rev()
+            .copied()
+            .collect();
         assert_eq!(kept, (28..40).collect::<Vec<_>>());
     }
 }

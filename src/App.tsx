@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -27,12 +27,17 @@ import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
 import { AdapterConsentModal } from "./components/AdapterConsentModal";
 import { MobilePairingModal } from "./components/MobilePairingModal";
 
+const AgentTerminal = lazy(() =>
+  import("./components/AgentTerminalCanvas").then((m) => ({ default: m.AgentTerminalCanvas }))
+);
+
 export default function App() {
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
+  const [activeTerminal, setActiveTerminal] = useState<{ session: TmuxSession; paneId: string } | null>(null);
   const [showMobilePairingModal, setShowMobilePairingModal] = useState(false);
   const sessionsRef = useRef<TmuxSession[]>([]);
   const failedPaneCountsRef = useRef(new Map<string, number>());
-  const sessionPollInFlightRef = useRef(false);
+  const sessionPollPromiseRef = useRef<Promise<void> | null>(null);
   const captureInFlightRef = useRef(false);
 
   // Card reordering & Drag state
@@ -72,29 +77,24 @@ export default function App() {
     selectedAgent
   );
 
-  // Rename & Icon Cache State
+  // Rename State
   const [renamingSession, setRenamingSession] = useState<string | null>(null);
   const [renamedName, setRenamedName] = useState("");
-  const [terminalIconUrls, setTerminalIconUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
     showCreateModalRef.current = showCreateModal;
   }, [showCreateModal]);
 
+  // Keep activeTerminal.session synchronized with polled session state
   useEffect(() => {
-    if (!env?.terminals) return;
-    env.terminals.forEach((term) => {
-      if (terminalIconUrls[term.id]) return;
-      invoke<number[]>("get_terminal_icon", { terminalId: term.id })
-        .then((bytes) => {
-          if (!bytes?.length) return;
-          const binary = String.fromCharCode(...new Uint8Array(bytes));
-          const base64 = btoa(binary);
-          setTerminalIconUrls((prev) => ({ ...prev, [term.id]: `data:image/png;base64,${base64}` }));
-        })
-        .catch(() => {});
-    });
-  }, [env]);
+    if (!activeTerminal) return;
+    const updated = sessions.find(
+      (s) => s.id === activeTerminal.session.id || s.name === activeTerminal.session.name
+    );
+    if (updated && updated !== activeTerminal.session) {
+      setActiveTerminal((prev) => (prev ? { ...prev, session: updated } : null));
+    }
+  }, [sessions, activeTerminal]);
 
   const sortSessionsByOrder = (list: TmuxSession[], order: string[]) => {
     const orderMap = new Map(order.map((id, idx) => [id, idx]));
@@ -143,33 +143,50 @@ export default function App() {
     }
   };
 
-  const refreshSessions = async () => {
-    // A slow tmux call must not stack up behind the 4s timer.
-    if (sessionPollInFlightRef.current) return;
-    sessionPollInFlightRef.current = true;
-    try {
-      const sessionList = await invoke<TmuxSession[]>("get_tmux_sessions");
-      setErrorMsg("");
-      setSessions((prevSessions) => {
-        const mergedList = preservePaneContent(prevSessions, sessionList);
+  const refreshSessions = async (forceAfterCurrent = false): Promise<void> => {
+    // Timed polls share one request. User actions wait for any old poll and then
+    // fetch fresh state so a newly-created workspace never waits for the next tick.
+    const currentPoll = sessionPollPromiseRef.current;
+    if (currentPoll) {
+      await currentPoll;
+      if (!forceAfterCurrent) return;
+    }
+    if (sessionPollPromiseRef.current) {
+      return refreshSessions(forceAfterCurrent);
+    }
 
-        const activeIds = new Set(mergedList.map((s) => s.id));
-        const updatedOrder = cardOrderRef.current.filter((id) => activeIds.has(id));
-        mergedList.forEach((s) => {
-          if (!updatedOrder.includes(s.id)) updatedOrder.push(s.id);
+    const poll = (async () => {
+      try {
+        const sessionList = await invoke<TmuxSession[]>("get_tmux_sessions");
+        setErrorMsg("");
+        setSessions((prevSessions) => {
+          const mergedList = preservePaneContent(prevSessions, sessionList);
+
+          const activeIds = new Set(mergedList.map((s) => s.id));
+          const updatedOrder = cardOrderRef.current.filter((id) => activeIds.has(id));
+          mergedList.forEach((s) => {
+            if (!updatedOrder.includes(s.id)) updatedOrder.push(s.id);
+          });
+          cardOrderRef.current = updatedOrder;
+          setCardOrder(updatedOrder);
+
+          return sortSessionsByOrder(mergedList, updatedOrder);
         });
-        cardOrderRef.current = updatedOrder;
-        setCardOrder(updatedOrder);
 
-        return sortSessionsByOrder(mergedList, updatedOrder);
-      });
+        sessionsRef.current = sessionList;
+        failedPaneCountsRef.current.clear();
+      } catch (err: any) {
+        setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
+      }
+    })();
 
-      sessionsRef.current = sessionList;
-      failedPaneCountsRef.current.clear();
-    } catch (err: any) {
-      setErrorMsg(translateError(err) || t("val.dataRefreshFailed"));
+    sessionPollPromiseRef.current = poll;
+    try {
+      await poll;
     } finally {
-      sessionPollInFlightRef.current = false;
+      if (sessionPollPromiseRef.current === poll) {
+        sessionPollPromiseRef.current = null;
+      }
     }
   };
 
@@ -382,6 +399,7 @@ export default function App() {
       pane_agent_ids: effectivePaneAgentIds,
       panes: selectedPanes,
       terminal_id: selectedTerminal,
+      headless: true,
     };
     await invoke("create_session", { opts });
     setShowCreateModal(false);
@@ -390,8 +408,13 @@ export default function App() {
     setNewSessionName("");
     setWorkingDir("");
     setPaneAgentIds([]);
-    // Full reload: creating a workspace also appends to config.recent_dirs.
-    await loadData();
+    // Creation only changes sessions and recent defaults. Avoid a full agent/
+    // terminal rescan, which is intentionally much more expensive.
+    const [cfgData] = await Promise.all([
+      invoke<Config>("load_config"),
+      refreshSessions(true),
+    ]);
+    setConfig(cfgData);
   };
 
   const handleCreate = async () => {
@@ -470,7 +493,7 @@ export default function App() {
     if (!confirm(tPlural(confirmKey, paneCount, { name: sessionName }))) return;
     try {
       await invoke("kill_session", { sessionName });
-      await refreshSessions();
+      await refreshSessions(true);
     } catch (err: any) {
       alert(t("val.destroyFailed") + ": " + translateError(err));
     }
@@ -483,8 +506,29 @@ export default function App() {
     count: number
   ) => {
     try {
+      const currentTargetSession = sessionsRef.current.find(
+        (s) => s.name === sessionName || s.id === sessionName
+      );
+      const existingPaneIds = new Set(currentTargetSession?.panes.map((p) => p.id) ?? []);
+
       await invoke("add_panes", { sessionName, agentId, count });
-      await refreshSessions();
+      await refreshSessions(true);
+
+      const updatedSession = sessionsRef.current.find(
+        (s) => s.name === sessionName || s.id === sessionName
+      );
+      if (updatedSession && updatedSession.panes.length > 0) {
+        // Automatically switch and focus to the newly added tab
+        const newPane =
+          updatedSession.panes.find((p) => !existingPaneIds.has(p.id)) ||
+          updatedSession.panes[updatedSession.panes.length - 1];
+        if (newPane) {
+          setActiveTerminal({
+            session: updatedSession,
+            paneId: newPane.id,
+          });
+        }
+      }
     } catch (err: any) {
       alert(t("val.createFailed") + ": " + translateError(err));
     }
@@ -508,7 +552,7 @@ export default function App() {
       } else {
         await invoke("kill_pane", { paneId });
       }
-      await refreshSessions();
+      await refreshSessions(true);
     } catch (err: any) {
       alert(translateError(err));
     }
@@ -529,7 +573,7 @@ export default function App() {
       } else {
         await invoke("swap_pane", { paneIdA, paneIdB });
       }
-      await refreshSessions();
+      await refreshSessions(true);
     } catch (err: any) {
       alert(translateError(err));
     }
@@ -541,7 +585,7 @@ export default function App() {
     try {
       await invoke("rename_session", { oldName, newName: cleanNew });
       setRenamingSession(null);
-      await refreshSessions();
+      await refreshSessions(true);
     } catch (err: any) {
       alert(t("val.renameFailed") + ": " + translateError(err));
     }
@@ -577,54 +621,79 @@ export default function App() {
 
   return (
     <div className="td-canvas flex flex-col h-screen text-slate-100 font-sans select-none overflow-hidden">
-      <SearchHeader
-        search={search}
-        onSearchChange={setSearch}
-        totalSessions={sessions.length}
-        runningSessions={sessions.filter((s) => s.attached).length}
-        onOpenMobilePairing={() => setShowMobilePairingModal(true)}
-      />
+      {activeTerminal ? (
+        <Suspense
+          fallback={
+            <div className="flex-1 flex items-center justify-center bg-slate-950 text-slate-500 text-xs font-mono">
+              Loading Agent Terminal…
+            </div>
+          }
+        >
+          <AgentTerminal
+            session={activeTerminal.session}
+            activePaneId={activeTerminal.paneId}
+            onSelectPane={(paneId) =>
+              setActiveTerminal((prev) => (prev ? { ...prev, paneId } : null))
+            }
+            onBack={() => setActiveTerminal(null)}
+            env={env}
+            selectedTerminal={selectedTerminal}
+            onOpenExternalTerminal={handleOpenSession}
+            onAddPane={handleAddPane}
+          />
+        </Suspense>
+      ) : (
+        <>
+          <SearchHeader
+            search={search}
+            onSearchChange={setSearch}
+            totalSessions={sessions.length}
+            runningSessions={sessions.filter((s) => s.attached).length}
+            onOpenMobilePairing={() => setShowMobilePairingModal(true)}
+          />
 
-      <main className="flex-1 overflow-y-auto p-6">
-        {errorMsg && (
-          <div className="mb-6 p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-sm">
-            {errorMsg}
-          </div>
-        )}
+          <main className="flex-1 overflow-y-auto p-6">
+            {errorMsg && (
+              <div className="mb-6 p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-sm">
+                {errorMsg}
+              </div>
+            )}
 
-        <CardGrid
-          sessions={filteredSessions}
-          env={env}
-          selectedTerminal={selectedTerminal}
-          renamingSession={renamingSession}
-          renamedName={renamedName}
-          terminalIconUrls={terminalIconUrls}
-          onNewWorkspaceClick={() => {
-            setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
-            setPaneAgentIds([]);
-            setShowCreateModal(true);
-          }}
-          onRenameStart={(name) => {
-            setRenamingSession(name);
-            setRenamedName(name);
-          }}
-          onRenameChange={setRenamedName}
-          onRenameCommit={handleRename}
-          onKill={handleKill}
-          onAddPane={handleAddPane}
-          onKillPane={handleKillPane}
-          onOpenSession={handleOpenSession}
-          onSwapPane={handleSwapPane}
-          onReorderCards={handleReorderCards}
-          highlightedSessionId={highlightedSessionId}
-        />
+            <CardGrid
+              sessions={filteredSessions}
+              env={env}
+              selectedTerminal={selectedTerminal}
+              renamingSession={renamingSession}
+              renamedName={renamedName}
+              onNewWorkspaceClick={() => {
+                setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
+                setPaneAgentIds([]);
+                setShowCreateModal(true);
+              }}
+              onRenameStart={(name) => {
+                setRenamingSession(name);
+                setRenamedName(name);
+              }}
+              onRenameChange={setRenamedName}
+              onRenameCommit={handleRename}
+              onKill={handleKill}
+              onAddPane={handleAddPane}
+              onKillPane={handleKillPane}
+              onOpenSession={handleOpenSession}
+              onOpenChat={(session, paneId) => setActiveTerminal({ session, paneId })}
+              onSwapPane={handleSwapPane}
+              onReorderCards={handleReorderCards}
+              highlightedSessionId={highlightedSessionId}
+            />
 
-        {filteredSessions.length === 0 && search && (
-          <div className="text-center text-xs text-slate-400 mt-4 font-mono animate-fade-in-up">
-            {t("empty.title")}
-          </div>
-        )}
-      </main>
+            {filteredSessions.length === 0 && search && (
+              <div className="text-center text-xs text-slate-400 mt-4 font-mono animate-fade-in-up">
+                {t("empty.title")}
+              </div>
+            )}
+          </main>
+        </>
+      )}
 
       <CreateWorkspaceModal
         show={showCreateModal}
@@ -639,8 +708,6 @@ export default function App() {
         setSelectedPanes={setSelectedPanes}
         paneAgentIds={effectivePaneAgentIds}
         setPaneAgentIds={setPaneAgentIds}
-        selectedTerminal={selectedTerminal}
-        setSelectedTerminal={setSelectedTerminal}
         showCustomAgentForm={showCustomAgentForm}
         setShowCustomAgentForm={setShowCustomAgentForm}
         customAgentName={customAgentName}

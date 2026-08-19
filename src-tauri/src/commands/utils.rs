@@ -169,6 +169,10 @@ fn login_shell_network_env() -> &'static [(String, String)] {
     })
 }
 
+pub(crate) fn prewarm_login_shell_network_env() {
+    let _ = login_shell_network_env();
+}
+
 pub(crate) fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }

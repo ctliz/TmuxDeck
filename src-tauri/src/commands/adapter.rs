@@ -120,7 +120,9 @@ fn is_pi_intercom_settings_entry(value: &str) -> bool {
 }
 
 fn pi_npm_package_version(value: &str) -> Option<&str> {
-    value.strip_prefix(PI_NPM_PACKAGE_PREFIX).filter(|version| !version.is_empty())
+    value
+        .strip_prefix(PI_NPM_PACKAGE_PREFIX)
+        .filter(|version| !version.is_empty())
 }
 
 pub const CODEX_MCP_SERVER_KEY: &str = "codex-intercom";

@@ -9,7 +9,6 @@ interface CardGridProps {
   selectedTerminal: string;
   renamingSession: string | null;
   renamedName: string;
-  terminalIconUrls: Record<string, string>;
   onNewWorkspaceClick: () => void;
   onRenameStart: (name: string) => void;
   onRenameChange: (val: string) => void;
@@ -18,6 +17,7 @@ interface CardGridProps {
   onAddPane: (name: string, agentId: string, count: number) => Promise<void>;
   onKillPane: (id: string, sessionTarget?: string) => void;
   onOpenSession: (name: string, termId: string) => void;
+  onOpenChat: (session: TmuxSession, paneId: string) => void;
   onSwapPane: (
     paneIdA: string,
     paneIdB: string,
@@ -34,7 +34,6 @@ export function CardGrid({
   selectedTerminal,
   renamingSession,
   renamedName,
-  terminalIconUrls,
   onNewWorkspaceClick,
   onRenameStart,
   onRenameChange,
@@ -43,6 +42,7 @@ export function CardGrid({
   onAddPane,
   onKillPane,
   onOpenSession,
+  onOpenChat,
   onSwapPane,
   onReorderCards,
   highlightedSessionId,
@@ -109,7 +109,6 @@ export function CardGrid({
           selectedTerminal={selectedTerminal}
           renamingSession={renamingSession}
           renamedName={renamedName}
-          terminalIconUrls={terminalIconUrls}
           isDraggingCard={draggingCardId === session.id}
           isCardDragOverTarget={cardDragOverId === session.id}
           isHighlighted={highlightedSessionId === session.id}
@@ -120,6 +119,7 @@ export function CardGrid({
           onAddPane={onAddPane}
           onKillPane={onKillPane}
           onOpenSession={onOpenSession}
+          onOpenChat={onOpenChat}
           onSwapPane={onSwapPane}
           onCardDragStart={handleCardDragStart}
           onCardDragOver={handleCardDragOver}

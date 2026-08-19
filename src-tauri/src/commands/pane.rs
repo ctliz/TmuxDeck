@@ -255,25 +255,25 @@ fn add_native_panes(
     let mut target_slots = original_layout.clone();
     target_slots.extend(created.iter().cloned());
     target_slots.sort_by_key(|slot| slot.slot.parse::<usize>().unwrap_or(usize::MAX));
-    if let Err(error) = rebuild_native_workspace(workspace, &target_slots) {
-        let mut rollback_failures = Vec::new();
-        if let Err(detail) = rollback_targets("kill-session", &attempted_targets) {
-            rollback_failures.push(detail);
-        }
-        if !original_layout.is_empty() {
+    if !original_layout.is_empty() {
+        if let Err(error) = rebuild_native_workspace(workspace, &target_slots) {
+            let mut rollback_failures = Vec::new();
+            if let Err(detail) = rollback_targets("kill-session", &attempted_targets) {
+                rollback_failures.push(detail);
+            }
             if let Err(detail) = rebuild_native_workspace(workspace, &original_layout) {
                 rollback_failures.push(detail);
             }
+            return Err(if rollback_failures.is_empty() {
+                error
+            } else {
+                format!(
+                    "ERR_ADD_PANES_ROLLBACK|{}|{}",
+                    error,
+                    rollback_failures.join(";")
+                )
+            });
         }
-        return Err(if rollback_failures.is_empty() {
-            error
-        } else {
-            format!(
-                "ERR_ADD_PANES_ROLLBACK|{}|{}",
-                error,
-                rollback_failures.join(";")
-            )
-        });
     }
     Ok(count)
 }

@@ -255,6 +255,20 @@ test("mixed workspace summary renders every Agent with its pane count", () => {
     }),
     "Will create 3 panes (pi ×2 · claude ×1), and open with Ghostty."
   );
+  assert.strictEqual(
+    t("modal.summaryChatMixed", {
+      panesText: tPlural("modal.panesCount", 3),
+      mix,
+    }),
+    "Will create 3 panes (pi ×2 · claude ×1)."
+  );
+  assert.strictEqual(
+    t("modal.summaryChat", {
+      panesText: tPlural("modal.panesCount", 1),
+      agent: "Pi",
+    }),
+    "Will create 1 pane, running Pi in each."
+  );
 });
 
 test("dominantAgentId picks the most common agent, ties by first appearance", () => {
@@ -985,4 +999,73 @@ test("AdapterConsentModal renders single targetVersion when installedVersion mat
     consentModalSrc,
     /item\.installedVersion && item\.installedVersion !== item\.targetVersion/
   );
+});
+
+test("CreateOpts carries headless property", () => {
+  const opts: CreateOpts = {
+    name: "chat-workspace",
+    dir: null,
+    agent_id: "pi",
+    pane_agent_ids: ["pi"],
+    panes: 1,
+    terminal_id: "ghostty",
+    headless: true,
+  };
+  assert.strictEqual(opts.headless, true);
+});
+
+test("ChatCockpit component surfaces zero scope leakage", () => {
+  const chatCockpitSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/ChatCockpit.tsx"),
+    "utf-8"
+  );
+  assert.doesNotMatch(chatCockpitSrc, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(chatCockpitSrc, /scope_id/i);
+  assert.doesNotMatch(chatCockpitSrc, /scopeId/i);
+});
+
+test("AgentTerminal component surfaces zero scope leakage", () => {
+  const agentTerminalSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/AgentTerminal.tsx"),
+    "utf-8"
+  );
+  assert.doesNotMatch(agentTerminalSrc, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(agentTerminalSrc, /scope_id/i);
+  assert.doesNotMatch(agentTerminalSrc, /scopeId/i);
+});
+
+test("AgentTerminalCanvas component surfaces zero scope leakage", () => {
+  const agentTerminalCanvasSrc = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/AgentTerminalCanvas.tsx"),
+    "utf-8"
+  );
+  assert.doesNotMatch(agentTerminalCanvasSrc, /AGENT_INTERCOM_SCOPE_ID/);
+  assert.doesNotMatch(agentTerminalCanvasSrc, /scope_id/i);
+  assert.doesNotMatch(agentTerminalCanvasSrc, /scopeId/i);
+});
+
+test("terminal translation keys exist and are translated in both locales", () => {
+  const terminalKeys = [
+    "terminal.back",
+    "terminal.title",
+    "terminal.pane",
+    "terminal.status.connected",
+    "terminal.status.connecting",
+    "terminal.status.exited",
+    "terminal.status.disconnected",
+    "terminal.openFallback",
+    "terminal.layout.focus",
+    "terminal.layout.grid",
+    "terminal.layout.list",
+    "terminal.listTitle",
+    "terminal.maximize",
+    "card.openTerminal",
+    "card.openPaneTerminal",
+    "card.openTerminalFallback",
+  ];
+  for (const key of terminalKeys) {
+    assert.ok(dictionaries.en[key], `Missing en translation for ${key}`);
+    assert.ok(dictionaries.zh[key], `Missing zh translation for ${key}`);
+    assert.notStrictEqual(t(key), key);
+  }
 });

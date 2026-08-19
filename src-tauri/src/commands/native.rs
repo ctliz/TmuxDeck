@@ -531,7 +531,22 @@ fn validate_visible_slot_swap(
 pub(crate) fn visible_native_slot_numbers(workspace: &str) -> Result<Vec<usize>, String> {
     let prefix = format!("TmuxDeck::{}::", workspace);
     let script = format!(
-        "tell application \"Ghostty\"\nset resultText to \"\"\nrepeat with w in windows\nrepeat with term in terminals of w\nset termName to name of term\nif termName starts with \"{}\" then\nset resultText to resultText & termName & linefeed\nend if\nend repeat\nend repeat\nreturn resultText\nend tell\n",
+        "if application \"Ghostty\" is running then\n\
+         tell application \"Ghostty\"\n\
+         set resultText to \"\"\n\
+         repeat with w in windows\n\
+         repeat with term in terminals of w\n\
+         set termName to name of term\n\
+         if termName starts with \"{}\" then\n\
+         set resultText to resultText & termName & linefeed\n\
+         end if\n\
+         end repeat\n\
+         end repeat\n\
+         return resultText\n\
+         end tell\n\
+         else\n\
+         return \"\"\n\
+         end if\n",
         applescript_string(&prefix)
     );
     let output = Command::new("osascript")
@@ -559,6 +574,10 @@ pub(crate) fn rebuild_native_workspace(
     if slots.is_empty() {
         return Err("ERR_TMUX_NO_SERVER".to_string());
     }
+    let visible = visible_native_slot_numbers(workspace)?;
+    if visible.is_empty() {
+        return Ok(());
+    }
     let _layout_guard = GHOSTTY_LAYOUT_LOCK
         .lock()
         .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
@@ -572,6 +591,10 @@ fn rebuild_renamed_native_workspace(
     new_workspace: &str,
     slots: &[NativeSlot],
 ) -> Result<(), String> {
+    let visible = visible_native_slot_numbers(old_workspace)?;
+    if visible.is_empty() {
+        return Ok(());
+    }
     let _layout_guard = GHOSTTY_LAYOUT_LOCK
         .lock()
         .map_err(|_| "ERR_GHOSTTY_LAYOUT_LOCK_POISONED".to_string())?;
@@ -1131,7 +1154,11 @@ pub(crate) fn ghostty_terminal_count() -> Option<usize> {
     let output = Command::new("osascript")
         .args([
             "-e",
-            "tell application \"Ghostty\" to count of terminals of front window",
+            "if application \"Ghostty\" is running then\n\
+             tell application \"Ghostty\" to count of terminals of front window\n\
+             else\n\
+             return 0\n\
+             end if",
         ])
         .output()
         .ok()?;

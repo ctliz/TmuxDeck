@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Bot, ChevronDown, Crown, Folder, Plus, Settings, Sparkles, TriangleAlert } from "lucide-react";
-import { agentDisplayName, t, tPlural, translateName } from "../i18n";
+import { agentDisplayName, t, tPlural } from "../i18n";
 import { sanitizeNameFrontend, summarizePaneAgents } from "../utils";
 import {
   ClaudeMode,
@@ -26,8 +26,6 @@ interface CreateWorkspaceModalProps {
   /** Always exactly `selectedPanes` long — the caller normalizes it. */
   paneAgentIds: string[];
   setPaneAgentIds: (ids: string[]) => void;
-  selectedTerminal: string;
-  setSelectedTerminal: (term: string) => void;
   showCustomAgentForm: boolean;
   setShowCustomAgentForm: (show: boolean) => void;
   customAgentName: string;
@@ -61,8 +59,6 @@ export function CreateWorkspaceModal({
   setSelectedPanes,
   paneAgentIds,
   setPaneAgentIds,
-  selectedTerminal,
-  setSelectedTerminal,
   showCustomAgentForm,
   setShowCustomAgentForm,
   customAgentName,
@@ -105,9 +101,6 @@ export function CreateWorkspaceModal({
     onClaudeAction(mode);
   };
 
-  const currentTerminalObj =
-    env?.terminals.find((term) => term.id === selectedTerminal) ||
-    env?.terminals[0];
   const currentAgentObj =
     env?.agents.find((agent) => agent.id === selectedAgent) || env?.agents[0];
 
@@ -539,33 +532,7 @@ export function CreateWorkspaceModal({
             </div>
           )}
 
-          {/* Terminal Selection Segmented Chips */}
-          {env && env.terminals.length > 1 && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                {t("modal.terminalLabel")}
-              </label>
-              <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-                {env.terminals.map((term) => {
-                  const isSelected = selectedTerminal === term.id;
-                  return (
-                    <button
-                      key={term.id}
-                      type="button"
-                      onClick={() => setSelectedTerminal(term.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${
-                        isSelected
-                          ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
-                          : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300"
-                      }`}
-                    >
-                      {translateName(term.name)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {/* Desktop Notifications and Bypass Settings */}
 
           <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
             <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer">
@@ -600,21 +567,15 @@ export function CreateWorkspaceModal({
           {/* Dynamic Summary */}
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/60 text-xs text-slate-400">
             {paneAgentSummary.uniform
-              ? t("modal.summary", {
+              ? t("modal.summaryChat", {
                   panesText: tPlural("modal.panesCount", selectedPanes),
                   agent: agentNameFor(
                     paneAgentSummary.agentId ?? currentAgentObj?.id ?? selectedAgent
                   ),
-                  terminal: translateName(
-                    currentTerminalObj?.name || selectedTerminal
-                  ),
                 })
-              : t("modal.summaryMixed", {
+              : t("modal.summaryChatMixed", {
                   panesText: tPlural("modal.panesCount", selectedPanes),
                   mix: agentMixText,
-                  terminal: translateName(
-                    currentTerminalObj?.name || selectedTerminal
-                  ),
                 })}
           </div>
         </div>

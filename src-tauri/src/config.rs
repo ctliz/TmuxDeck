@@ -104,15 +104,23 @@ pub fn load_config() -> Config {
     Config::default()
 }
 
-#[tauri::command]
-pub fn save_config(config: Config) -> Result<(), String> {
+fn write_config(config: &Config) -> Result<(), String> {
     let path = get_config_path();
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let json =
-        serde_json::to_string_pretty(&config).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
-    std::fs::write(path, json).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
+        serde_json::to_string_pretty(config).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))?;
+    std::fs::write(path, json).map_err(|e| format!("ERR_CONFIG_SAVE|{}", e))
+}
+
+#[tauri::command]
+pub fn save_config(config: Config) -> Result<(), String> {
+    write_config(&config)?;
     crate::registry::invalidate_environment_cache();
     Ok(())
+}
+
+pub(crate) fn save_config_preserving_environment_cache(config: &Config) -> Result<(), String> {
+    write_config(config)
 }

@@ -60,12 +60,7 @@ pub fn refresh_bridge_pairing(state: tauri::State<Arc<BridgeState>>) -> serde_js
     }
     for _ in 0..20 {
         std::thread::sleep(std::time::Duration::from_millis(25));
-        if state
-            .rotate_token
-            .lock()
-            .map(|flag| !*flag)
-            .unwrap_or(true)
-        {
+        if state.rotate_token.lock().map(|flag| !*flag).unwrap_or(true) {
             break;
         }
     }
@@ -96,12 +91,20 @@ fn pairing_json(state: &BridgeState) -> serde_json::Value {
             .collect(),
         _ => Vec::new(),
     };
+    let desktop_ws_url = match (port, token.as_deref()) {
+        (Some(port), Some(token)) => Some(format!(
+            "ws://127.0.0.1:{}/v1/ws?token={}&client=desktop",
+            port, token
+        )),
+        _ => None,
+    };
     serde_json::json!({
         "enabled": port.is_some() && token.is_some(),
         "port": port,
         "httpUrls": http_urls,
         "lanUrls": http_urls,
         "wsUrls": ws_urls,
+        "desktopWsUrl": desktop_ws_url,
         "token": token,
         "connectedClients": clients,
         "brokerConnected": broker,
@@ -119,4 +122,37 @@ pub fn bridge_conversations(
         .lock()
         .map(|g| g.clone())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pairing_json_includes_desktop_ws_url_when_port_and_token_ready() {
+        let state = BridgeState::default();
+        *state.port.lock().unwrap() = Some(8765);
+        *state.ws_token.lock().unwrap() = Some("secret_token_123".to_string());
+        *state.lan_hosts.lock().unwrap() = vec!["192.168.1.50".to_string()];
+
+        let value = pairing_json(&state);
+        assert_eq!(value["enabled"], true);
+        assert_eq!(value["port"], 8765);
+        assert_eq!(
+            value["desktopWsUrl"],
+            "ws://127.0.0.1:8765/v1/ws?token=secret_token_123&client=desktop"
+        );
+        assert_eq!(
+            value["wsUrls"][0],
+            "ws://192.168.1.50:8765/v1/ws?token=secret_token_123"
+        );
+    }
+
+    #[test]
+    fn test_pairing_json_desktop_ws_url_is_null_when_offline() {
+        let state = BridgeState::default();
+        let value = pairing_json(&state);
+        assert_eq!(value["enabled"], false);
+        assert!(value["desktopWsUrl"].is_null());
+    }
 }

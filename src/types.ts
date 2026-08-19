@@ -78,6 +78,7 @@ export interface CreateOpts {
   pane_agent_ids: string[];
   panes: number;
   terminal_id: string;
+  headless?: boolean;
 }
 
 export interface TmuxPane {
@@ -133,10 +134,41 @@ export interface BridgePairingStatus {
   wsUrl?: string;
   httpUrls?: string[];
   wsUrls?: string[];
+  desktopWsUrl?: string;
   token: string;
   connectedClients: number;
   brokerConnected: boolean;
   trustedLanOnly?: boolean;
+}
+
+export type TurnRole = "human" | "agent" | "peer" | "system";
+
+export interface ChatTurn {
+  conversationId?: string;
+  conversation_id?: string;
+  role: TurnRole;
+  text: string;
+  timestamp: number;
+}
+
+export type ConversationStatus =
+  | "idle"
+  | "thinking"
+  | "running-tool"
+  | "awaiting-human"
+  | "unknown";
+
+export interface ConversationItem {
+  id: string;
+  session: string;
+  workspaceId: string;
+  workspaceName: string;
+  cwd: string;
+  kind: string;
+  transcriptKind: "structured" | "capture";
+  title: string;
+  intercomSessionId?: string;
+  status: ConversationStatus;
 }
 
 export type AdapterHealthState =

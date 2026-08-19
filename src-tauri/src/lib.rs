@@ -1,5 +1,7 @@
 use tauri::Emitter;
 
+mod agent_terminal;
+mod agent_terminal_actor;
 mod audit;
 mod bridge;
 mod bridge_state;
@@ -8,6 +10,7 @@ mod commands;
 mod config;
 mod connection;
 mod engine;
+mod ghostty_vt;
 mod intercom;
 mod models;
 mod notify;
@@ -20,6 +23,7 @@ mod transport;
 mod tray;
 mod usage;
 
+pub use agent_terminal::*;
 pub use bridge::*;
 pub use bridge_state::*;
 pub use claude_adapter::*;
@@ -37,6 +41,8 @@ pub use usage::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    std::thread::spawn(commands::prewarm_login_shell_network_env);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -73,13 +79,18 @@ pub fn run() {
                 let bridge_state = crate::bridge_state::spawn_bridge(app.handle().clone());
                 app.manage(bridge_state);
 
+                let agent_terminal_state: AgentTerminalState =
+                    std::sync::Arc::new(AgentTerminalManager::default());
+                app.manage(agent_terminal_state);
+
                 let handle = app.handle().clone();
 
                 // 菜单在所有平台都构建（启动时一次，很便宜），但只在非 macOS 上挂到图标上，
                 // 原因见下方注释。macOS 上它仅作为保留代码路径存在。
                 if let Ok(_initial_menu) = build_tray_menu(&handle) {
-                    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
-                        .expect("failed to load tray icon bytes");
+                    let tray_icon =
+                        tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+                            .expect("failed to load tray icon bytes");
 
                     #[allow(unused_mut)]
                     let mut builder = TrayIconBuilder::with_id("main")
@@ -227,7 +238,17 @@ pub fn run() {
             panel_hide,
             panel_quit,
             check_workspace_adapters,
-            apply_workspace_install_plan
+            apply_workspace_install_plan,
+            open_agent_terminal,
+            write_agent_terminal,
+            paste_agent_terminal,
+            focus_agent_terminal,
+            key_agent_terminal,
+            mouse_agent_terminal,
+            scroll_agent_terminal,
+            copy_agent_terminal,
+            resize_agent_terminal,
+            close_agent_terminal
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -252,18 +273,33 @@ mod tests {
     #[test]
     fn test_sanitize_session_name() {
         assert_eq!(sanitize_session_name(""), Err("ERR_NAME_EMPTY".to_string()));
-        assert_eq!(sanitize_session_name("   "), Err("ERR_NAME_EMPTY".to_string()));
+        assert_eq!(
+            sanitize_session_name("   "),
+            Err("ERR_NAME_EMPTY".to_string())
+        );
 
-        assert_eq!(sanitize_session_name("foo@bar#baz!"), Ok("foo-bar-baz".to_string()));
-        assert_eq!(sanitize_session_name("  hello   world  "), Ok("hello-world".to_string()));
+        assert_eq!(
+            sanitize_session_name("foo@bar#baz!"),
+            Ok("foo-bar-baz".to_string())
+        );
+        assert_eq!(
+            sanitize_session_name("  hello   world  "),
+            Ok("hello-world".to_string())
+        );
 
         let long_name = "a".repeat(70);
         let result = sanitize_session_name(&long_name).unwrap();
         assert_eq!(result.len(), 60);
         assert_eq!(result, "a".repeat(60));
 
-        assert_eq!(sanitize_session_name("---"), Err("ERR_NAME_INVALID".to_string()));
-        assert_eq!(sanitize_session_name("!!!"), Err("ERR_NAME_INVALID".to_string()));
+        assert_eq!(
+            sanitize_session_name("---"),
+            Err("ERR_NAME_INVALID".to_string())
+        );
+        assert_eq!(
+            sanitize_session_name("!!!"),
+            Err("ERR_NAME_INVALID".to_string())
+        );
     }
 
     #[test]
@@ -279,8 +315,14 @@ mod tests {
 
     #[test]
     fn test_swap_pane_validation() {
-        assert_eq!(swap_panes("invalid", "%1"), Err("ERR_PANE_INVALID".to_string()));
-        assert_eq!(swap_panes("%1", "invalid"), Err("ERR_PANE_INVALID".to_string()));
+        assert_eq!(
+            swap_panes("invalid", "%1"),
+            Err("ERR_PANE_INVALID".to_string())
+        );
+        assert_eq!(
+            swap_panes("%1", "invalid"),
+            Err("ERR_PANE_INVALID".to_string())
+        );
     }
 
     #[test]
@@ -292,8 +334,12 @@ mod tests {
 
     #[test]
     fn test_is_no_server_err() {
-        assert!(is_no_server_err("no server running on /private/tmp/tmux-501/default"));
-        assert!(is_no_server_err("error connecting to /private/tmp/tmux-501/default (No such file or directory)"));
+        assert!(is_no_server_err(
+            "no server running on /private/tmp/tmux-501/default"
+        ));
+        assert!(is_no_server_err(
+            "error connecting to /private/tmp/tmux-501/default (No such file or directory)"
+        ));
         assert!(is_no_server_err("failed to connect to server"));
         assert!(is_no_server_err("No such file or directory (tmux socket)"));
 
@@ -308,17 +354,25 @@ mod tests {
         assert!(is_session_missing_err("can't find session: Tmux-Deck"));
         assert!(is_session_missing_err("invalid or unknown session: %foo"));
         assert!(is_session_missing_err("no session"));
-        assert!(is_session_missing_err("can't find session: alpha__td_slot_inside__td_slot_01"));
+        assert!(is_session_missing_err(
+            "can't find session: alpha__td_slot_inside__td_slot_01"
+        ));
 
         // 反例：其他错误 / 空串
-        assert!(!is_session_missing_err("no server running on /tmp/tmux-501/default"));
-        assert!(!is_session_missing_err("error connecting to /tmp/tmux-501/default"));
+        assert!(!is_session_missing_err(
+            "no server running on /tmp/tmux-501/default"
+        ));
+        assert!(!is_session_missing_err(
+            "error connecting to /tmp/tmux-501/default"
+        ));
         assert!(!is_session_missing_err("duplicate session: bar"));
         assert!(!is_session_missing_err(""));
 
         // 与 is_no_server_err 互斥
         assert!(!is_no_server_err("can't find session: foo"));
-        assert!(!is_session_missing_err("no server running on /tmp/tmux-501/default"));
+        assert!(!is_session_missing_err(
+            "no server running on /tmp/tmux-501/default"
+        ));
     }
 
     #[test]

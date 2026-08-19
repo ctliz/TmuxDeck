@@ -37,4 +37,7 @@ libc = "0.2"
 sha2 = "0.10"
 toml_edit = "=0.25.13"
 tauri-plugin-notification = "2"
+portable-pty = "0.8"
+base64 = "0.22"
+png = "0.17"
 
