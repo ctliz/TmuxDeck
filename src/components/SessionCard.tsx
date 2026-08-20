@@ -454,7 +454,7 @@ export function SessionCard({
 
         {/* Dynamic Telemetry Waveform */}
         <TelemetryWaveform
-          active={Boolean(session.attached || session.native_split)}
+          active={session.attached || session.native_split}
           color={agentVisualTheme.stroke}
         />
       </div>
