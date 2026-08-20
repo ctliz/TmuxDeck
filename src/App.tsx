@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { Plus, QrCode } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -699,49 +698,6 @@ export default function App() {
               </div>
             )}
           </main>
-
-          {/* Floating Glass Bottom Bar */}
-          <footer className="p-4 pt-0 shrink-0 max-w-7xl mx-auto w-full flex items-center justify-between pointer-events-none select-none">
-            <div className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-slate-900/60 backdrop-blur-2xl border border-white/10 text-xs text-slate-300 font-medium shadow-xl pointer-events-auto">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  sessions.some((s) => s.attached)
-                    ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse"
-                    : "bg-slate-500"
-                }`}
-              />
-              <span className="text-[11px] font-mono text-slate-200">
-                {sessions.filter((s) => s.attached).length} {t("panel.running")}
-              </span>
-              <span className="text-white/20">·</span>
-              <span className="text-[11px] font-mono text-slate-400">
-                {sessions.length} {t("panel.workspaces")}
-              </span>
-            </div>
-
-            <div className="flex items-center space-x-2 px-2 py-1 rounded-2xl bg-slate-900/60 backdrop-blur-2xl border border-white/10 shadow-xl pointer-events-auto">
-              <button
-                type="button"
-                onClick={() => {
-                  setNewSessionName(`project-${Math.floor(Math.random() * 900 + 100)}`);
-                  setPaneAgentIds([]);
-                  setShowCreateModal(true);
-                }}
-                className="flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 border border-cyan-400/40 text-cyan-300 text-xs font-medium transition cursor-pointer shadow-sm"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{t("btn.newWorkspace")}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowMobilePairingModal(true)}
-                className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition cursor-pointer"
-                title={t("mobile.openPairing")}
-              >
-                <QrCode className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </footer>
         </>
       )}
 
