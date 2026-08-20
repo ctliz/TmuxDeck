@@ -25,14 +25,23 @@ pub fn check_tmux_installed() -> Option<String> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn check_tmux_installed() -> Option<String> {
-    find_binary(
-        "tmux",
-        &[
-            "/opt/homebrew/bin/tmux",
-            "/usr/local/bin/tmux",
-            "/usr/bin/tmux",
-        ],
-    )
+    let mut candidates = vec![
+        "/opt/homebrew/bin/tmux".to_string(),
+        "/opt/homebrew/sbin/tmux".to_string(),
+        "/usr/local/bin/tmux".to_string(),
+        "/usr/bin/tmux".to_string(),
+        "/bin/tmux".to_string(),
+        "/opt/local/bin/tmux".to_string(),
+        "/home/linuxbrew/.linuxbrew/bin/tmux".to_string(),
+    ];
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !home.is_empty() {
+        candidates.push(format!("{}/.local/bin/tmux", home));
+        candidates.push(format!("{}/.cargo/bin/tmux", home));
+        candidates.push(format!("{}/.nix-profile/bin/tmux", home));
+    }
+    let candidate_refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
+    find_binary("tmux", &candidate_refs)
 }
 
 #[cfg(target_os = "windows")]

@@ -151,6 +151,8 @@ const en: Record<string, string> = {
   "terminal.layout.list": "List",
   "terminal.listTitle": "Conversations & Panes",
   "terminal.maximize": "Focus Pane",
+  "terminal.retry": "Retry Connection",
+  "terminal.failedToOpen": "Failed to attach terminal session",
 
   // Communication Adapter & Consent
   "consent.title": "Communication Adapter Consent",
@@ -522,6 +524,8 @@ const zh: Record<string, string> = {
   "terminal.layout.list": "列表",
   "terminal.listTitle": "分屏对话列表",
   "terminal.maximize": "全屏聚焦",
+  "terminal.retry": "重试连接",
+  "terminal.failedToOpen": "分屏终端附加失败",
 
   // Communication Adapter & Consent
   "consent.title": "通信适配器授权",

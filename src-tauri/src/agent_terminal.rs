@@ -570,6 +570,30 @@ pub struct AgentTerminalManager {
 
 pub type AgentTerminalState = Arc<AgentTerminalManager>;
 
+fn parse_session_and_zoom(output: &str) -> Result<(String, bool), String> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return Err("ERR_SESSION_PARSE|empty output".to_string());
+    }
+    let (session, zoomed) = if let Some((s, z)) = trimmed.split_once('|') {
+        (s, z)
+    } else if let Some((s, z)) = trimmed.split_once('\t') {
+        (s, z)
+    } else if let Some((s, z)) = trimmed.split_once("\\t") {
+        (s, z)
+    } else if let Some((s, z)) = trimmed.split_once(' ') {
+        (s, z)
+    } else {
+        return Err(format!("ERR_SESSION_PARSE|{}", trimmed));
+    };
+
+    let session = session.trim();
+    if session.is_empty() {
+        return Err("ERR_SESSION_NAME_EMPTY".to_string());
+    }
+    Ok((session.to_string(), zoomed.trim() == "1"))
+}
+
 fn query_pane_session_and_zoom(pane_id: &str) -> Result<(String, bool), String> {
     if !validate_pane_id(pane_id) {
         return Err("ERR_INVALID_PANE_ID".to_string());
@@ -579,7 +603,7 @@ fn query_pane_session_and_zoom(pane_id: &str) -> Result<(String, bool), String> 
         "-p",
         "-t",
         pane_id,
-        "#{session_name}\t#{window_zoomed_flag}",
+        "#{session_name}|#{window_zoomed_flag}",
     ])
     .map_err(|error| format!("ERR_TMUX_EXEC|{error}"))?;
 
@@ -590,14 +614,7 @@ fn query_pane_session_and_zoom(pane_id: &str) -> Result<(String, bool), String> 
         ));
     }
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let Some((session, zoomed)) = stdout.trim().split_once('\t') else {
-        return Err("ERR_SESSION_PARSE".to_string());
-    };
-    if session.trim().is_empty() {
-        return Err("ERR_SESSION_NAME_EMPTY".to_string());
-    }
-    Ok((session.trim().to_string(), zoomed.trim() == "1"))
+    parse_session_and_zoom(&String::from_utf8_lossy(&out.stdout))
 }
 
 impl AgentTerminalManager {
@@ -660,9 +677,21 @@ impl AgentTerminalManager {
             })
             .map_err(|error| format!("ERR_OPEN_PTY|{error}"))?;
 
-        let tmux_bin = check_tmux_installed().unwrap_or_else(|| "tmux".to_string());
-        let mut command = CommandBuilder::new(&tmux_bin);
-        command.args(["attach-session", "-t", &session_name]);
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            let mut cmd = CommandBuilder::new("wsl.exe");
+            cmd.args(["--", "tmux", "attach-session", "-t", &session_name]);
+            cmd
+        };
+        #[cfg(not(target_os = "windows"))]
+        let mut command = {
+            let tmux_bin = check_tmux_installed().unwrap_or_else(|| "tmux".to_string());
+            let mut cmd = CommandBuilder::new(&tmux_bin);
+            cmd.args(["attach-session", "-t", &session_name]);
+            cmd.env("PATH", crate::commands::build_augmented_path());
+            cmd
+        };
+
         command.env_remove("TMUX");
         command.env_remove("TMUX_PANE");
         command.env("TERM", "xterm-256color");
@@ -1093,6 +1122,32 @@ mod tests {
             Some(ffi::GhosttyKey_GHOSTTY_KEY_F12)
         );
         assert_eq!(ghostty_key_from_dom_code("Unknown"), None);
+    }
+
+    #[test]
+    fn test_parse_session_and_zoom() {
+        assert_eq!(
+            parse_session_and_zoom("my_session|0\n"),
+            Ok(("my_session".to_string(), false))
+        );
+        assert_eq!(
+            parse_session_and_zoom("cutter-team__td_slot_01|1"),
+            Ok(("cutter-team__td_slot_01".to_string(), true))
+        );
+        assert_eq!(
+            parse_session_and_zoom("cutter-team\t1\n"),
+            Ok(("cutter-team".to_string(), true))
+        );
+        assert_eq!(
+            parse_session_and_zoom("cutter-team\\t0"),
+            Ok(("cutter-team".to_string(), false))
+        );
+        assert_eq!(
+            parse_session_and_zoom("cutter-team 0"),
+            Ok(("cutter-team".to_string(), false))
+        );
+        assert!(parse_session_and_zoom("").is_err());
+        assert!(parse_session_and_zoom("  \n").is_err());
     }
 
     #[test]

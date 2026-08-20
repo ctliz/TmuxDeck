@@ -10,6 +10,8 @@ import {
   Rows3,
   Plus,
   ChevronDown,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { agentDisplayName, t, tPlural, translateName } from "../i18n";
 import { Environment, TmuxPane, TmuxSession } from "../types";
@@ -166,9 +168,11 @@ interface SinglePaneCanvasProps {
   env: Environment | null;
   isActive: boolean;
   layoutMode: TerminalLayoutMode;
+  sessionName?: string;
   onFocus: () => void;
   onMaximize?: () => void;
   onStatusChange?: (status: "connecting" | "attached" | "exited" | "error") => void;
+  onOpenExternalTerminal?: (sessionName: string, termId?: string) => void;
   isDraggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -185,9 +189,11 @@ function SinglePaneCanvas({
   env,
   isActive,
   layoutMode,
+  sessionName,
   onFocus,
   onMaximize,
   onStatusChange,
+  onOpenExternalTerminal,
   isDraggable,
   onDragStart,
   onDragOver,
@@ -197,6 +203,9 @@ function SinglePaneCanvas({
   isDragging,
   isDragOver,
 }: SinglePaneCanvasProps) {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -544,6 +553,7 @@ function SinglePaneCanvas({
 
     const init = async () => {
       try {
+        setErrorMessage(null);
         const [fnFrame, fnExit] = await Promise.all([
           listen<TerminalFramePayload>("agent-terminal-frame", (event) => {
             if (!isMountedRef.current || event.payload.terminalId !== terminalId) return;
@@ -569,16 +579,24 @@ function SinglePaneCanvas({
         let rows = 24;
 
         if (container && container.clientWidth > 0 && container.clientHeight > 0) {
-          const charWidth = charWidthRef.current;
-          const charHeight = charHeightRef.current;
+          const charWidth = charWidthRef.current || 7.8;
+          const charHeight = charHeightRef.current || 16;
           if (charWidth > 0 && charHeight > 0) {
             const style = window.getComputedStyle(container);
-            const contentWidth =
-              container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-            const contentHeight =
-              container.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-            cols = Math.max(10, Math.floor(contentWidth / charWidth));
-            rows = Math.max(5, Math.floor(contentHeight / charHeight));
+            const padLeft = parseFloat(style.paddingLeft) || 0;
+            const padRight = parseFloat(style.paddingRight) || 0;
+            const padTop = parseFloat(style.paddingTop) || 0;
+            const padBottom = parseFloat(style.paddingBottom) || 0;
+            const contentWidth = container.clientWidth - padLeft - padRight;
+            const contentHeight = container.clientHeight - padTop - padBottom;
+            const computedCols = Math.floor(contentWidth / charWidth);
+            const computedRows = Math.floor(contentHeight / charHeight);
+            if (Number.isFinite(computedCols) && computedCols >= 10) {
+              cols = Math.min(500, Math.max(10, Math.floor(computedCols)));
+            }
+            if (Number.isFinite(computedRows) && computedRows >= 5) {
+              rows = Math.min(200, Math.max(5, Math.floor(computedRows)));
+            }
             colsRef.current = cols;
             rowsRef.current = rows;
           }
@@ -592,6 +610,7 @@ function SinglePaneCanvas({
         });
 
         if (isMountedRef.current && terminalIdRef.current === terminalId) {
+          setErrorMessage(null);
           onStatusChangeRef.current?.("attached");
           if (isActiveRef.current) {
             textareaRef.current?.focus();
@@ -601,6 +620,10 @@ function SinglePaneCanvas({
         }
       } catch (err) {
         console.error("open_agent_terminal failed:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isMountedRef.current) {
+          setErrorMessage(msg);
+        }
         onStatusChangeRef.current?.("error");
         invoke("close_agent_terminal", { terminalId }).catch(() => {});
       }
@@ -619,7 +642,7 @@ function SinglePaneCanvas({
         invoke("close_agent_terminal", { terminalId: termIdToClose }).catch(() => {});
       }
     };
-  }, [pane.id, measureCharMetrics, renderFrame]);
+  }, [pane.id, retryCount, measureCharMetrics, renderFrame]);
 
   // Focus textarea when pane becomes active
   useEffect(() => {
@@ -636,14 +659,18 @@ function SinglePaneCanvas({
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        const charWidth = charWidthRef.current;
-        const charHeight = charHeightRef.current;
+        const charWidth = charWidthRef.current || 7.8;
+        const charHeight = charHeightRef.current || 16;
         if (width <= 0 || height <= 0 || charWidth <= 0 || charHeight <= 0) return;
 
-        const newCols = Math.max(10, Math.floor(width / charWidth));
-        const newRows = Math.max(5, Math.floor(height / charHeight));
+        const newCols = Math.min(500, Math.max(10, Math.floor(width / charWidth)));
+        const newRows = Math.min(200, Math.max(5, Math.floor(height / charHeight)));
 
-        if (newCols !== colsRef.current || newRows !== rowsRef.current) {
+        if (
+          Number.isFinite(newCols) &&
+          Number.isFinite(newRows) &&
+          (newCols !== colsRef.current || newRows !== rowsRef.current)
+        ) {
           colsRef.current = newCols;
           rowsRef.current = newRows;
 
@@ -1044,6 +1071,47 @@ function SinglePaneCanvas({
           onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
         />
+
+        {/* Error / Disconnection Overlay */}
+        {errorMessage && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-[#090d16]/90 backdrop-blur-md text-center select-text">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mb-3 text-rose-400 shadow-lg shadow-rose-950/30">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-200 mb-1">
+              {t("terminal.failedToOpen")}
+            </h3>
+            <p className="text-xs text-rose-300/90 font-mono max-w-md break-all bg-rose-950/40 border border-rose-900/50 rounded-lg px-3 py-1.5 my-2">
+              {errorMessage}
+            </p>
+            <div className="flex items-center space-x-2.5 mt-3 pointer-events-auto">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRetryCount((c) => c + 1);
+                }}
+                className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium text-xs shadow-lg shadow-cyan-500/20 transition cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>{t("terminal.retry")}</span>
+              </button>
+              {onOpenExternalTerminal && sessionName && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenExternalTerminal(sessionName);
+                  }}
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 font-medium text-xs transition cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>{t("terminal.openFallback")}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -1160,6 +1228,24 @@ export function AgentTerminalCanvas({
   const activePane = useMemo(() => {
     return session.panes.find((p) => p.id === activePaneId) || session.panes[0];
   }, [session.panes, activePaneId]);
+
+  if (!activePane) {
+    return (
+      <div className="td-canvas flex flex-col h-screen text-slate-100 font-sans select-none overflow-hidden items-center justify-center p-6">
+        <div className="p-8 rounded-2xl bg-slate-900/80 border border-white/10 flex flex-col items-center text-center max-w-md">
+          <p className="text-slate-300 text-sm font-medium mb-4">No active terminal panes found in session.</p>
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 hover:text-white transition cursor-pointer text-xs font-medium"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>{t("terminal.back")}</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const activePaneAgentId = activePane
     ? resolvePaneAgentId(activePane, env?.agents ?? [])
@@ -1448,8 +1534,10 @@ export function AgentTerminalCanvas({
             env={env}
             isActive={true}
             layoutMode="focus"
+            sessionName={session.name}
             onFocus={() => {}}
             onStatusChange={setTermStatus}
+            onOpenExternalTerminal={onOpenExternalTerminal}
           />
         ) : layoutMode === "list" ? (
           <div className="flex h-full w-full gap-3 overflow-hidden">
@@ -1548,8 +1636,10 @@ export function AgentTerminalCanvas({
                 env={env}
                 isActive={true}
                 layoutMode="focus"
+                sessionName={session.name}
                 onFocus={() => {}}
                 onStatusChange={setTermStatus}
+                onOpenExternalTerminal={onOpenExternalTerminal}
               />
             </main>
           </div>
@@ -1573,6 +1663,7 @@ export function AgentTerminalCanvas({
                 env={env}
                 isActive={pane.id === activePaneId}
                 layoutMode="grid"
+                sessionName={session.name}
                 onFocus={() => onSelectPane(pane.id)}
                 onMaximize={() => {
                   onSelectPane(pane.id);
@@ -1583,6 +1674,7 @@ export function AgentTerminalCanvas({
                     setTermStatus(status);
                   }
                 }}
+                onOpenExternalTerminal={onOpenExternalTerminal}
                 isDraggable={session.panes.length > 1}
                 isDragging={draggingPaneId === pane.id}
                 isDragOver={dragOverPaneId === pane.id}
@@ -1602,8 +1694,10 @@ export function AgentTerminalCanvas({
             env={env}
             isActive={true}
             layoutMode="focus"
+            sessionName={session.name}
             onFocus={() => {}}
             onStatusChange={setTermStatus}
+            onOpenExternalTerminal={onOpenExternalTerminal}
           />
         )}
       </div>
