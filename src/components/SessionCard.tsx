@@ -1,8 +1,16 @@
-import { useState, useRef } from "react";
-import { Terminal, ExternalLink } from "lucide-react";
+import { useState, useRef, useMemo } from "react";
+import {
+  Terminal,
+  ExternalLink,
+  Sparkles,
+  Cpu,
+  Code,
+  Layers,
+  X,
+} from "lucide-react";
 import { agentDisplayName, t, translateName } from "../i18n";
 import { Environment, TmuxPane, TmuxSession } from "../types";
-import { resolvePaneAgentId } from "../utils";
+import { dominantAgentId, resolvePaneAgentId } from "../utils";
 
 interface SessionCardProps {
   session: TmuxSession;
@@ -38,15 +46,21 @@ export function getSessionActivityInfo(session: TmuxSession) {
   if (session.attached) {
     return {
       statusClass:
-        "bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse",
+        "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse",
       statusTooltip: t("card.attached"),
+      label: t("card.attached"),
+      pillClass:
+        "bg-emerald-500/10 text-emerald-300 border-emerald-500/25 shadow-[0_0_8px_rgba(52,211,153,0.2)]",
     };
   }
 
   if (session.native_split) {
     return {
-      statusClass: "bg-amber-400 shadow-sm shadow-amber-400/80",
+      statusClass: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]",
       statusTooltip: t("card.runningDetached"),
+      label: t("card.runningDetached"),
+      pillClass:
+        "bg-amber-500/10 text-amber-300 border-amber-500/25 shadow-[0_0_8px_rgba(251,191,36,0.2)]",
     };
   }
 
@@ -58,15 +72,120 @@ export function getSessionActivityInfo(session: TmuxSession) {
 
   if (elapsed >= 0 && elapsed < 600) {
     return {
-      statusClass: "bg-amber-400 shadow-sm shadow-amber-400/80",
+      statusClass: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]",
       statusTooltip: t("card.bgActive"),
+      label: t("card.bgActive"),
+      pillClass: "bg-amber-500/10 text-amber-300 border-amber-500/25",
     };
   }
 
   return {
-    statusClass: "bg-slate-600",
+    statusClass: "bg-slate-500",
     statusTooltip: t("card.idle"),
+    label: t("card.idle"),
+    pillClass: "bg-white/5 text-slate-400 border-white/10",
   };
+}
+
+function getAgentVisualTheme(agentId?: string | null) {
+  const id = agentId?.toLowerCase() || "";
+  if (id.includes("claude") || id === "cci") {
+    return {
+      bg: "bg-gradient-to-br from-amber-500/20 via-orange-500/15 to-amber-700/10",
+      border: "border-amber-500/30",
+      text: "text-amber-300",
+      shadow: "shadow-[0_0_14px_rgba(245,158,11,0.25)]",
+      stroke: "#f59e0b",
+      icon: Sparkles,
+    };
+  }
+  if (id.includes("pi")) {
+    return {
+      bg: "bg-gradient-to-br from-cyan-500/20 via-blue-500/15 to-indigo-700/10",
+      border: "border-cyan-500/30",
+      text: "text-cyan-300",
+      shadow: "shadow-[0_0_14px_rgba(6,182,212,0.25)]",
+      stroke: "#06b6d4",
+      icon: Cpu,
+    };
+  }
+  if (id.includes("codex")) {
+    return {
+      bg: "bg-gradient-to-br from-emerald-500/20 via-teal-500/15 to-emerald-700/10",
+      border: "border-emerald-500/30",
+      text: "text-emerald-300",
+      shadow: "shadow-[0_0_14px_rgba(16,185,129,0.25)]",
+      stroke: "#10b981",
+      icon: Code,
+    };
+  }
+  if (id.includes("opencode")) {
+    return {
+      bg: "bg-gradient-to-br from-purple-500/20 via-violet-500/15 to-purple-700/10",
+      border: "border-purple-500/30",
+      text: "text-purple-300",
+      shadow: "shadow-[0_0_14px_rgba(168,85,247,0.25)]",
+      stroke: "#a855f7",
+      icon: Layers,
+    };
+  }
+  return {
+    bg: "bg-gradient-to-br from-blue-500/20 via-slate-600/15 to-blue-700/10",
+    border: "border-blue-500/30",
+    text: "text-blue-300",
+    shadow: "shadow-[0_0_14px_rgba(59,130,246,0.25)]",
+    stroke: "#38bdf8",
+    icon: Terminal,
+  };
+}
+
+function TelemetryWaveform({
+  active,
+  color = "#38bdf8",
+}: {
+  active: boolean;
+  color?: string;
+}) {
+  const gradId = `spark-${color.replace("#", "")}`;
+  return (
+    <div className="w-full h-4 overflow-hidden pointer-events-none select-none my-1 opacity-80">
+      <svg
+        viewBox="0 0 240 18"
+        className="w-full h-full"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <path
+          d={
+            active
+              ? "M0 9 Q 15 2, 30 9 T 60 9 T 90 2 T 120 14 T 150 5 T 180 11 T 210 3 T 240 9 L 240 18 L 0 18 Z"
+              : "M0 9 Q 30 8, 60 9 T 120 9 T 180 9 T 240 9 L 240 18 L 0 18 Z"
+          }
+          fill={`url(#${gradId})`}
+        />
+        <path
+          d={
+            active
+              ? "M0 9 Q 15 2, 30 9 T 60 9 T 90 2 T 120 14 T 150 5 T 180 11 T 210 3 T 240 9"
+              : "M0 9 Q 30 8, 60 9 T 120 9 T 180 9 T 240 9"
+          }
+          fill="none"
+          stroke={color}
+          strokeWidth="1.5"
+          className={
+            active
+              ? "drop-shadow-[0_0_5px_rgba(56,189,248,0.7)]"
+              : "opacity-40"
+          }
+        />
+      </svg>
+    </div>
+  );
 }
 
 export function SessionCard({
@@ -107,6 +226,23 @@ export function SessionCard({
   const isPaneDraggingRef = useRef(false);
 
   const panesCount = session.panes.length || session.panes_count;
+
+  const runningAgentIds = useMemo(() => {
+    return session.panes
+      .map((pane) => resolvePaneAgentId(pane, env?.agents ?? []))
+      .filter((agentId): agentId is string => Boolean(agentId));
+  }, [session.panes, env?.agents]);
+
+  const dominantAgent = useMemo(() => {
+    const domId = dominantAgentId(runningAgentIds);
+    if (!domId) return null;
+    const tool = env?.agents.find((a) => a.id === domId);
+    return tool ? agentDisplayName(tool) : domId;
+  }, [runningAgentIds, env?.agents]);
+
+  const firstAgentId = runningAgentIds[0] || null;
+  const agentVisualTheme = getAgentVisualTheme(firstAgentId);
+  const AgentIconComponent = agentVisualTheme.icon;
 
   const gridCols =
     panesCount === 1
@@ -190,20 +326,20 @@ export function SessionCard({
       onDragOver={(e) => !isPaneDraggingRef.current && onCardDragOver?.(e, session.id)}
       onDragLeave={(e) => !isPaneDraggingRef.current && onCardDragLeave?.(e, session.id)}
       onDrop={(e) => !isPaneDraggingRef.current && onCardDrop?.(e, session.id)}
-      className={`flex flex-col justify-between rounded-2xl bg-white/10 backdrop-blur-xl border transition-all duration-300 shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15 group animate-fade-in-up ${
+      className={`flex flex-col justify-between rounded-2xl td-glass-card transition-all duration-300 group animate-fade-in-up ${
         isDraggingCard
           ? "opacity-40 border-cyan-500/70 scale-95 cursor-grabbing"
           : isCardDragOverTarget
           ? "border-cyan-400 bg-cyan-500/20 shadow-cyan-500/20 scale-[1.02]"
           : isHighlighted
           ? "border-cyan-400/80 bg-cyan-500/10 shadow-cyan-500/10"
-          : "border-white/15 hover:border-cyan-500/50"
+          : ""
       }`}
     >
       {/* Card Header */}
       <div className="p-4 border-b border-white/10">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center space-x-2 min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center space-x-2.5 min-w-0 flex-1">
             <button
               type="button"
               draggable={!isRenaming}
@@ -215,10 +351,14 @@ export function SessionCard({
             >
               ⠿
             </button>
-            <span
-              className={`w-2.5 h-2.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
-              title={activityInfo.statusTooltip}
-            />
+
+            {/* Agent Squircle Icon Badge */}
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center border shrink-0 ${agentVisualTheme.bg} ${agentVisualTheme.border} ${agentVisualTheme.text} ${agentVisualTheme.shadow} transition-transform group-hover:scale-105`}
+            >
+              <AgentIconComponent className="w-4 h-4" />
+            </div>
+
             {isRenaming ? (
               <input
                 type="text"
@@ -230,27 +370,37 @@ export function SessionCard({
                   e.key === "Enter" && onRenameCommit(session.name)
                 }
                 autoFocus
-                className="bg-slate-950 px-2 py-0.5 border border-cyan-500 rounded text-sm text-white w-full cursor-text"
+                className="bg-slate-950/90 px-2.5 py-1 border border-cyan-400 rounded-xl text-sm text-white w-full cursor-text shadow-lg focus:outline-none"
                 onPointerDown={(e) => e.stopPropagation()}
                 onDragStart={(e) => e.stopPropagation()}
               />
             ) : (
-              <div className="flex items-center space-x-2 min-w-0">
-                <h2
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRenameStart(session.name);
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onDragStart={(e) => e.stopPropagation()}
-                  className="font-semibold text-slate-100 truncate text-base transition hover:text-cyan-300 hover:underline cursor-pointer"
-                  title={t("card.rename")}
-                >
-                  {session.name}
-                </h2>
+              <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex items-center space-x-1.5 min-w-0">
+                  <h2
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRenameStart(session.name);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDragStart={(e) => e.stopPropagation()}
+                    className="font-semibold text-slate-100 truncate text-sm tracking-tight transition hover:text-cyan-300 cursor-pointer"
+                    title={t("card.rename")}
+                  >
+                    {session.name}
+                  </h2>
+                </div>
+                <div className="flex items-center space-x-1.5 text-[10px] text-slate-400/80 font-mono truncate mt-0.5">
+                  <span className="truncate text-slate-300">
+                    {dominantAgent || t("agent.shell")}
+                  </span>
+                  <span>·</span>
+                  <span className="shrink-0">{panesCount} {panesCount === 1 ? "pane" : "panes"}</span>
+                </div>
               </div>
             )}
           </div>
+
           <div className="flex items-center space-x-1 shrink-0">
             {/* Primary Action: Open Agent Terminal */}
             <button
@@ -263,11 +413,12 @@ export function SessionCard({
                 const targetPaneId = session.panes[0]?.id || "%0";
                 onOpenChat(session, targetPaneId);
               }}
-              className="p-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 hover:text-cyan-200 transition cursor-pointer flex items-center justify-center shadow-sm shadow-cyan-500/20"
+              className="p-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 border border-cyan-400/40 text-cyan-300 hover:text-cyan-200 transition cursor-pointer flex items-center justify-center shadow-lg shadow-cyan-950/40"
               title={t("card.openTerminal")}
             >
               <Terminal className="w-3.5 h-3.5" />
             </button>
+
             {/* Fallback Action: Open in External Terminal */}
             <button
               type="button"
@@ -278,11 +429,12 @@ export function SessionCard({
                 e.stopPropagation();
                 onOpenSession(session.name, activeTermId);
               }}
-              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-slate-200 transition cursor-pointer flex items-center justify-center"
+              className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-slate-200 transition cursor-pointer flex items-center justify-center"
               title={`${t("card.openTerminalFallback")} (${termName})`}
             >
               <ExternalLink className="w-3.5 h-3.5" />
             </button>
+
             <button
               type="button"
               draggable={false}
@@ -292,26 +444,31 @@ export function SessionCard({
                 e.stopPropagation();
                 onKill(session.name, session.panes_count);
               }}
-              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-white/10 transition cursor-pointer text-sm font-bold leading-none shrink-0"
+              className="p-1.5 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer shrink-0"
               title={t("card.destroy")}
             >
-              ✕
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+
+        {/* Dynamic Telemetry Waveform */}
+        <TelemetryWaveform
+          active={session.attached || session.native_split}
+          color={agentVisualTheme.stroke}
+        />
       </div>
 
       {/* Pane Layout Preview */}
-      <div className="p-4 flex-1">
+      <div className="p-3.5 flex-1">
         <div
-          className={`grid ${gridCols} gap-2 p-2 rounded-xl bg-black/30 border border-white/10 h-[12.5rem] overflow-y-auto`}
+          className={`grid ${gridCols} gap-2 p-2 rounded-xl td-glass-inner h-[12.5rem] overflow-y-auto`}
         >
           {session.panes.map((pane, idx) => {
             const paneAgentId = resolvePaneAgentId(pane, env?.agents ?? []);
             const matchedAgent = paneAgentId
               ? env?.agents.find((agent) => agent.id === paneAgentId)
               : undefined;
-            // An Agent uninstalled since launch still labels its pane by id.
             const paneAgentLabel = matchedAgent
               ? agentDisplayName(matchedAgent)
               : paneAgentId;
@@ -343,7 +500,7 @@ export function SessionCard({
                   }
                 }}
                 title={t("card.openPaneTerminal")}
-                className={`relative group/pane flex flex-col justify-between p-2.5 rounded-lg border text-[11px] transition-all duration-200 cursor-pointer hover:border-cyan-400/60 hover:bg-white/5 ${
+                className={`relative group/pane flex flex-col justify-between p-2.5 rounded-lg border text-[11px] transition-all duration-200 cursor-pointer hover:border-cyan-400/60 hover:bg-slate-900/60 ${
                   isPaneColSpan ? "col-span-2" : ""
                 } ${
                   isPaneFullHeight ? "h-full min-h-[9.8rem]" : "min-h-[4.8rem]"
@@ -355,10 +512,10 @@ export function SessionCard({
                     : isThisPaneDragOver
                     ? "border-cyan-400 bg-cyan-500/30 shadow-sm shadow-cyan-500/30 scale-[1.03]"
                     : hasContent
-                    ? "bg-black/40 border-white/15 text-slate-200"
+                    ? "bg-slate-950/60 border-white/10 text-slate-200"
                     : isAgent
-                    ? "bg-cyan-950/30 border-cyan-800/40 text-cyan-300"
-                    : "bg-black/20 border-white/10 text-slate-400"
+                    ? "bg-cyan-950/40 border-cyan-800/40 text-cyan-300"
+                    : "bg-slate-950/40 border-white/5 text-slate-400"
                 }`}
               >
                 <div className="flex items-center justify-between mb-1.5 select-none pointer-events-none">
@@ -407,6 +564,24 @@ export function SessionCard({
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Card Footer: Status Pill & Metadata */}
+      <div className="px-4 py-2.5 border-t border-white/10 flex items-center justify-between text-[10px] font-mono text-slate-400 select-none">
+        <div
+          className={`flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-medium ${activityInfo.pillClass}`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${activityInfo.statusClass}`}
+          />
+          <span>{activityInfo.label}</span>
+        </div>
+
+        <div className="flex items-center space-x-2 text-slate-400/80">
+          <span>{session.panes[0]?.id || "%0"}</span>
+          <span>·</span>
+          <span>{session.created_at || "now"}</span>
         </div>
       </div>
     </div>

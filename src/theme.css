@@ -4,20 +4,20 @@
  * 两者是两个独立的 Vite 入口，样式基线也不同（面板的 body 必须透明），
  * 颜色若各写各的必然漂移——所以底色配方只在这里定义一次。
  *
- * 配方要点：中心压暗保证正文/终端预览的对比度，只在两个对角注入 indigo / cyan 色偏。
- * 之前主窗口用的是 `from-slate-900 via-slate-950 to-indigo-950/60`——三个停靠点都太暗，
- * 在 1080×720 的尺寸下渐变根本读不出来，整块就是平黑，其上的 bg-white/10 玻璃面
- * 也就失去了「透出底色」的意义，只能读成深灰实底。
+ * 配方要点：深色极光/网格环境光（indigo、cyan、emerald、sapphire 氛围色），
+ * 搭配多层精细玻璃拟态（24px 模糊度、顶边缘 1px 高光、内部凹槽与深层投影），
+ * 实现极具质感且对比度清晰的高级桌面端深色毛玻璃交互体验。
  */
 
-/* 不透明版本：主窗口。窗口本身不做 vibrancy——1080×720 的半透明叠在杂乱桌面上
-   会把终端预览的可读性毁掉，这里只取渐变，不取透明。 */
+/* 主窗口：环境极光氛围底色 + 深度磨砂玻璃透光 */
 .td-canvas {
-  background-color: #020617;
+  background-color: #030712;
   background-image:
-    radial-gradient(120% 85% at 0% 0%, rgba(79, 70, 229, 0.30), transparent 62%),
-    radial-gradient(115% 85% at 100% 100%, rgba(6, 182, 212, 0.22), transparent 62%),
-    linear-gradient(160deg, #0c1326 0%, #020617 52%, #071a2a 100%);
+    radial-gradient(130% 90% at 0% 0%, rgba(99, 102, 241, 0.32), transparent 60%),
+    radial-gradient(120% 90% at 100% 100%, rgba(6, 182, 212, 0.28), transparent 60%),
+    radial-gradient(90% 60% at 50% 0%, rgba(37, 99, 235, 0.22), transparent 70%),
+    radial-gradient(80% 50% at 0% 75%, rgba(16, 185, 129, 0.16), transparent 65%),
+    linear-gradient(160deg, #090e1c 0%, #030712 50%, #061322 100%);
   background-attachment: fixed;
 }
 
@@ -43,3 +43,43 @@
     transparent 45%
   );
 }
+
+/* 玻璃拟态卡片容器 */
+.td-glass-card {
+  background-color: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+    0 16px 36px -8px rgba(0, 0, 0, 0.55);
+}
+
+.td-glass-card:hover {
+  background-color: rgba(15, 23, 42, 0.65);
+  border-color: rgba(34, 211, 238, 0.35);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
+    0 20px 45px -8px rgba(6, 182, 212, 0.16);
+}
+
+/* 嵌套玻璃容器（如分屏预览内部） */
+.td-glass-inner {
+  background-color: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* 玻璃拟态胶囊 / 药丸按钮 */
+.td-glass-pill {
+  background-color: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+    0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
