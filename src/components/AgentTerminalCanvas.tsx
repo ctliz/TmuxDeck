@@ -12,6 +12,7 @@ import {
   ChevronDown,
   RefreshCw,
   AlertCircle,
+  Check,
 } from "lucide-react";
 import { agentDisplayName, t, tPlural, translateName } from "../i18n";
 import { Environment, TmuxPane, TmuxSession } from "../types";
@@ -162,6 +163,92 @@ function getNormalizedSelection(sel: SelectionRange): { startX: number; startY: 
   return { startX, startY, endX, endY };
 }
 
+function getSelectedTextFromGrid(
+  grid: TerminalCell[][],
+  sel: SelectionRange,
+  cols: number,
+  rows: number
+): string {
+  const norm = getNormalizedSelection(sel);
+  const startRow = Math.max(0, Math.min(rows - 1, norm.startY));
+  const endRow = Math.max(0, Math.min(rows - 1, norm.endY));
+  const lines: string[] = [];
+
+  for (let r = startRow; r <= endRow; r++) {
+    const rowCells = grid[r];
+    if (!rowCells) {
+      lines.push("");
+      continue;
+    }
+    const startCol = r === startRow ? Math.max(0, Math.min(cols - 1, norm.startX)) : 0;
+    const endCol = r === endRow ? Math.max(0, Math.min(cols - 1, norm.endX)) : cols - 1;
+
+    let lineStr = "";
+    for (let c = startCol; c <= endCol; c++) {
+      const cell = rowCells[c];
+      if (cell && cell.text !== undefined) {
+        lineStr += cell.text;
+      } else {
+        lineStr += " ";
+      }
+    }
+    lines.push(lineStr.trimEnd());
+  }
+
+  return lines.join("\n");
+}
+
+function getWordSelectionAt(
+  grid: TerminalCell[][],
+  col: number,
+  row: number,
+  cols: number,
+  rows: number
+): SelectionRange | null {
+  if (row < 0 || row >= rows || !grid[row]) return null;
+  const rowCells = grid[row];
+  if (!rowCells || col < 0 || col >= cols) return null;
+
+  const targetCell = rowCells[col];
+  const char = targetCell?.text || " ";
+  if (!char.trim()) return null;
+
+  const isWordChar = (ch: string) => /[a-zA-Z0-9_\-\.\/\@\:\~\$\#\u4e00-\u9fa5]/.test(ch);
+  const targetIsWord = isWordChar(char);
+
+  let startX = col;
+  while (startX > 0) {
+    const prevChar = rowCells[startX - 1]?.text || " ";
+    if (targetIsWord ? isWordChar(prevChar) : !isWordChar(prevChar) && prevChar.trim() !== "") {
+      startX--;
+    } else {
+      break;
+    }
+  }
+
+  let endX = col;
+  while (endX < cols - 1) {
+    const nextChar = rowCells[endX + 1]?.text || " ";
+    if (targetIsWord ? isWordChar(nextChar) : !isWordChar(nextChar) && nextChar.trim() !== "") {
+      endX++;
+    } else {
+      break;
+    }
+  }
+
+  return { startX, startY: row, endX, endY: row };
+}
+
+function getLineSelectionAt(
+  grid: TerminalCell[][],
+  row: number,
+  cols: number,
+  rows: number
+): SelectionRange | null {
+  if (row < 0 || row >= rows || !grid[row]) return null;
+  return { startX: 0, startY: row, endX: cols - 1, endY: row };
+}
+
 interface SinglePaneCanvasProps {
   pane: TmuxPane;
   paneIndex: number;
@@ -205,6 +292,8 @@ function SinglePaneCanvas({
 }: SinglePaneCanvasProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [copyToast, setCopyToast] = useState<{ visible: boolean; count: number }>({ visible: false, count: 0 });
+  const [isScrolledUp, setIsScrolledUp] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -216,6 +305,16 @@ function SinglePaneCanvas({
   const scrollbarRef = useRef<TerminalScrollbar | null>(null);
   const selectionRef = useRef<SelectionRange | null>(null);
   const isSelectingRef = useRef<boolean>(false);
+  const dragStartedRef = useRef<boolean>(false);
+  const mouseDownPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isHoveringScrollbarRef = useRef<boolean>(false);
+  const isDraggingScrollbarRef = useRef<boolean>(false);
+  const scrollbarDragStartYRef = useRef<number>(0);
+  const scrollbarDragStartOffsetRef = useRef<number>(0);
+  const copyToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelAccumulatorRef = useRef<number>(0);
+  const scrollRafRef = useRef<number | null>(null);
+  const pendingScrollDeltaRef = useRef<number>(0);
 
   const isMountedRef = useRef(true);
   const isComposingRef = useRef(false);
@@ -241,6 +340,16 @@ function SinglePaneCanvas({
     onStatusChangeRef.current = onStatusChange;
   }, [isActive, onStatusChange]);
 
+  const triggerCopy = useCallback((text: string) => {
+    if (!text || !text.trim()) return;
+    navigator.clipboard.writeText(text).catch(() => {});
+    if (copyToastTimeoutRef.current) clearTimeout(copyToastTimeoutRef.current);
+    setCopyToast({ visible: true, count: text.length });
+    copyToastTimeoutRef.current = setTimeout(() => {
+      setCopyToast({ visible: false, count: 0 });
+    }, 1600);
+  }, []);
+
   // Measure font metrics on a test canvas context
   const measureCharMetrics = useCallback(() => {
     const canvas = document.createElement("canvas");
@@ -255,7 +364,7 @@ function SinglePaneCanvas({
   }, []);
 
   // Draw scrollbar on canvas
-  const drawScrollbar = useCallback((ctx: CanvasRenderingContext2D, displayWidth: number, displayHeight: number) => {
+  const drawScrollbar = useCallback((ctx: CanvasRenderingContext2D, displayWidth: number, displayHeight: number, isHovered: boolean = false) => {
     const scrollbar = scrollbarRef.current;
     if (
       !scrollbar ||
@@ -265,17 +374,17 @@ function SinglePaneCanvas({
     ) return;
 
     const trackHeight = displayHeight;
-    const thumbHeight = Math.max(16, Math.min(trackHeight, Math.round((scrollbar.length / scrollbar.total) * trackHeight)));
+    const thumbHeight = Math.max(24, Math.min(trackHeight, Math.round((scrollbar.length / scrollbar.total) * trackHeight)));
     const maxOffset = Math.max(1, scrollbar.total - scrollbar.length);
     const clampedOffset = Math.max(0, Math.min(maxOffset, scrollbar.offset));
     const thumbY = Math.round((clampedOffset / maxOffset) * (trackHeight - thumbHeight));
-    const barWidth = 4;
-    const barX = displayWidth - barWidth - 2;
+    const barWidth = isHovered ? 7 : 4;
+    const barX = displayWidth - barWidth - 3;
 
-    ctx.fillStyle = "rgba(148, 163, 184, 0.4)";
+    ctx.fillStyle = isHovered ? "rgba(148, 163, 184, 0.75)" : "rgba(148, 163, 184, 0.35)";
     if ("roundRect" in ctx && typeof ctx.roundRect === "function") {
       ctx.beginPath();
-      ctx.roundRect(barX, thumbY, barWidth, thumbHeight, 2);
+      ctx.roundRect(barX, thumbY, barWidth, thumbHeight, 3);
       ctx.fill();
     } else {
       ctx.fillRect(barX, thumbY, barWidth, thumbHeight);
@@ -401,7 +510,7 @@ function SinglePaneCanvas({
       }
     }
 
-    drawScrollbar(ctx, displayWidth, displayHeight);
+    drawScrollbar(ctx, displayWidth, displayHeight, isHoveringScrollbarRef.current);
     ctx.restore();
   }, [drawScrollbar, drawSingleRow]);
 
@@ -420,10 +529,8 @@ function SinglePaneCanvas({
     const mouseModeChanged = mouseReportingRef.current !== Boolean(mouseReporting);
     mouseReportingRef.current = Boolean(mouseReporting);
     scrollbarRef.current = scrollbar || null;
-    if (mouseReportingRef.current) {
-      selectionRef.current = null;
-      isSelectingRef.current = false;
-    }
+    const isUp = Boolean(scrollbar && scrollbar.total > scrollbar.length && scrollbar.offset + scrollbar.length < scrollbar.total);
+    setIsScrolledUp(isUp);
 
     const displayWidth = cols * charWidth;
     const displayHeight = rows * charHeight;
@@ -517,7 +624,7 @@ function SinglePaneCanvas({
       }
     }
 
-    drawScrollbar(ctx, displayWidth, displayHeight);
+    drawScrollbar(ctx, displayWidth, displayHeight, isHoveringScrollbarRef.current);
 
     prevCursorRef.current = cursor;
     ctx.restore();
@@ -690,6 +797,23 @@ function SinglePaneCanvas({
     return () => observer.disconnect();
   }, []);
 
+  const handleScrollToBottom = useCallback(() => {
+    const currentTerminalId = terminalIdRef.current;
+    if (!currentTerminalId) return;
+
+    if (mouseReportingRef.current) {
+      invoke("write_agent_terminal", {
+        terminalId: currentTerminalId,
+        data: "q",
+      }).catch(() => {});
+    } else {
+      invoke("scroll_agent_terminal", {
+        terminalId: currentTerminalId,
+        delta: 999999,
+      }).catch(() => {});
+    }
+  }, []);
+
   // Mouse & Scroll Handling
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const currentTerminalId = terminalIdRef.current;
@@ -704,30 +828,82 @@ function SinglePaneCanvas({
     const y = e.clientY - rect.top;
     const charWidth = charWidthRef.current;
     const charHeight = charHeightRef.current;
+    const cols = colsRef.current;
+    const rows = rowsRef.current;
+    const displayWidth = cols * charWidth;
+    const displayHeight = rows * charHeight;
 
-    if (mouseReportingRef.current) {
-      invoke("mouse_agent_terminal", {
-        terminalId: currentTerminalId,
-        action: "press",
-        button: e.button,
-        x,
-        y,
-        cellWidth: charWidth,
-        cellHeight: charHeight,
-        ctrl: e.ctrlKey,
-        alt: e.altKey,
-        shift: e.shiftKey,
-        meta: e.metaKey,
-      }).catch((err) => console.error("mouse_agent_terminal press error:", err));
-    } else {
-      if (e.button === 0) {
-        const col = Math.max(0, Math.min(colsRef.current - 1, Math.floor(x / charWidth)));
-        const row = Math.max(0, Math.min(rowsRef.current - 1, Math.floor(y / charHeight)));
-        selectionRef.current = { startX: col, startY: row, endX: col, endY: row };
-        isSelectingRef.current = true;
-        redrawCanvas();
+    // Check if clicked in scrollbar zone
+    const scrollbar = scrollbarRef.current;
+    const hasScrollbar = Boolean(scrollbar && scrollbar.total > scrollbar.length);
+    if (x >= displayWidth - 16 && hasScrollbar && scrollbar) {
+      const trackHeight = displayHeight;
+      const thumbHeight = Math.max(24, Math.min(trackHeight, Math.round((scrollbar.length / scrollbar.total) * trackHeight)));
+      const maxOffset = Math.max(1, scrollbar.total - scrollbar.length);
+      const clampedOffset = Math.max(0, Math.min(maxOffset, scrollbar.offset));
+      const thumbY = Math.round((clampedOffset / maxOffset) * (trackHeight - thumbHeight));
+
+      if (y >= thumbY && y <= thumbY + thumbHeight) {
+        // Dragging thumb
+        isDraggingScrollbarRef.current = true;
+        scrollbarDragStartYRef.current = y;
+        scrollbarDragStartOffsetRef.current = clampedOffset;
+        return;
+      } else if (y < thumbY) {
+        // Page up
+        invoke("scroll_agent_terminal", {
+          terminalId: currentTerminalId,
+          delta: -Math.max(1, Math.floor(scrollbar.length * 0.8)),
+        }).catch(() => {});
+        return;
+      } else {
+        // Page down
+        invoke("scroll_agent_terminal", {
+          terminalId: currentTerminalId,
+          delta: Math.max(1, Math.floor(scrollbar.length * 0.8)),
+        }).catch(() => {});
+        return;
       }
     }
+
+    if (e.button !== 0) return; // Only handle primary mouse button for selection
+
+    const col = Math.max(0, Math.min(cols - 1, Math.floor(x / charWidth)));
+    const row = Math.max(0, Math.min(rows - 1, Math.floor(y / charHeight)));
+
+    if (e.detail === 2) {
+      // Double click: select word
+      const wordSel = getWordSelectionAt(gridBufferRef.current, col, row, cols, rows);
+      if (wordSel) {
+        selectionRef.current = wordSel;
+        isSelectingRef.current = false;
+        dragStartedRef.current = false;
+        redrawCanvas();
+        const text = getSelectedTextFromGrid(gridBufferRef.current, wordSel, cols, rows);
+        triggerCopy(text);
+      }
+      return;
+    }
+
+    if (e.detail === 3) {
+      // Triple click: select whole row
+      const lineSel = getLineSelectionAt(gridBufferRef.current, row, cols, rows);
+      if (lineSel) {
+        selectionRef.current = lineSel;
+        isSelectingRef.current = false;
+        dragStartedRef.current = false;
+        redrawCanvas();
+        const text = getSelectedTextFromGrid(gridBufferRef.current, lineSel, cols, rows);
+        triggerCopy(text);
+      }
+      return;
+    }
+
+    // Detail === 1: Start selection drag or click
+    mouseDownPosRef.current = { x, y };
+    selectionRef.current = { startX: col, startY: row, endX: col, endY: row };
+    isSelectingRef.current = true;
+    dragStartedRef.current = false;
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -740,27 +916,49 @@ function SinglePaneCanvas({
     const y = e.clientY - rect.top;
     const charWidth = charWidthRef.current;
     const charHeight = charHeightRef.current;
+    const cols = colsRef.current;
+    const rows = rowsRef.current;
+    const displayWidth = cols * charWidth;
+    const displayHeight = rows * charHeight;
 
-    if (mouseReportingRef.current) {
-      if (e.buttons > 0) {
-        invoke("mouse_agent_terminal", {
-          terminalId: currentTerminalId,
-          action: "motion",
-          button: e.buttons === 1 ? 0 : e.buttons === 2 ? 2 : 1,
-          x,
-          y,
-          cellWidth: charWidth,
-          cellHeight: charHeight,
-          ctrl: e.ctrlKey,
-          alt: e.altKey,
-          shift: e.shiftKey,
-          meta: e.metaKey,
-        }).catch(() => {});
+    // Handle scrollbar hover
+    const isNearScrollbar = x >= displayWidth - 16;
+    if (isHoveringScrollbarRef.current !== isNearScrollbar) {
+      isHoveringScrollbarRef.current = isNearScrollbar;
+      redrawCanvas();
+    }
+
+    // Handle scrollbar drag
+    if (isDraggingScrollbarRef.current && scrollbarRef.current) {
+      const scrollbar = scrollbarRef.current;
+      const trackHeight = displayHeight;
+      const thumbHeight = Math.max(24, Math.min(trackHeight, Math.round((scrollbar.length / scrollbar.total) * trackHeight)));
+      const maxOffset = Math.max(1, scrollbar.total - scrollbar.length);
+      const availableTrack = trackHeight - thumbHeight;
+      if (availableTrack > 0) {
+        const deltaY = y - scrollbarDragStartYRef.current;
+        const targetOffset = Math.max(0, Math.min(maxOffset, Math.round(scrollbarDragStartOffsetRef.current + (deltaY / availableTrack) * maxOffset)));
+        const scrollDelta = targetOffset - scrollbar.offset;
+        if (scrollDelta !== 0) {
+          invoke("scroll_agent_terminal", {
+            terminalId: currentTerminalId,
+            delta: scrollDelta,
+          }).catch(() => {});
+        }
       }
-    } else {
-      if (isSelectingRef.current && selectionRef.current) {
-        const col = Math.max(0, Math.min(colsRef.current - 1, Math.floor(x / charWidth)));
-        const row = Math.max(0, Math.min(rowsRef.current - 1, Math.floor(y / charHeight)));
+      return;
+    }
+
+    // Handle text selection drag
+    if (isSelectingRef.current && selectionRef.current) {
+      const dist = Math.hypot(x - mouseDownPosRef.current.x, y - mouseDownPosRef.current.y);
+      if (dist > 4) {
+        dragStartedRef.current = true;
+      }
+      const col = Math.max(0, Math.min(cols - 1, Math.floor(x / charWidth)));
+      const row = Math.max(0, Math.min(rows - 1, Math.floor(y / charHeight)));
+
+      if (selectionRef.current.endX !== col || selectionRef.current.endY !== row) {
         selectionRef.current = {
           ...selectionRef.current,
           endX: col,
@@ -781,70 +979,137 @@ function SinglePaneCanvas({
     const y = e.clientY - rect.top;
     const charWidth = charWidthRef.current;
     const charHeight = charHeightRef.current;
+    const cols = colsRef.current;
+    const rows = rowsRef.current;
 
-    if (mouseReportingRef.current) {
-      invoke("mouse_agent_terminal", {
-        terminalId: currentTerminalId,
-        action: "release",
-        button: e.button,
-        x,
-        y,
-        cellWidth: charWidth,
-        cellHeight: charHeight,
-        ctrl: e.ctrlKey,
-        alt: e.altKey,
-        shift: e.shiftKey,
-        meta: e.metaKey,
-      }).catch((err) => console.error("mouse_agent_terminal release error:", err));
-    } else {
-      if (isSelectingRef.current) {
-        isSelectingRef.current = false;
-        if (
-          selectionRef.current &&
-          selectionRef.current.startX === selectionRef.current.endX &&
-          selectionRef.current.startY === selectionRef.current.endY
-        ) {
+    if (isDraggingScrollbarRef.current) {
+      isDraggingScrollbarRef.current = false;
+      return;
+    }
+
+    if (isSelectingRef.current) {
+      isSelectingRef.current = false;
+
+      if (dragStartedRef.current && selectionRef.current) {
+        const norm = getNormalizedSelection(selectionRef.current);
+        const isMultiCell = norm.startY !== norm.endY || norm.startX !== norm.endX;
+        if (isMultiCell) {
+          const text = getSelectedTextFromGrid(gridBufferRef.current, selectionRef.current, cols, rows);
+          if (text && text.trim().length > 0) {
+            triggerCopy(text);
+          }
+        } else {
           selectionRef.current = null;
           redrawCanvas();
+        }
+      } else {
+        // Single click without drag: clear local selection
+        selectionRef.current = null;
+        redrawCanvas();
+
+        // Forward click to terminal app if mouse reporting is enabled
+        if (mouseReportingRef.current) {
+          invoke("mouse_agent_terminal", {
+            terminalId: currentTerminalId,
+            action: "press",
+            button: e.button,
+            x,
+            y,
+            cellWidth: charWidth,
+            cellHeight: charHeight,
+            ctrl: e.ctrlKey,
+            alt: e.altKey,
+            shift: e.shiftKey,
+            meta: e.metaKey,
+          })
+            .then(() => {
+              invoke("mouse_agent_terminal", {
+                terminalId: currentTerminalId,
+                action: "release",
+                button: e.button,
+                x,
+                y,
+                cellWidth: charWidth,
+                cellHeight: charHeight,
+                ctrl: e.ctrlKey,
+                alt: e.altKey,
+                shift: e.shiftKey,
+                meta: e.metaKey,
+              }).catch(() => {});
+            })
+            .catch(() => {});
         }
       }
     }
   };
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
     const currentTerminalId = terminalIdRef.current;
     if (!currentTerminalId) return;
 
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const charWidth = charWidthRef.current;
-    const charHeight = charHeightRef.current;
+    const charHeight = charHeightRef.current || 16;
+    const charWidth = charWidthRef.current || 7.8;
+    const rows = rowsRef.current || 24;
 
-    if (mouseReportingRef.current) {
-      const button = e.deltaY < 0 ? 3 : 4;
-      invoke("mouse_agent_terminal", {
-        terminalId: currentTerminalId,
-        action: "press",
-        button,
-        x,
-        y,
-        cellWidth: charWidth,
-        cellHeight: charHeight,
-        ctrl: e.ctrlKey,
-        alt: e.altKey,
-        shift: e.shiftKey,
-        meta: e.metaKey,
-      }).catch(() => {});
-    } else {
-      const delta = e.deltaY < 0 ? -3 : 3;
-      invoke("scroll_agent_terminal", {
-        terminalId: currentTerminalId,
-        delta,
-      }).catch((err) => {
-        console.error("scroll_agent_terminal error:", err);
-      });
+    let pixelDelta = e.deltaY;
+    if (e.deltaMode === 1) {
+      // DOM_DELTA_LINE
+      pixelDelta = e.deltaY * charHeight * 1.5;
+    } else if (e.deltaMode === 2) {
+      // DOM_DELTA_PAGE
+      pixelDelta = e.deltaY * charHeight * rows;
+    }
+
+    wheelAccumulatorRef.current += pixelDelta;
+
+    // Pixels of finger movement required per discrete line
+    const pixelsPerLine = Math.max(14, charHeight * 1.0);
+    const lines = Math.trunc(wheelAccumulatorRef.current / pixelsPerLine);
+
+    if (lines !== 0) {
+      wheelAccumulatorRef.current -= lines * pixelsPerLine;
+      const clampedLines = Math.max(-8, Math.min(8, lines));
+      pendingScrollDeltaRef.current += clampedLines;
+
+      if (scrollRafRef.current === null) {
+        scrollRafRef.current = requestAnimationFrame(() => {
+          scrollRafRef.current = null;
+          const totalDelta = pendingScrollDeltaRef.current;
+          pendingScrollDeltaRef.current = 0;
+
+          if (totalDelta === 0 || !terminalIdRef.current) return;
+
+          if (mouseReportingRef.current) {
+            const button = totalDelta < 0 ? 3 : 4;
+            const steps = Math.min(5, Math.abs(totalDelta));
+            const rect = canvasRef.current?.getBoundingClientRect();
+            const x = rect ? e.clientX - rect.left : 0;
+            const y = rect ? e.clientY - rect.top : 0;
+
+            for (let i = 0; i < steps; i++) {
+              invoke("mouse_agent_terminal", {
+                terminalId: terminalIdRef.current,
+                action: "press",
+                button,
+                x,
+                y,
+                cellWidth: charWidth,
+                cellHeight: charHeight,
+                ctrl: e.ctrlKey,
+                alt: e.altKey,
+                shift: e.shiftKey,
+                meta: e.metaKey,
+              }).catch(() => {});
+            }
+          } else {
+            invoke("scroll_agent_terminal", {
+              terminalId: terminalIdRef.current,
+              delta: totalDelta,
+            }).catch(() => {});
+          }
+        });
+      }
     }
   };
 
@@ -863,25 +1128,17 @@ function SinglePaneCanvas({
       !e.shiftKey &&
       !e.altKey;
 
-    if (isCopyCombo && selectionRef.current && !mouseReportingRef.current) {
+    if (isCopyCombo && selectionRef.current) {
       e.preventDefault();
-      const norm = getNormalizedSelection(selectionRef.current);
-      invoke<string>("copy_agent_terminal", {
-        terminalId: currentTerminalId,
-        startX: norm.startX,
-        startY: norm.startY,
-        endX: norm.endX,
-        endY: norm.endY,
-        rectangle: false,
-      })
-        .then((text) => {
-          if (text) {
-            navigator.clipboard.writeText(text).catch(() => {});
-          }
-        })
-        .catch((err) => {
-          console.error("copy_agent_terminal error:", err);
-        });
+      const text = getSelectedTextFromGrid(
+        gridBufferRef.current,
+        selectionRef.current,
+        colsRef.current,
+        rowsRef.current
+      );
+      if (text && text.trim().length > 0) {
+        triggerCopy(text);
+      }
       return;
     }
 
@@ -1071,6 +1328,29 @@ function SinglePaneCanvas({
           onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
         />
+
+        {/* Copy feedback notification badge */}
+        {copyToast.visible && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 text-white text-xs font-medium shadow-lg shadow-black/50 backdrop-blur border border-emerald-400/30 pointer-events-none transition-all animate-in fade-in duration-150">
+            <Check className="w-3.5 h-3.5 text-emerald-200" />
+            <span>已复制 {copyToast.count} 字符</span>
+          </div>
+        )}
+
+        {/* Floating Scroll to Bottom button when scrolled into history */}
+        {isScrolledUp && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleScrollToBottom();
+            }}
+            className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-600/90 hover:bg-cyan-500 text-white text-xs font-medium shadow-lg shadow-cyan-950/60 backdrop-blur border border-cyan-400/30 transition-all active:scale-95 cursor-pointer pointer-events-auto"
+            title="回到最新 (Scroll to bottom)"
+          >
+            <span>↓ 回到最新</span>
+          </button>
+        )}
 
         {/* Error / Disconnection Overlay */}
         {errorMessage && (

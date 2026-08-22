@@ -645,6 +645,25 @@ impl AgentTerminalManager {
         let _ = run_tmux(&["set-option", "-t", &session_name, "mouse", "on"]);
         let _ = run_tmux(&["set-option", "-t", &session_name, "window-size", "latest"]);
         let _ = run_tmux(&["set-option", "-t", &session_name, "fill-character", " "]);
+        let _ = run_tmux(&["set-option", "-s", "set-clipboard", "on"]);
+        let _ = run_tmux(&[
+            "bind-key",
+            "-T",
+            "copy-mode",
+            "MouseDragEnd1Pane",
+            "send-keys",
+            "-X",
+            "copy-selection",
+        ]);
+        let _ = run_tmux(&[
+            "bind-key",
+            "-T",
+            "copy-mode-vi",
+            "MouseDragEnd1Pane",
+            "send-keys",
+            "-X",
+            "copy-selection",
+        ]);
         let _ = run_tmux(&[
             "set-window-option",
             "-t",
@@ -849,7 +868,11 @@ impl AgentTerminalManager {
         let session = self.session(terminal_id)?;
         let frame = {
             let mut core = session.core.lock().map_err(|_| "ERR_LOCK".to_string())?;
-            core.scroll(delta);
+            if delta >= 900_000 {
+                core.terminal.scroll_viewport_bottom();
+            } else {
+                core.scroll(delta);
+            }
             core.frame(terminal_id, true)?
                 .ok_or_else(|| "ERR_GHOSTTY_EMPTY_FRAME".to_string())?
         };
