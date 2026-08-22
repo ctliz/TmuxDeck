@@ -527,7 +527,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
     }
     let isolated_first_agent = crate::commands::utils::isolated_agent_command_with_team_env(
         &first_agent_cmd,
-        !opts.headless && pane_agent_ids[0] != "shell",
+        pane_agent_ids[0] != "shell",
         &first_team_envs,
     );
     new_args.push(format!(
@@ -711,7 +711,7 @@ pub fn create_session(opts: CreateOpts) -> Result<(), String> {
         });
         let isolated_agent = crate::commands::utils::isolated_agent_command_with_team_env(
             &pane_agent_cmd,
-            !opts.headless && pane_agent_ids[pane - 1] != "shell",
+            pane_agent_ids[pane - 1] != "shell",
             &pane_team_envs,
         );
         split_args.push(isolated_agent);
@@ -1205,21 +1205,21 @@ mod tests {
     }
 
     #[test]
-    fn headless_mode_disables_return_to_shell_fallback() {
+    fn agent_commands_always_return_to_shell_fallback() {
         let team_envs = vec![("AGENT_INTERCOM_SESSION_ID".to_string(), "id1".to_string())];
         let normal_cmd = crate::commands::utils::isolated_agent_command_with_team_env(
             "pi",
-            !false && "pi" != "shell",
+            "pi" != "shell",
             &team_envs,
         );
         assert!(normal_cmd.contains("exec \"${SHELL:-/bin/sh}\""));
+        assert!(normal_cmd.contains("@tmuxdeck-agent shell"));
 
-        let headless_cmd = crate::commands::utils::isolated_agent_command_with_team_env(
-            "pi",
-            !true && "pi" != "shell",
+        let shell_cmd = crate::commands::utils::isolated_agent_command_with_team_env(
+            "/bin/zsh",
+            "shell" != "shell",
             &team_envs,
         );
-        assert!(!headless_cmd.contains("exec \"${SHELL:-/bin/sh}\""));
-        assert!(!headless_cmd.contains("@tmuxdeck-agent shell"));
+        assert!(!shell_cmd.contains("@tmuxdeck-agent shell"));
     }
 }

@@ -611,6 +611,10 @@ export default function App() {
 
   const filteredSessions = sessions.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
 
+  const liveActiveSession = activeTerminal
+    ? sessions.find((s) => s.id === activeTerminal.session.id || s.name === activeTerminal.session.name) || activeTerminal.session
+    : null;
+
   if (env && env.tmux === null) {
     return (
       <TmuxMissingScreen
@@ -626,7 +630,7 @@ export default function App() {
 
   return (
     <div className="td-canvas flex flex-col h-screen text-slate-100 font-sans select-none overflow-hidden">
-      {activeTerminal ? (
+      {activeTerminal && liveActiveSession ? (
         <Suspense
           fallback={
             <div className="flex-1 flex items-center justify-center bg-slate-950 text-slate-500 text-xs font-mono">
@@ -635,7 +639,7 @@ export default function App() {
           }
         >
           <AgentTerminal
-            session={activeTerminal.session}
+            session={liveActiveSession}
             activePaneId={activeTerminal.paneId}
             onSelectPane={(paneId) =>
               setActiveTerminal((prev) => (prev ? { ...prev, paneId } : null))

@@ -945,6 +945,9 @@ impl AgentTerminalManager {
                 let _ = child.kill();
                 let _ = child.wait();
             }
+            if session.zoomed_by_us {
+                let _ = run_tmux(&["resize-pane", "-t", &session.pane_id, "-Z"]);
+            }
         }
         session
     }
