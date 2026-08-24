@@ -594,6 +594,10 @@ fn parse_session_and_zoom(output: &str) -> Result<(String, bool), String> {
     Ok((session.to_string(), zoomed.trim() == "1"))
 }
 
+fn tmux_attach_args(session_name: &str) -> [&str; 4] {
+    ["-u", "attach-session", "-t", session_name]
+}
+
 fn query_pane_session_and_zoom(pane_id: &str) -> Result<(String, bool), String> {
     if !validate_pane_id(pane_id) {
         return Err("ERR_INVALID_PANE_ID".to_string());
@@ -699,14 +703,15 @@ impl AgentTerminalManager {
         #[cfg(target_os = "windows")]
         let mut command = {
             let mut cmd = CommandBuilder::new("wsl.exe");
-            cmd.args(["--", "tmux", "attach-session", "-t", &session_name]);
+            cmd.args(["--", "tmux"]);
+            cmd.args(tmux_attach_args(&session_name));
             cmd
         };
         #[cfg(not(target_os = "windows"))]
         let mut command = {
             let tmux_bin = check_tmux_installed().unwrap_or_else(|| "tmux".to_string());
             let mut cmd = CommandBuilder::new(&tmux_bin);
-            cmd.args(["attach-session", "-t", &session_name]);
+            cmd.args(tmux_attach_args(&session_name));
             cmd.env("PATH", crate::commands::build_augmented_path());
             cmd
         };
@@ -1177,6 +1182,14 @@ mod tests {
     }
 
     #[test]
+    fn embedded_tmux_client_forces_utf8_output() {
+        assert_eq!(
+            tmux_attach_args("workspace"),
+            ["-u", "attach-session", "-t", "workspace"]
+        );
+    }
+
+    #[test]
     fn invalid_pane_id_is_rejected() {
         assert!(query_pane_session_and_zoom("invalid").is_err());
         assert!(query_pane_session_and_zoom("").is_err());
@@ -1210,6 +1223,16 @@ mod tests {
         assert!(!patch.full);
         assert_eq!(patch.updates.len(), 1);
         assert_eq!(patch.updates[0].row, 0);
+    }
+
+    #[test]
+    fn ghostty_core_preserves_chinese_text() {
+        let mut core = GhosttyCore::new(8, 2, |_| {}).unwrap();
+        core.process("中文".as_bytes());
+        let frame = core.frame("term_test", true).unwrap().unwrap();
+        let cells = &frame.updates[0].cells;
+        assert_eq!(cells[0].text, "中");
+        assert_eq!(cells[2].text, "文");
     }
 
     #[test]
@@ -1249,10 +1272,14 @@ mod tests {
     #[test]
     fn test_encode_enter() {
         let mut core = GhosttyCore::new(80, 24, |_| {}).unwrap();
-        let enter_bytes = core.encode_key("Enter", "Enter", false, false, false, false).unwrap();
+        let enter_bytes = core
+            .encode_key("Enter", "Enter", false, false, false, false)
+            .unwrap();
         assert_eq!(enter_bytes, b"\r");
 
-        let shift_enter = core.encode_key("Enter", "Enter", false, false, true, false).unwrap();
+        let shift_enter = core
+            .encode_key("Enter", "Enter", false, false, true, false)
+            .unwrap();
         assert!(!shift_enter.is_empty());
     }
 }
