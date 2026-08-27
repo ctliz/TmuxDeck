@@ -18,7 +18,6 @@
     radial-gradient(120% 85% at 0% 0%, rgba(79, 70, 229, 0.30), transparent 62%),
     radial-gradient(115% 85% at 100% 100%, rgba(6, 182, 212, 0.22), transparent 62%),
     linear-gradient(160deg, #0c1326 0%, #020617 52%, #071a2a 100%);
-  background-attachment: fixed;
 }
 
 /* 半透明版本：托盘面板。底下还有 NSVisualEffectView(popover)，

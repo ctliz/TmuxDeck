@@ -190,7 +190,7 @@ export function SessionCard({
       onDragOver={(e) => !isPaneDraggingRef.current && onCardDragOver?.(e, session.id)}
       onDragLeave={(e) => !isPaneDraggingRef.current && onCardDragLeave?.(e, session.id)}
       onDrop={(e) => !isPaneDraggingRef.current && onCardDrop?.(e, session.id)}
-      className={`flex flex-col justify-between rounded-2xl bg-white/10 backdrop-blur-xl border transition-all duration-300 shadow-lg shadow-black/5 hover:shadow-xl hover:bg-white/15 group animate-fade-in-up ${
+      className={`flex flex-col justify-between rounded-2xl bg-slate-900/[0.72] border transition-colors duration-200 shadow-lg shadow-black/10 hover:bg-slate-800/[0.78] group animate-fade-in-up ${
         isDraggingCard
           ? "opacity-40 border-cyan-500/70 scale-95 cursor-grabbing"
           : isCardDragOverTarget

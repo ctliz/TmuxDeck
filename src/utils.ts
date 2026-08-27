@@ -26,19 +26,56 @@ export function preservePaneContent(
   previous: TmuxSession[],
   incoming: TmuxSession[]
 ): TmuxSession[] {
-  return incoming.map((session) => {
+  let changed = previous.length !== incoming.length;
+  const next = incoming.map((session) => {
     const old = previous.find(
       (prev) => prev.id === session.id || prev.name === session.name
     );
-    if (!old) return session;
-    return {
-      ...session,
-      panes: session.panes.map((pane) => {
-        const oldPane = old.panes.find((prev) => prev.id === pane.id);
-        return oldPane?.content ? { ...pane, content: oldPane.content } : pane;
-      }),
-    };
+    if (!old) {
+      changed = true;
+      return session;
+    }
+
+    const panes = session.panes.map((pane) => {
+      const oldPane = old.panes.find((prev) => prev.id === pane.id);
+      if (!oldPane) return pane;
+      const content = oldPane.content ?? pane.content;
+      if (
+        oldPane.command === pane.command &&
+        oldPane.active === pane.active &&
+        oldPane.session_target === pane.session_target &&
+        oldPane.slot === pane.slot &&
+        oldPane.attached === pane.attached &&
+        oldPane.agent_id === pane.agent_id &&
+        oldPane.content === content
+      ) {
+        return oldPane;
+      }
+      return { ...pane, content };
+    });
+
+    const samePanes =
+      panes.length === old.panes.length &&
+      panes.every((pane, index) => pane === old.panes[index]);
+    if (
+      old.id === session.id &&
+      old.name === session.name &&
+      old.windows_count === session.windows_count &&
+      old.panes_count === session.panes_count &&
+      old.attached === session.attached &&
+      old.created_at === session.created_at &&
+      old.last_active_ts === session.last_active_ts &&
+      old.native_split === session.native_split &&
+      old.terminal_id === session.terminal_id &&
+      samePanes
+    ) {
+      return old;
+    }
+
+    changed = true;
+    return { ...session, panes };
   });
+  return changed ? next : previous;
 }
 
 /**

@@ -39,9 +39,9 @@ export default function App() {
   const failedPaneCountsRef = useRef(new Map<string, number>());
   const sessionPollPromiseRef = useRef<Promise<void> | null>(null);
   const captureInFlightRef = useRef(false);
+  const dashboardScrollingUntilRef = useRef(0);
 
   // Card reordering & Drag state
-  const [, setCardOrder] = useState<string[]>([]);
   const cardOrderRef = useRef<string[]>([]);
 
   const [env, setEnv] = useState<Environment | null>(null);
@@ -98,11 +98,12 @@ export default function App() {
 
   const sortSessionsByOrder = (list: TmuxSession[], order: string[]) => {
     const orderMap = new Map(order.map((id, idx) => [id, idx]));
-    return [...list].sort((a, b) => {
+    const sorted = [...list].sort((a, b) => {
       const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : Number.MAX_SAFE_INTEGER;
       const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : Number.MAX_SAFE_INTEGER;
       return idxA - idxB;
     });
+    return sorted.every((session, index) => session === list[index]) ? list : sorted;
   };
 
   /**
@@ -159,6 +160,10 @@ export default function App() {
       try {
         const sessionList = await invoke<TmuxSession[]>("get_tmux_sessions");
         setErrorMsg("");
+        if (!forceAfterCurrent && Date.now() < dashboardScrollingUntilRef.current) {
+          sessionsRef.current = sessionList;
+          return;
+        }
         setSessions((prevSessions) => {
           const mergedList = preservePaneContent(prevSessions, sessionList);
 
@@ -168,7 +173,6 @@ export default function App() {
             if (!updatedOrder.includes(s.id)) updatedOrder.push(s.id);
           });
           cardOrderRef.current = updatedOrder;
-          setCardOrder(updatedOrder);
 
           return sortSessionsByOrder(mergedList, updatedOrder);
         });
@@ -213,7 +217,6 @@ export default function App() {
           ...cardOrderRef.current.filter((id) => id !== match.id),
         ];
         cardOrderRef.current = nextOrder;
-        setCardOrder(nextOrder);
         setSessions((prev) => sortSessionsByOrder(prev, nextOrder));
         setHighlightedSessionId(match.id);
         if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
@@ -232,6 +235,7 @@ export default function App() {
     const captureTimer = setInterval(async () => {
       if (document.visibilityState !== "visible") return;
       if (captureInFlightRef.current) return;
+      if (Date.now() < dashboardScrollingUntilRef.current) return;
       const current = sessionsRef.current;
       if (current.length === 0) return;
 
@@ -599,7 +603,6 @@ export default function App() {
   const handleReorderCards = (sourceSessionId: string, targetSessionId: string) => {
     const currentOrder = reorderIds(cardOrderRef.current, sourceSessionId, targetSessionId);
     cardOrderRef.current = currentOrder;
-    setCardOrder(currentOrder);
     setSessions((prev) => sortSessionsByOrder(prev, currentOrder));
   };
 
@@ -662,7 +665,12 @@ export default function App() {
             onOpenMobilePairing={() => setShowMobilePairingModal(true)}
           />
 
-          <main className="flex-1 overflow-y-auto p-6">
+          <main
+            className="flex-1 overflow-y-auto p-6"
+            onScroll={() => {
+              dashboardScrollingUntilRef.current = Date.now() + 250;
+            }}
+          >
             {errorMsg && (
               <div className="mb-6 p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-sm">
                 {errorMsg}

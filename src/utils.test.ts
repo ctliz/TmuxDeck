@@ -147,6 +147,15 @@ test("preservePaneContent keeps captured output across a session poll", () => {
   assert.strictEqual(previous[0].panes[0].content, "hello", "no mutation");
 });
 
+test("preservePaneContent reuses unchanged session objects", () => {
+  const previous = [makeSession("s1", "alpha", [makePane("%1", "kept")])];
+  const incoming = [makeSession("s1", "alpha", [makePane("%1")])];
+  const merged = preservePaneContent(previous, incoming);
+  assert.strictEqual(merged, previous);
+  assert.strictEqual(merged[0], previous[0]);
+  assert.strictEqual(merged[0].panes[0], previous[0].panes[0]);
+});
+
 test("preservePaneContent re-matches a session that was renamed or re-ided", () => {
   const previous = [makeSession("s1", "alpha", [makePane("%1", "kept")])];
   // tmux reports a new id for the same session name.

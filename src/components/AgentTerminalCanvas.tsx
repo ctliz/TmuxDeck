@@ -1142,6 +1142,14 @@ function SinglePaneCanvas({
       return;
     }
 
+    // Let WebKit perform the native clipboard paste. Preventing this keydown
+    // suppresses the textarea's onPaste event on macOS.
+    const isPasteCombo =
+      (e.metaKey || e.ctrlKey) &&
+      (e.key === "v" || e.key === "V") &&
+      !e.altKey;
+    if (isPasteCombo) return;
+
     const isSpecialKey =
       e.key === "Enter" ||
       e.key === "Tab" ||
