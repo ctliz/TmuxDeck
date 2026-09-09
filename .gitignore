@@ -26,3 +26,8 @@ package/
 *.njsproj
 *.sln
 *.sw?
+
+# Apple signing & notarization keys
+*.p8
+*.p12
+

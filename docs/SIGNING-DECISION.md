@@ -5,8 +5,8 @@ TmuxDeck ships unsigned. This document records why.
 ## Status
 
 - Releases are built and published by GitHub Actions (`release.yml`).
-- Artifacts are not signed or notarized on either platform.
-- The workflow contains an optional Azure Trusted Signing hook for Windows, guarded by `if:` conditions. It is dormant and requires no action.
+- **macOS.** Developer ID code signing and Apple notarization are supported. Release builds are signed and notarized when Apple secrets are configured in GitHub Actions or locally in the environment.
+- **Windows.** Artifacts are not signed. The workflow contains an optional Azure Trusted Signing hook for Windows, guarded by `if:` conditions. It is dormant and requires no action.
 
 ## Why unsigned
 

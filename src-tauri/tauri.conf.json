@@ -65,7 +65,9 @@
       "resources/opencode-sdk-closure.tgz"
     ],
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": null,
+      "hardenedRuntime": true,
+      "entitlements": "Entitlements.plist"
     }
   }
 }
