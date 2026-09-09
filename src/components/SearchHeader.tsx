@@ -1,5 +1,6 @@
 import { Search, QrCode } from "lucide-react";
 import { t } from "../i18n";
+import { UpdateBadge } from "./UpdateBadge";
 
 interface SearchHeaderProps {
   search: string;
@@ -43,16 +44,19 @@ export function SearchHeader({
         />
       </div>
 
-      {onOpenMobilePairing && (
-        <button
-          onClick={onOpenMobilePairing}
-          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-cyan-600/20 border border-cyan-500/40 hover:bg-cyan-600/30 text-cyan-300 rounded-full transition shadow-sm ml-3"
-          title={t("mobile.openPairing")}
-        >
-          <QrCode className="w-3.5 h-3.5" />
-          <span>{t("mobile.openPairing")}</span>
-        </button>
-      )}
+      <div className="flex items-center space-x-2.5 shrink-0 ml-3">
+        <UpdateBadge />
+        {onOpenMobilePairing && (
+          <button
+            onClick={onOpenMobilePairing}
+            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-cyan-600/20 border border-cyan-500/40 hover:bg-cyan-600/30 text-cyan-300 rounded-full transition shadow-sm"
+            title={t("mobile.openPairing")}
+          >
+            <QrCode className="w-3.5 h-3.5" />
+            <span>{t("mobile.openPairing")}</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

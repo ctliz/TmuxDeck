@@ -369,6 +369,13 @@ const en: Record<string, string> = {
   "mobile.refreshPairing": "New QR",
   "mobile.openPairing": "Mobile Pairing",
   "mobile.trustedLanOnly": "Trusted LAN Only",
+
+  // Updates
+  "update.available": "v{version} Available",
+  "update.downloading": "Updating... {progress}%",
+  "update.ready": "Restart to Apply",
+  "update.error": "Update Failed",
+  "update.check": "Check for Updates",
 };
 
 const zh: Record<string, string> = {
@@ -742,6 +749,13 @@ const zh: Record<string, string> = {
   "mobile.refreshPairing": "刷新二维码",
   "mobile.openPairing": "手机配对",
   "mobile.trustedLanOnly": "仅可信局域网使用",
+
+  // Updates
+  "update.available": "发现新版本 v{version}",
+  "update.downloading": "更新中... {progress}%",
+  "update.ready": "重启以生效",
+  "update.error": "更新失败",
+  "update.check": "检查更新",
 };
 
 /** Exposed so tests can assert both locales stay in sync. */

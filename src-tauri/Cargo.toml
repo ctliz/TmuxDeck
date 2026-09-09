@@ -40,4 +40,6 @@ tauri-plugin-notification = "2"
 portable-pty = "0.8"
 base64 = "0.22"
 png = "0.17"
+tauri-plugin-updater = "2.11.0"
+tauri-plugin-process = "2.3.1"
 

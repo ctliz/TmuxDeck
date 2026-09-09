@@ -61,6 +61,7 @@ Progress:
 
 ### P3 · Tech debt and continuous improvement
 
+- [x] macOS Developer ID signing, Apple notarization, and Tauri auto-updater (2026-09-09)
 - [x] Split `lib.rs` into modules (tmux / registry / config / models / tray / commands, 2026-08-10)
 - [x] Introduce automated tests (v1.7.0, 2026-08-10)
 - [x] tmux no-server error handling (v1.7.0, 2026-08-10)

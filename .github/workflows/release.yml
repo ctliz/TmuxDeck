@@ -131,6 +131,8 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if [ -n "$APPLE_CERTIFICATE" ]; then
             if [ -n "$APPLE_API_KEY_BASE64" ] && [ -n "$APPLE_API_KEY" ]; then
@@ -143,7 +145,7 @@ jobs:
             echo "::warning::APPLE_CERTIFICATE secret is missing, falling back to unsigned build"
             npm run tauri build -- --no-sign
           fi
-      - name: Upload .dmg to release
+      - name: Upload macOS artifacts to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -155,11 +157,20 @@ jobs:
             exit 1
           fi
           name="$(basename "${files[0]}")"
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
-            echo "Release asset already exists: $name" >&2
-            exit 1
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+            gh release upload "$RELEASE_TAG" "${files[0]}" --repo "$GITHUB_REPOSITORY"
           fi
-          gh release upload "$RELEASE_TAG" "${files[0]}" --repo "$GITHUB_REPOSITORY"
+
+          updater_files=(src-tauri/target/release/bundle/macos/*.tar.gz src-tauri/target/release/bundle/macos/*.tar.gz.sig)
+          for uf in "${updater_files[@]}"; do
+            if [ -s "$uf" ]; then
+              uname="$(basename "$uf")"
+              if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$uname"; then
+                echo "Uploading macOS updater asset: $uname"
+                gh release upload "$RELEASE_TAG" "$uf" --repo "$GITHUB_REPOSITORY"
+              fi
+            fi
+          done
 
   build-windows:
     needs: create-release
@@ -194,6 +205,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
       - name: Upload Windows installer to release
         shell: bash
@@ -213,6 +227,17 @@ jobs:
               if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
                 echo "Uploading Windows asset: $name"
                 gh release upload "$RELEASE_TAG" "$file" --repo "$GITHUB_REPOSITORY"
+              fi
+            fi
+          done
+
+          updater_files=(src-tauri/target/release/bundle/nsis/*.nsis.zip src-tauri/target/release/bundle/nsis/*.nsis.zip.sig)
+          for uf in "${updater_files[@]}"; do
+            if [ -s "$uf" ]; then
+              uname="$(basename "$uf")"
+              if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$uname"; then
+                echo "Uploading Windows updater asset: $uname"
+                gh release upload "$RELEASE_TAG" "$uf" --repo "$GITHUB_REPOSITORY"
               fi
             fi
           done
@@ -259,6 +284,84 @@ jobs:
             exit 1
           fi
 
+      - name: Generate and upload updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/updater-sigs
+          # Download signature files from draft release
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "*.sig" --dir /tmp/updater-sigs || true
+          
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const tag = process.env.RELEASE_TAG;
+            const repo = process.env.GITHUB_REPOSITORY;
+            const version = tag.replace(/^v/, "");
+            const notesFile = `docs/RELEASE-NOTES-${tag}.md`;
+            const notes = fs.existsSync(notesFile) ? fs.readFileSync(notesFile, "utf8") : "";
+            const pub_date = new Date().toISOString();
+            
+            const sigDir = "/tmp/updater-sigs";
+            const files = fs.existsSync(sigDir) ? fs.readdirSync(sigDir) : [];
+            const platforms = {};
+            
+            // Darwin aarch64 (Apple Silicon)
+            const macSig = files.find(f => (f.includes("aarch64") && f.endsWith(".tar.gz.sig")) || f.endsWith(".app.tar.gz.sig"));
+            if (macSig) {
+              const sig = fs.readFileSync(path.join(sigDir, macSig), "utf8").trim();
+              const tarFile = macSig.replace(/\.sig$/, "");
+              platforms["darwin-aarch64"] = {
+                signature: sig,
+                url: `https://github.com/${repo}/releases/download/${tag}/${tarFile}`
+              };
+            }
+
+            // Darwin x86_64 (Intel)
+            const macIntelSig = files.find(f => (f.includes("x86_64") || f.includes("x64")) && f.endsWith(".tar.gz.sig"));
+            if (macIntelSig) {
+              const sig = fs.readFileSync(path.join(sigDir, macIntelSig), "utf8").trim();
+              const tarFile = macIntelSig.replace(/\.sig$/, "");
+              platforms["darwin-x86_64"] = {
+                signature: sig,
+                url: `https://github.com/${repo}/releases/download/${tag}/${tarFile}`
+              };
+            }
+            
+            // Windows x86_64
+            const winSig = files.find(f => f.endsWith(".nsis.zip.sig") || f.endsWith(".zip.sig"));
+            if (winSig) {
+              const sig = fs.readFileSync(path.join(sigDir, winSig), "utf8").trim();
+              const zipFile = winSig.replace(/\.sig$/, "");
+              platforms["windows-x86_64"] = {
+                signature: sig,
+                url: `https://github.com/${repo}/releases/download/${tag}/${zipFile}`
+              };
+            }
+            
+            if (Object.keys(platforms).length > 0) {
+              const manifest = {
+                version: tag,
+                notes,
+                pub_date,
+                platforms
+              };
+              fs.writeFileSync("latest.json", JSON.stringify(manifest, null, 2));
+              console.log("Generated latest.json:\n" + JSON.stringify(manifest, null, 2));
+            } else {
+              console.log("No updater signature files found, skipping latest.json");
+            }
+          '
+          
+          if [ -f "latest.json" ]; then
+            gh release upload "$RELEASE_TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber
+            echo "Uploaded latest.json to release $RELEASE_TAG"
+          fi
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --draft=false \

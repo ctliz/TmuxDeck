@@ -49,6 +49,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -68,6 +69,14 @@
       "signingIdentity": null,
       "hardenedRuntime": true,
       "entitlements": "Entitlements.plist"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDNEM3RjYxQzNEOEI4NDIKUldSQ3VOakRZWDlNN0dIYWVFUGJnZjVjeXdjVHhqMVF5MUFpSDhubDcvUVlZRWxXUkVES2l1dDgK",
+      "endpoints": [
+        "https://github.com/ctliz/TmuxDeck/releases/latest/download/latest.json"
+      ]
     }
   }
 }

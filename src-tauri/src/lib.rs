@@ -47,6 +47,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| match event {
             // 关闭只隐藏，App 常驻菜单栏。
             tauri::WindowEvent::CloseRequested { api, .. } => {
