@@ -54,9 +54,9 @@ TmuxDeck bundles third-party source artifacts for optional macOS **App-Private M
 
 ### 6. OpenCode Offline Dependency Closure
 - File: `opencode-sdk-closure.tgz`
-- Size: `11510485` bytes
-- SHA-256: `8e1d64c90fcf4a7ed73d6d4eaa1b726f8c6a647c82e1dbeba4af6c8d04f24237`
-- Contents: exact offline `node_modules` closure for the frozen OpenCode SDK package and its 26 transitive packages
+- Size: `11087553` bytes
+- SHA-256: `b524560dd0a28dabf6ca9775215e68f6e28c36a7911e868493b302f1d5273e97`
+- Contents: exact offline `node_modules` closure for the frozen OpenCode SDK package and its 26 transitive packages (omits optional unnotarized native addon)
 - Source: local npm cache, packed and verified offline
 
 ---

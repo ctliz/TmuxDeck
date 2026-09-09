@@ -90,7 +90,7 @@ pub const OPENCODE_SDK_RESOURCE_SHA256: &str =
     "26ac7cc2608fc63e063a0b08857c277b17d75043ad37125667275932f17b3d43";
 pub const OPENCODE_CLOSURE_RESOURCE_NAME: &str = "opencode-sdk-closure.tgz";
 pub const OPENCODE_CLOSURE_RESOURCE_SHA256: &str =
-    "8e1d64c90fcf4a7ed73d6d4eaa1b726f8c6a647c82e1dbeba4af6c8d04f24237";
+    "b524560dd0a28dabf6ca9775215e68f6e28c36a7911e868493b302f1d5273e97";
 pub const OPENCODE_IMMUTABLE_DIGESTS: &[(&str, &str)] = &[
     (
         "dist/plugin.mjs",
