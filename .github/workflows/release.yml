@@ -337,7 +337,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           dmg_count="$(jq '[.[] | select(.name | endswith(".dmg"))] | length' <<<"$assets")"
           win_count="$(jq '[.[] | select(.name | (endswith(".exe") or endswith(".msi")))] | length' <<<"$assets")"
-          invalid_count="$(jq --arg version "$version" '[.[] | select(.size <= 0 or (.name | contains($version) | not))] | length' <<<"$assets")"
+          invalid_count="$(jq --arg version "$version" '[.[] | select(.size <= 0 or ((.name | test("\\.(dmg|exe|msi)$")) and (.name | contains($version) | not)))] | length' <<<"$assets")"
 
           if [ "$dmg_count" -lt 1 ] || [ "$win_count" -lt 1 ] || [ "$invalid_count" -ne 0 ]; then
             echo "Release must contain non-empty versioned DMG and Windows installer assets" >&2
