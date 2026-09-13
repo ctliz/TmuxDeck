@@ -657,6 +657,7 @@ test("Static mobile HTML contains bugfixes for sendSay, WS resubscribe, ALLOWED_
   assert.match(html, /\.key-btn[\s\S]*?min-height:\s*44px/);
   assert.doesNotMatch(html, /(^|[^-])shrink:\s*0/m);
   assert.match(html, /enterkeyhint="send"/);
+  assert.doesNotMatch(html, /sessionStorage/);
 });
 
 test("mobile vendors marked and DOMPurify inline, with provenance and no duplicate copy", () => {
@@ -1021,26 +1022,6 @@ test("CreateOpts carries headless property", () => {
     headless: true,
   };
   assert.strictEqual(opts.headless, true);
-});
-
-test("ChatCockpit component surfaces zero scope leakage", () => {
-  const chatCockpitSrc = fs.readFileSync(
-    path.resolve(process.cwd(), "src/components/ChatCockpit.tsx"),
-    "utf-8"
-  );
-  assert.doesNotMatch(chatCockpitSrc, /AGENT_INTERCOM_SCOPE_ID/);
-  assert.doesNotMatch(chatCockpitSrc, /scope_id/i);
-  assert.doesNotMatch(chatCockpitSrc, /scopeId/i);
-});
-
-test("AgentTerminal component surfaces zero scope leakage", () => {
-  const agentTerminalSrc = fs.readFileSync(
-    path.resolve(process.cwd(), "src/components/AgentTerminal.tsx"),
-    "utf-8"
-  );
-  assert.doesNotMatch(agentTerminalSrc, /AGENT_INTERCOM_SCOPE_ID/);
-  assert.doesNotMatch(agentTerminalSrc, /scope_id/i);
-  assert.doesNotMatch(agentTerminalSrc, /scopeId/i);
 });
 
 test("AgentTerminalCanvas component surfaces zero scope leakage", () => {

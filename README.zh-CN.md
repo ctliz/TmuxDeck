@@ -91,7 +91,7 @@ TmuxDeck 是专为多 AI Coding Agent 打造的并行工作区控制台。每个
 flowchart LR
     A["<b>感知 (See)</b><br/>哪个需要我？<br/><i>已发布</i>"]
     B["<b>交互 (Speak)</b><br/>一行代码直接回复<br/><i>v1.12 已发布</i>"]
-    C["<b>无处不在 (Anywhere)</b><br/>离开桌面也能处理<br/><i>规划中</i>"]
+    C["<b>无处不在 (Anywhere)</b><br/>可信局域网手机访问<br/><i>已发布；推送仍待做</i>"]
     A --> B --> C
 ```
 
@@ -205,11 +205,7 @@ npm install -g opencode-ai
 
 从 [Releases 页面](https://github.com/ctliz/TmuxDeck/releases) 下载最新版本的 Apple Silicon (`aarch64`) `.dmg`，将 `TmuxDeck.app` 拖入 Applications 目录即可。
 
-发布版本已进行 Ad-hoc 签名但未完成公证。首次启动时，请在 `TmuxDeck.app` 图标上右键选择「打开」并确认。若 macOS 提示应用已损坏或无法打开，请执行以下命令清除标志：
-
-```bash
-xattr -cr /Applications/TmuxDeck.app
-```
+macOS 发布包已使用 Developer ID 签名并完成公证，可直接打开，不应再出现 Gatekeeper 警告。应用内自动更新覆盖 Apple Silicon 版本。
 
 ## 使用说明
 
@@ -256,7 +252,7 @@ xattr -cr /Applications/TmuxDeck.app
 
 **TmuxDeck 支持 Linux 或 Windows 吗？**
 
-暂不支持原生 Linux。Windows 支持在 WSL 中运行并提供安装包，但 macOS 为主测试平台 — 欢迎在 GitHub 报告 Windows 相关问题。
+暂不支持原生 Linux。Windows/WSL 仍可编译，但当前不发布 Windows 安装包。正式发布仅支持 macOS Apple Silicon。
 
 ## 开发者指南
 

@@ -91,7 +91,7 @@ That last card is the whole point. Everything else can wait.
 flowchart LR
     A["<b>See</b><br/>Which one needs me?<br/><i>shipped</i>"]
     B["<b>Speak</b><br/>Answer it in one line<br/><i>shipped in v1.12</i>"]
-    C["<b>Anywhere</b><br/>Even away from the desk<br/><i>planned</i>"]
+    C["<b>Anywhere</b><br/>Trusted LAN on your phone<br/><i>shipped; push still pending</i>"]
     A --> B --> C
 ```
 
@@ -209,11 +209,7 @@ Terminals and agents are optional; the app offers only what you have installed.
 
 Download the latest Apple Silicon (`aarch64`) `.dmg` release from the [Releases page](https://github.com/ctliz/TmuxDeck/releases) and drag `TmuxDeck.app` into Applications.
 
-Release builds are ad-hoc signed but not notarized. On first launch, right-click `TmuxDeck.app`, choose **Open**, and confirm. If macOS reports that the application is damaged or cannot be opened, run:
-
-```bash
-xattr -cr /Applications/TmuxDeck.app
-```
+macOS releases are Developer ID signed and notarized. Open the app normally; Gatekeeper should not warn. In-app updates cover Apple Silicon builds.
 
 ## Usage
 
@@ -260,7 +256,7 @@ Only installed terminals are shown. If a category has a single candidate, the ro
 
 **Does TmuxDeck support Linux or Windows?**
 
-Linux is not supported yet. Windows works through WSL and ships the same installers, but macOS is the battle-tested platform — please report Windows issues on GitHub.
+Linux is not supported yet. Windows/WSL still compiles, but Windows installers are not published. macOS Apple Silicon is the supported release.
 
 ## Development
 

@@ -58,7 +58,7 @@ pub(crate) async fn accept_loop(
         recent.push(now);
 
         let clients = clients.clone();
-        let token = token.read().map(|g| g.clone()).unwrap_or_default();
+        let token = token.clone();
         let cmd_tx = cmd_tx.clone();
         let client_count_tx = client_count_tx.clone();
         let conn_id = next_id.fetch_add(1, Ordering::Relaxed);
@@ -78,12 +78,16 @@ pub(crate) async fn accept_loop(
 }
 
 /// 单端口 HTTP/WS 路由。HTTP 只提供 token 保护的单文件移动页。
+fn current_token(token: &Arc<RwLock<String>>) -> String {
+    token.read().map(|g| g.clone()).unwrap_or_default()
+}
+
 async fn route_connection(
     mut stream: TcpStream,
     peer_ip: IpAddr,
     conn_id: u64,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
-    token: String,
+    token: Arc<RwLock<String>>,
     cmd_tx: mpsc::UnboundedSender<InboundCommand>,
     client_count_tx: mpsc::UnboundedSender<usize>,
 ) -> Result<(), String> {
@@ -162,7 +166,11 @@ fn is_websocket_upgrade(request: &str) -> bool {
     })
 }
 
-async fn serve_http(stream: &mut TcpStream, request: &str, token: &str) -> Result<(), String> {
+async fn serve_http(
+    stream: &mut TcpStream,
+    request: &str,
+    token: &Arc<RwLock<String>>,
+) -> Result<(), String> {
     let host_ok = request
         .lines()
         .filter_map(|line| line.split_once(':'))
@@ -193,10 +201,11 @@ async fn serve_http(stream: &mut TcpStream, request: &str, token: &str) -> Resul
         .await;
     }
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let current = current_token(token);
     let token_ok = query
         .split('&')
         .find_map(|kv| kv.strip_prefix("token="))
-        .is_some_and(|candidate| ct_eq(candidate, token));
+        .is_some_and(|candidate| ct_eq(candidate, &current));
     if !token_ok {
         return write_http(
             stream,
@@ -263,7 +272,7 @@ async fn handle_websocket(
     peer_ip: IpAddr,
     conn_id: u64,
     clients: Arc<Mutex<HashMap<u64, ConnState>>>,
-    token: String,
+    token: Arc<RwLock<String>>,
     cmd_tx: mpsc::UnboundedSender<InboundCommand>,
     client_count_tx: mpsc::UnboundedSender<usize>,
 ) -> Result<(), String> {
@@ -288,12 +297,13 @@ async fn handle_websocket(
                 .and_then(|v| v.to_str().ok())
                 .map(host_allowed)
                 .unwrap_or(false);
-            // 3. token：query 参数，常量时间比较
+            // 3. token：query 参数，校验时再读当前值（rotate 后在途握手用新 token）
+            let current = current_token(&token);
             let token_ok = req
                 .uri()
                 .query()
                 .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=")))
-                .map(|t| crate::transport::ct_eq(t, &token))
+                .map(|t| crate::transport::ct_eq(t, &current))
                 .unwrap_or(false);
             if !(path_ok && proto_ok && host_ok && token_ok) {
                 // 统一拒绝，不区分失败原因（无探测信息）
@@ -469,7 +479,7 @@ mod tests {
                     peer.ip(),
                     1,
                     clients,
-                    "secret".to_string(),
+                    Arc::new(RwLock::new("secret".to_string())),
                     cmd_tx,
                     count_tx,
                 )
@@ -525,7 +535,7 @@ mod tests {
                     serve_http(
                         &mut stream,
                         std::str::from_utf8(&buf[..n]).unwrap(),
-                        "secret",
+                        &Arc::new(RwLock::new("secret".to_string())),
                     )
                     .await
                     .unwrap();

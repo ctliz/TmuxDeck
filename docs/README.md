@@ -19,7 +19,7 @@
 | [DESIGN-v1.13-transcript-source.md](./DESIGN-v1.13-transcript-source.md) | Conversation content source design (Claude Code JSONL preferred + fallback) |
 | [DESIGN-v1.14-transport-security.md](./DESIGN-v1.14-transport-security.md) | Mobile transport and security design |
 | [ROADMAP.md](./ROADMAP.md) | Schedule and progress, maintained by product |
-| [SIGNING-DECISION.md](./SIGNING-DECISION.md) | Why we are not code-signing yet |
+| [SIGNING-DECISION.md](./SIGNING-DECISION.md) | macOS signing/notarization and Windows pause |
 | [WINDOWS-VERIFICATION-v1.7.0.md](./WINDOWS-VERIFICATION-v1.7.0.md) | Windows on-device acceptance checklist |
 
 ## Decision log
@@ -67,4 +67,4 @@ Test instances may only be terminated by the **exact PID recorded at launch**: s
 [v1.14.0](./RELEASE-NOTES-v1.14.0.md) · [v1.14.1](./RELEASE-NOTES-v1.14.1.md) ·
 [v1.14.2](./RELEASE-NOTES-v1.14.2.md) · [v1.14.3](./RELEASE-NOTES-v1.14.3.md) ·
 [v1.14.4](./RELEASE-NOTES-v1.14.4.md) · [v1.14.5](./RELEASE-NOTES-v1.14.5.md) ·
-[v1.14.6](./RELEASE-NOTES-v1.14.6.md) · [v1.14.7](./RELEASE-NOTES-v1.14.7.md) · [v1.14.8](./RELEASE-NOTES-v1.14.8.md) · [v1.14.9](./RELEASE-NOTES-v1.14.9.md) · [v1.14.10](./RELEASE-NOTES-v1.14.10.md) · [v1.14.11](./RELEASE-NOTES-v1.14.11.md)
+[v1.14.6](./RELEASE-NOTES-v1.14.6.md) · [v1.14.7](./RELEASE-NOTES-v1.14.7.md) · [v1.14.8](./RELEASE-NOTES-v1.14.8.md) · [v1.14.9](./RELEASE-NOTES-v1.14.9.md) · [v1.14.10](./RELEASE-NOTES-v1.14.10.md) · [v1.14.11](./RELEASE-NOTES-v1.14.11.md) · [v1.14.12](./RELEASE-NOTES-v1.14.12.md) · [v1.14.13](./RELEASE-NOTES-v1.14.13.md) · [v1.14.14](./RELEASE-NOTES-v1.14.14.md) · [v1.14.15](./RELEASE-NOTES-v1.14.15.md) · [v1.14.16](./RELEASE-NOTES-v1.14.16.md) · [v1.14.17](./RELEASE-NOTES-v1.14.17.md)

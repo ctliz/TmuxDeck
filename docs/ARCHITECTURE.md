@@ -31,17 +31,22 @@ src-tauri/src/
 ├── engine.rs         v1.14 bridge engine: one background loop — intercom events + mobile commands
 │                     + periodic refresh / transcript polling; owns registry & transport (single-threaded)
 ├── transport.rs      v1.14 WebSocket server (Transport impl): token auth, Host allowlist, rate limits
+├── team.rs           Workspace team manifests (lead/worker, capacity, reconcile)
+├── usage.rs          Agent token-usage snapshots for the tray
+├── notify.rs         Desktop notification routing
+├── agent_terminal.rs Embedded Ghostty VT terminal + Tauri commands
 │
 └── commands/         Thin Tauri command wrappers — no business logic
     ├── session.rs    Session-level: create / open / list / delete / rename
     ├── pane.rs       Pane-level: add / delete / capture / send input
     ├── native.rs     Native Ghostty workspace model (see "Native Ghostty workspaces" below)
+    ├── adapter.rs    Workspace adapter install plans
     └── utils.rs      Icons, WSL path conversion, agent-command isolation
 ```
 
 **Layering constraint:** `commands/` only parses arguments and translates errors; business logic belongs in `tmux.rs` / `bridge.rs`. `intercom.rs` and `bridge.rs` **do not depend on the tauri crate** — that keeps them directly unit-testable and extractable into a standalone daemon later without changes.
 
-The frontend is componentized: `src/main.tsx` mounts `App.tsx`, which composes `src/components/` (`CardGrid`, `SessionCard`, `CreateWorkspaceModal`, `NewWorkspaceCard`, `SearchHeader`, `TmuxMissingScreen`); `src/i18n.ts` holds the en / zh-CN strings, `src/types.ts` the shared types, and `src/utils.ts` the shared helpers.
+The frontend is componentized: `src/main.tsx` mounts `App.tsx`, which composes `src/components/` (`CardGrid`, `SessionCard`, `CreateWorkspaceModal`, `NewWorkspaceCard`, `SearchHeader`, `TmuxMissingScreen`, `AgentTerminalCanvas`, `UpdateBadge`); `src/i18n.ts` holds the en / zh-CN strings, `src/types.ts` the shared types, and `src/utils.ts` the shared helpers.
 
 ---
 
@@ -97,7 +102,7 @@ The three paths, their sources and status:
 |---|---|---|
 | Which conversations exist and their status | broker registry + `tmux list-panes -a` | implemented |
 | human → agent | `intercom send` (preferred) / `send-keys` (fallback) | implemented |
-| agent → human | `TranscriptSource` | **undecided, see below** |
+| agent → human | `TranscriptSource` | implemented for Pi / Claude CLI jsonl; others fall back to capture-pane |
 
 ---
 
@@ -132,9 +137,9 @@ Multi-line text is sent line by line (line content + explicit `Enter`), because 
 
 ---
 
-## Unresolved: where conversation content comes from
+## Conversation content source
 
-"Which conversations", "what status" and "how to talk" are all wired up; what's missing is **what the agent said**.
+"Which conversations", "what status" and "how to talk" are wired up. Turn text comes from `TranscriptSource`: Pi and Claude Code CLI jsonl first, `capture-pane` for everyone else.
 
 | Approach | Status | Problem |
 |---|---|---|

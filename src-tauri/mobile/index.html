@@ -898,10 +898,6 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       const urlParams = new URLSearchParams(window.location.search);
       const urlToken = urlParams.get('token') || '';
       let token = urlToken;
-      try {
-        if (urlToken) sessionStorage.setItem('tmuxdeck-token', urlToken);
-        else token = sessionStorage.getItem('tmuxdeck-token') || '';
-      } catch (e) {}
       if (urlToken && window.history && window.history.replaceState) {
         window.history.replaceState({}, document.title, window.location.pathname);
       }

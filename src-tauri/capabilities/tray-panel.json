@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tray-panel",
+  "description": "Capability for the tray panel: session controls only",
+  "windows": [
+    "tray-panel"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

@@ -23,7 +23,8 @@ Stack: Tauri 2, React, TypeScript, Tailwind CSS, Rust.
 ## Project layout
 
 ```
-src/App.tsx                    All frontend UI (single file)
+src/App.tsx                    Dashboard shell (composes src/components/)
+src/components/                Cards, modals, embedded terminal canvas
 src/i18n.ts                    en / zh-CN string tables
 
 src-tauri/src/lib.rs           Tauri builder, tray wiring, command registration

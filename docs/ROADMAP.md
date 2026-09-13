@@ -5,14 +5,14 @@
 
 ## Current status
 
-- **Latest release:** v1.12.0 (2026-08-13) — Managed Claude fallback, atomic batch panes, and workspace-aware mobile conversations
-- **Next release candidate:** v1.13.0 (in progress) — Agent Intercom protocol v4 integration, broker-enforced workspace scoping, Managed Claude 0.12.0-connect.3
-- **Test suite:** 131 backend tests passing + 2 environment/on-device ignored, and 42 frontend tests passing; physical-phone LAN acceptance remains pending
+- **Latest release:** v1.14.17 — signed/notarized macOS-only shipping, desktop CSP, tray capability split, pairing-token hardening
+- **Supported binary:** macOS Apple Silicon `.dmg` (Developer ID + notarization). Windows installers paused. Intel Mac from source only.
+- **Test suite:** 220+ backend tests passing + 2 on-device ignored, and 50+ frontend tests passing; physical-phone LAN acceptance remains pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
 
 ## Planning queue
 
-### P0 · v1.12 Conversation bridge (in progress)
+### P0 · Conversation bridge leftovers
 
 Mobile access. Positioning: TmuxDeck becomes pi-intercom's **"human adapter"** — the family already has Pi / Codex / Claude Code / OpenCode adapters, but no "human".
 
@@ -56,12 +56,12 @@ Progress:
 | Candidate | Value | Effort estimate | Notes |
 |---|---|---|---|
 | Workspace templates / layout presets | reuse common layouts in one click | low-medium | same |
-| macOS signing + auto-update | remove Gatekeeper warning, users auto-upgrade | medium-high | needs Apple developer account + tauri-updater |
-| Split App.tsx | pay down tech debt, refactor before features grow | medium | single 987-line file; `lib.rs` already split on 2026-08-10 |
+| Codex / OpenCode structured transcripts | phone sees turns instead of capture-pane | medium | Pi and Claude CLI already read jsonl |
+| Split App.tsx / AgentTerminalCanvas | pay down tech debt | medium | App.tsx ~770 lines; canvas ~2000 lines |
 
 ### P3 · Tech debt and continuous improvement
 
-- [x] macOS Developer ID signing, Apple notarization, and Tauri auto-updater (2026-09-09)
+- [x] macOS Developer ID signing, Apple notarization, and Tauri auto-updater (2026-09-09; v1.14.17 refuses unsigned release uploads)
 - [x] Split `lib.rs` into modules (tmux / registry / config / models / tray / commands, 2026-08-10)
 - [x] Introduce automated tests (v1.7.0, 2026-08-10)
 - [x] tmux no-server error handling (v1.7.0, 2026-08-10)

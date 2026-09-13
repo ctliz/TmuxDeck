@@ -1,30 +1,19 @@
 # Code signing decision (macOS and Windows)
 
-TmuxDeck ships unsigned. This document records why.
-
 ## Status
 
-- Releases are built and published by GitHub Actions (`release.yml`).
-- **macOS.** Developer ID code signing and Apple notarization are supported. Release builds are signed and notarized when Apple secrets are configured in GitHub Actions or locally in the environment.
-- **Windows.** Artifacts are not signed. The workflow contains an optional Azure Trusted Signing hook for Windows, guarded by `if:` conditions. It is dormant and requires no action.
+- **macOS.** Official releases are Developer ID signed, notarized, and stapled. GitHub Actions refuses to upload a DMG unless signing and notarization secrets are present and notarization succeeds.
+- **Windows.** Installers are not published. The release workflow no longer builds `.exe` / `.msi`. Windows/WSL still compiles in CI so that code does not rot.
 
-## Why unsigned
+## Auto-update
 
-- **macOS.** Notarization requires an Apple Developer account ($99/year). That is a business decision, not a technical one; for an open-source project with no revenue it is not justified. Users who hit the "cannot verify developer" warning follow the right-click -> Open flow, which is documented in the README and is common practice for open-source macOS apps.
-- **Windows.** Azure Trusted Signing is a paid, per-use service with no free tier. Real cost would be a few cents per month, but it requires binding a credit card to an Azure subscription permanently. That was weighed against the fact that SmartScreen warnings are a known, tolerated hurdle for open-source Windows apps. Decision: do not bind a card.
+In-app updates (Tauri updater + Minisign) are published for **Apple Silicon** (`darwin-aarch64`) only. Intel Macs can still be built from source. Windows has no updater channel while installers are paused.
 
-## If signing is revisited
+## Why Windows stays unsigned / unpublished
 
-The `release.yml` Windows job already has the plumbing:
-
-```
-- Azure login (OIDC), runs only if AZURE_CLIENT_ID is set
-- Sign artifacts (Azure Trusted Signing), runs only if AZURE_TRUSTED_SIGNING_ENDPOINT is set
-```
-
-To enable, set the six `AZURE_*` secrets (see the workflow) and create the Trusted Signing account, profile, and OIDC federation in Azure. The steps are not documented here because the decision is currently "no"; the workflow comments and the historical git history contain the details.
+Azure Trusted Signing is a paid, per-use service with no free tier, and it requires binding a credit card to an Azure subscription. That remains a business decision, not a technical one.
 
 ## Related
 
-- README's FAQ covers the macOS first-launch warning.
-- Opening a signed build would change nothing about the product itself; this is purely about install-time trust UI.
+- Release notes for v1.14.16 landed signing and notarization.
+- v1.14.17 makes missing Apple secrets a hard release failure, and pauses Windows assets.

@@ -79,8 +79,26 @@ pub(crate) fn host_allowed(host: &str) -> bool {
     if let Ok(ip) = bare.parse::<IpAddr>() {
         return trusted_client_ip(ip);
     }
-    // MagicDNS：<host>.<tailnet>.ts.net
-    lower.ends_with(".ts.net")
+    // MagicDNS：machine.tailnet.ts.net（.ts.net 前至少两段标签）
+    magic_dns_host(&lower)
+}
+
+fn magic_dns_host(host: &str) -> bool {
+    let Some(rest) = host.strip_suffix(".ts.net") else {
+        return false;
+    };
+    if rest.is_empty() || !rest.contains('.') {
+        return false;
+    }
+    rest.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    })
 }
 
 /// 常量时间比较，避免时序侧信道。长度不同直接返回 false（token 定长 64 hex）。
@@ -331,6 +349,11 @@ mod tests {
         assert!(host_allowed("172.16.2.3"));
         assert!(!host_allowed("evil.example.com"));
         assert!(!host_allowed(""));
+        assert!(!host_allowed("8.8.8.8"));
+        assert!(!host_allowed("1.1.1.1"));
+        assert!(!host_allowed("8.8.8.8:443"));
+        assert!(!host_allowed("ts.net"));
+        assert!(!host_allowed("evil.ts.net"));
     }
 
     #[test]
@@ -375,6 +398,32 @@ mod integration_tests {
             .unwrap()
     }
 
+    async fn wait_for_client_count(transport: &mut WsTransport, expected: usize) -> usize {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let mut last = None;
+        loop {
+            while let Some(count) = transport.try_client_count_change() {
+                last = Some(count);
+                if count == expected {
+                    return count;
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return last.expect("timed out waiting for client count");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn ws_request(url: &str) -> tokio_tungstenite::tungstenite::http::Request<()> {
+        let mut req = url.into_client_request().unwrap();
+        req.headers_mut().insert(
+            "sec-websocket-protocol",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static(WS_SUBPROTOCOL),
+        );
+        req
+    }
+
     #[test]
     fn test_rotate_token_changes_pairing_value() {
         let rt = tokio_runtime();
@@ -385,6 +434,29 @@ mod integration_tests {
             let (_, second) = transport.pairing();
             assert_ne!(first, rotated);
             assert_eq!(rotated, second);
+        });
+    }
+
+    #[test]
+    fn test_rotate_token_rejects_old_handshake() {
+        let rt = tokio_runtime();
+        rt.block_on(async {
+            let (transport, _cmd_rx) = WsTransport::bind().await.unwrap();
+            let (port, old_token) = transport.pairing();
+            let old_url = format!("ws://127.0.0.1:{}/v1/ws?token={}", port, old_token);
+            tokio_tungstenite::connect_async(ws_request(&old_url))
+                .await
+                .expect("old token should work before rotate");
+
+            let new_token = transport.rotate_token();
+            assert!(tokio_tungstenite::connect_async(ws_request(&old_url))
+                .await
+                .is_err());
+
+            let new_url = format!("ws://127.0.0.1:{}/v1/ws?token={}", port, new_token);
+            tokio_tungstenite::connect_async(ws_request(&new_url))
+                .await
+                .expect("new token should work after rotate");
         });
     }
 
@@ -562,11 +634,11 @@ mod integration_tests {
             );
             let (desktop_ws, _) = tokio_tungstenite::connect_async(desktop_req).await.unwrap();
 
-            // 等待连接并确认 client_count 变化为 0（非 mobile 不计数）
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            while let Some(count) = transport.try_client_count_change() {
-                assert_eq!(count, 0, "桌面端连接时不应计入 mobile 数量");
-            }
+            assert_eq!(
+                wait_for_client_count(&mut transport, 0).await,
+                0,
+                "桌面端连接时不应计入 mobile 数量"
+            );
             // 但 has_clients 必须为 true（包含桌面端）
             assert!(
                 transport.has_clients(),
@@ -582,20 +654,19 @@ mod integration_tests {
             );
             let (mobile_ws, _) = tokio_tungstenite::connect_async(mobile_req).await.unwrap();
 
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let mut last_count = None;
-            while let Some(count) = transport.try_client_count_change() {
-                last_count = Some(count);
-            }
-            assert_eq!(last_count, Some(1), "手机端接入后 mobile count 应为 1");
+            assert_eq!(
+                wait_for_client_count(&mut transport, 1).await,
+                1,
+                "手机端接入后 mobile count 应为 1"
+            );
 
             // 3. 手机端断开，计数降回 0，但桌面端仍在
             drop(mobile_ws);
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            while let Some(count) = transport.try_client_count_change() {
-                last_count = Some(count);
-            }
-            assert_eq!(last_count, Some(0), "手机端断开后 mobile count 恢复为 0");
+            assert_eq!(
+                wait_for_client_count(&mut transport, 0).await,
+                0,
+                "手机端断开后 mobile count 恢复为 0"
+            );
             assert!(transport.has_clients(), "桌面端仍在，has_clients 仍为 true");
 
             // 4. 广播事件桌面端仍可接收
