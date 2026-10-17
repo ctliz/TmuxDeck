@@ -19,8 +19,8 @@ src-tauri/src/
 ├── tray.rs           Menu bar menu construction
 ├── audit.rs          Kill/rename audit trail + session/pane counters
 │
-├── intercom.rs       ← Agent Intercom broker client (protocol v4, ctliz agent-intercom v4, Pi `@ctliz/pi-intercom@0.12.1` / Claude 0.13.0-connect.1)
-├── claude_adapter.rs ← Managed Claude adapter management (macOS pinned 0.13.0-connect.1, --tui --safe, SHA verification, rollback)
+├── intercom.rs       ← Agent Intercom broker client (protocol v4, ctliz agent-intercom v4, Pi `@ctliz/pi-intercom@0.12.1`; bundled adapters pinned in resources/plugins.lock.json)
+├── claude_adapter.rs ← Managed Claude adapter management (macOS version from plugins.lock.json, --tui --safe, SHA verification, rollback)
 ├── scope.rs          ← Workspace scope routing boundaries and validation (scope is routing boundary, not auth)
 ├── bridge.rs         ← Conversation bridge: panes ⊕ intercom sessions → unified conversation model;
 │                       ConversationRegistry, pane↔session association, deliver/forward, Transport trait

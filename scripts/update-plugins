@@ -1,0 +1,227 @@
+#!/usr/bin/env node
+// Node 24+, npm, Python 3 and tar. No project npm install or global package writes.
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const resources = path.join(root, 'src-tauri/resources');
+const lockPath = path.join(resources, 'plugins.lock.json');
+const check = process.argv.includes('--check');
+const offline = process.argv.includes('--offline');
+if (process.argv.includes('--help')) {
+  console.log('Usage: scripts/update-plugins [--check [--offline]]\nUpdate: resolve npm latest, pack, verify registry SRI, regenerate lock/Rust/config/docs.\n--check: verify latest versions and every locked/generated file without modifying the repository.\n--check --offline: verify locked artifacts/generated files without registry access.');
+  process.exit(0);
+}
+if (process.argv.slice(2).some(arg => !['--check', '--offline'].includes(arg)) || (offline && !check)) {
+  throw new Error('Usage: scripts/update-plugins [--check [--offline]]');
+}
+const specs = {
+  core: '@ctliz/agent-intercom-core',
+  claude: '@ctliz/agent-intercom-claude',
+  codex: '@ctliz/agent-intercom-codex',
+  opencode: '@ctliz/agent-intercom-opencode',
+  sdk: '@opencode-ai/plugin',
+};
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tmuxdeck-plugins-'));
+const run = (cmd, args, cwd = tmp) => execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+const npm = args => run('npm', args);
+const json = obj => JSON.stringify(obj, null, 2) + '\n';
+const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
+const shaFile = file => hash(fs.readFileSync(file));
+const sriFile = file => 'sha512-' + hash(fs.readFileSync(file), 'sha512', 'base64');
+const previous = fs.existsSync(lockPath) ? JSON.parse(fs.readFileSync(lockPath, 'utf8')) : null;
+
+function output(file, content) {
+  if (check) {
+    if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) throw new Error(`Stale generated file: ${path.relative(root, file)}`);
+  } else {
+    fs.writeFileSync(file, content);
+  }
+}
+
+function walk(dir, prefix = '') {
+  return fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1).flatMap(entry => {
+    const rel = prefix + entry.name;
+    if (entry.isSymbolicLink()) throw new Error(`Unexpected symlink: ${rel}`);
+    return entry.isDirectory() ? walk(path.join(dir, entry.name), rel + '/') : [rel];
+  });
+}
+
+function unpack(file, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  // npm tarballs must contain regular files/directories only, inside package/.
+  run('python3', ['-c', `import sys,tarfile,posixpath
+with tarfile.open(sys.argv[1]) as t:
+ for m in t.getmembers():
+  if not (m.isfile() or m.isdir()) or not m.name.startswith('package/') or '..' in m.name.split('/') or m.name.startswith('/'):
+   raise ValueError('unsafe npm archive entry: '+m.name)
+ t.extractall(sys.argv[2])`, file, dest]);
+  return path.join(dest, 'package');
+}
+
+function coreTree(dir) {
+  const entries = [];
+  function scan(current, prefix = '') {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const rel = prefix + entry.name;
+      if (entry.isDirectory()) {
+        entries.push([rel, `DIR\0${rel}\n`]);
+        scan(path.join(current, entry.name), rel + '/');
+      } else {
+        entries.push([rel, `FILE\0${rel}\0${shaFile(path.join(current, entry.name))}\n`]);
+      }
+    }
+  }
+  scan(dir);
+  entries.sort((a, b) => a[0] < b[0] ? -1 : 1);
+  return { entries: entries.length, sha256: hash(entries.map(e => e[1]).join('')) };
+}
+
+function buildClosure(packages) {
+  const stage = path.join(tmp, 'closure');
+  const vendor = path.join(stage, 'vendor');
+  fs.mkdirSync(vendor, { recursive: true });
+  const dependencies = {};
+  for (const id of ['core', 'opencode', 'sdk']) {
+    const p = packages[id];
+    fs.copyFileSync(path.join(resources, p.file), path.join(vendor, p.file));
+    dependencies[p.name] = 'file:./vendor/' + p.file;
+  }
+  fs.writeFileSync(path.join(stage, 'package.json'), json({ name: 'tmuxdeck-opencode-closure', version: '1.0.0', private: true, dependencies }));
+  // Deliberately omit optional native addons: required JS fallbacks remain,
+  // avoiding platform-specific, unnotarized binaries in the shipped app.
+  run('npm', ['install', '--ignore-scripts', '--omit=optional', '--no-audit', '--no-fund', '--cache', path.join(tmp, 'npm-cache')], stage);
+  fs.rmSync(path.join(stage, 'node_modules/.bin'), { force: true, recursive: true });
+  const dest = path.join(resources, 'opencode-sdk-closure.tgz');
+  // Deterministic archive: sorted paths, no host uid/gid/timestamps or symlinks.
+  run('python3', ['-c', `import sys,os,tarfile,gzip
+root,out=sys.argv[1:]
+with open(out,'wb') as f, gzip.GzipFile(fileobj=f,mode='wb',filename='',mtime=0) as gz, tarfile.open(fileobj=gz,mode='w') as t:
+ for base,dirs,files in os.walk(os.path.join(root,'node_modules')):
+  dirs.sort(); files.sort()
+  for name in ['']+files:
+   p=os.path.join(base,name) if name else base
+   if os.path.islink(p): raise ValueError('symlink in closure: '+p)
+   info=t.gettarinfo(p,arcname=os.path.relpath(p,root)); info.uid=info.gid=info.mtime=0; info.uname=info.gname=''; info.mode=0o755 if info.isdir() else 0o644
+   if info.isfile():
+    with open(p,'rb') as data: t.addfile(info,data)
+   else: t.addfile(info)`, stage, dest]);
+}
+
+function closureInfo(packages) {
+  const file = 'opencode-sdk-closure.tgz';
+  const archive = path.join(resources, file);
+  const closureLock = JSON.parse(run('tar', ['-xOf', archive, 'node_modules/.package-lock.json']));
+  for (const id of ['core', 'opencode', 'sdk']) {
+    const p = packages[id];
+    if (closureLock.packages['node_modules/' + p.name]?.version !== p.version) throw new Error(`Closure has wrong ${p.name} version`);
+  }
+  if (closureLock.packages['node_modules/@opencode-ai/sdk']?.version !== packages.sdk.version) throw new Error('Closure SDK version mismatch');
+  const native = run('tar', ['-tzf', archive]).split('\n').filter(f => /\.(node|dylib|dll|exe)$/.test(f));
+  if (native.length) throw new Error(`Native binaries in closure: ${native.join(', ')}`);
+  return { file, size: fs.statSync(archive).size, sha256: shaFile(archive), integrity: sriFile(archive), packages: Object.fromEntries(Object.entries(closureLock.packages).sort(([a], [b]) => a < b ? -1 : 1).map(([k, v]) => [k, v.version])) };
+}
+
+function generateRust(lock) {
+  const lines = ['// Generated by scripts/update-plugins; do not edit.', '// Source of truth: resources/plugins.lock.json', ''];
+  const str = (name, value) => lines.push(`pub const ${name}: &str = ${JSON.stringify(value)};`);
+  const list = (name, values) => lines.push(`pub const ${name}: &[&str] = &[`, ...values.map(v => `    ${JSON.stringify(v)},`), '];');
+  for (const [id, p] of Object.entries(lock.packages)) {
+    const prefix = id === 'sdk' ? 'OPENCODE_SDK' : id.toUpperCase();
+    str(prefix + '_RESOURCE_NAME', p.file);
+    str(prefix + '_RESOURCE_SHA256', p.sha256);
+    str(prefix + '_TARGET_VERSION', p.version);
+    if (id === 'core') {
+      str('CORE_TREE_DIGEST_SHA256', p.tree.sha256);
+      lines.push(`pub const CORE_TREE_ENTRIES: usize = ${p.tree.entries};`);
+    }
+    if (['claude', 'codex', 'opencode'].includes(id)) {
+      const digests = { ...p.immutable };
+      if (id === 'codex') digests['dist/codex-launcher.mjs'] = lock.codexLauncher.sha256;
+      digests['vendor/' + p.file] = p.sha256;
+      digests['vendor/' + lock.packages.core.file] = lock.packages.core.sha256;
+      lines.push(`pub const ${prefix}_IMMUTABLE_DIGESTS: &[(&str, &str)] = &[`, ...Object.entries(digests).sort(([a], [b]) => a < b ? -1 : 1).map(([f, digest]) => `    (${JSON.stringify(f)}, ${JSON.stringify(digest)}),`), '];');
+    }
+    if (id === 'claude') {
+      list('CLAUDE_REQUIRED_FILES', Object.keys(p.immutable));
+      list('CLAUDE_RUNTIME_FILES', Object.keys(p.immutable).filter(f => f.startsWith('dist/') && f.endsWith('.mjs')));
+    }
+    lines.push('');
+  }
+  str('OPENCODE_CLOSURE_RESOURCE_NAME', lock.closure.file);
+  str('OPENCODE_CLOSURE_RESOURCE_SHA256', lock.closure.sha256);
+  list('OPENCODE_CLOSURE_PACKAGES', Object.keys(lock.closure.packages));
+  lines.push('');
+  return lines.join('\n');
+}
+
+function generateReadme(lock) {
+  const lines = ['# Bundled Agent Intercom Adapter Resources', '', 'Generated by `scripts/update-plugins`. Versions and integrity are locked in `plugins.lock.json`.', '', 'These npm artifacts are used for optional app-private managed adapters. Installations do not modify global npm packages.', ''];
+  for (const p of Object.values(lock.packages)) {
+    lines.push(`## ${p.name}`, '', `- File: \`${p.file}\``, `- Version: \`${p.version}\``, `- Size: \`${p.size}\` bytes`, `- SHA-256: \`${p.sha256}\``, `- SHA-512 SRI: \`${p.integrity}\``, `- npm tarball: <${p.tarball}>`, `- Repository: <${p.repository}>`, `- Source offer / release: <${p.repository}/releases/tag/v${p.version}>`, `- License: \`${p.license}\``, '');
+  }
+  const c = lock.closure;
+  lines.push('## OpenCode Offline Dependency Closure', '', `- File: \`${c.file}\``, `- Size: \`${c.size}\` bytes`, `- SHA-256: \`${c.sha256}\``, `- SHA-512 SRI: \`${c.integrity}\``, `- Contents: node_modules for Core, OpenCode adapter, @opencode-ai/plugin ${lock.packages.sdk.version}, @opencode-ai/sdk ${lock.packages.sdk.version} and their dependencies (${Object.keys(c.packages).length} packages).`, '- Built with `--ignore-scripts --omit=optional`; optional native addons and .bin symlinks are excluded for notarization and portability.', '- The app installs OpenCode directly from the verified closure, without registry resolution or a populated npm cache.', '- Exact transitive package versions are recorded in plugins.lock.json; the existing closure is reused when direct package versions are unchanged.', '', '## Integrity and maintenance', '', '- Run `scripts/update-plugins` to query npm latest, npm pack, verify registry SHA-512 SRI, rebuild the SDK closure if needed, and generate Rust constants, Tauri resource references and this file.', '- Run `scripts/update-plugins --check` in CI to check registry versions and local/generated integrity without writing to the repository.', '- Use `scripts/update-plugins --check --offline` to verify only the frozen local artifacts and generated references.', '- New/renamed dist files, Claude hooks, monitors, commands and skills are included in immutable digests automatically. Required entrypoints fail closed if removed upstream; review API changes before accepting an upgrade.', '- The TmuxDeck-specific Codex launcher is resources/codex-launcher.mjs (not part of the upstream npm package); its digest is generated alongside upstream digests.', '- Pi is not bundled and is outside this updater. Existing Pi adapter settings are unchanged.', '- AGPL source/provenance and license files remain inside the original ctliz npm archives; SDK license is MIT.', '');
+  return lines.join('\n');
+}
+
+try {
+  if (check && !previous) throw new Error('plugins.lock.json is missing; run scripts/update-plugins');
+  const packages = {};
+  for (const [id, name] of Object.entries(specs)) {
+    const meta = offline ? null : JSON.parse(npm(['view', name + '@latest', '--json']));
+    const old = previous?.packages[id];
+    if (check && meta && old.version !== meta.version) throw new Error(`${name}: locked ${old.version}, npm latest ${meta.version}`);
+    let file;
+    if (check) {
+      file = old.file;
+    } else {
+      const [packed] = JSON.parse(npm(['pack', `${name}@${meta.version}`, '--ignore-scripts', '--json']));
+      file = packed.filename;
+      fs.copyFileSync(path.join(tmp, file), path.join(resources, file));
+    }
+    const archive = path.join(resources, file);
+    const integrity = sriFile(archive);
+    if (integrity !== (meta?.dist.integrity ?? old.integrity)) throw new Error(`SRI mismatch: ${file}`);
+    const dir = unpack(archive, path.join(tmp, id));
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    if (pkg.name !== name || pkg.version !== (meta?.version ?? old.version)) throw new Error(`Wrong package identity: ${file}`);
+    // The published OpenCode SDK omits repository metadata.
+    const repository = (typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url ?? 'https://github.com/anomalyco/opencode').replace(/^git\+/, '').replace(/\.git$/, '');
+    const p = { name, version: pkg.version, file, size: fs.statSync(archive).size, sha256: shaFile(archive), integrity, tarball: meta?.dist.tarball ?? old.tarball, repository, license: pkg.license };
+    if (id === 'core') p.tree = coreTree(dir);
+    if (['claude', 'codex', 'opencode'].includes(id)) {
+      const included = walk(dir).filter(f => f.startsWith('dist/') || (id === 'claude' && (/^(?:\.claude-plugin|hooks|monitors|commands|skills)\//.test(f) || f === '.mcp.json')));
+      for (const entry of ({ claude: ['dist/cci.mjs', 'dist/claude-server.mjs', 'dist/inbox-monitor.mjs', 'dist/session-hook.mjs', 'hooks/hooks.json', '.claude-plugin/plugin.json', '.mcp.json', 'monitors/monitors.json'], codex: ['dist/codex-server.mjs', 'dist/bridge-daemon.mjs', 'dist/coi.mjs'], opencode: ['dist/plugin.mjs', 'dist/tui.mjs'] })[id]) {
+        if (!included.includes(entry)) throw new Error(`Required upstream entrypoint removed: ${name}/${entry}; review installer compatibility`);
+      }
+      p.immutable = Object.fromEntries(included.map(f => [f, shaFile(path.join(dir, f))]));
+    }
+    packages[id] = p;
+    console.log(`${name} ${p.version}: ${p.sha256}`);
+  }
+  const closureChanged = !previous || ['core', 'opencode', 'sdk'].some(id => previous.packages[id].version !== packages[id].version);
+  if (!check && closureChanged) buildClosure(packages);
+  const lock = { schemaVersion: 1, packages, codexLauncher: { file: 'codex-launcher.mjs', sha256: shaFile(path.join(resources, 'codex-launcher.mjs')) }, closure: closureInfo(packages) };
+  if (!check && previous && !closureChanged && lock.closure.sha256 !== previous.closure.sha256) throw new Error('Existing closure changed unexpectedly');
+  output(lockPath, json(lock));
+  output(path.join(root, 'src-tauri/src/commands/plugins.generated.rs'), generateRust(lock));
+  output(path.join(resources, 'README.md'), generateReadme(lock));
+  const confPath = path.join(root, 'src-tauri/tauri.conf.json');
+  const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'));
+  conf.bundle.resources = [...Object.values(packages).map(p => 'resources/' + p.file), 'resources/' + lock.closure.file];
+  output(confPath, json(conf));
+  if (!check) {
+    const keep = new Set([...Object.values(packages).map(p => p.file), lock.closure.file]);
+    for (const file of fs.readdirSync(resources)) {
+      if (/^(ctliz-agent-intercom-|opencode-ai-plugin-).*\.tgz$/.test(file) && !keep.has(file)) fs.unlinkSync(path.join(resources, file));
+    }
+  }
+  console.log(check ? 'Plugin integrity and generated references OK (no repository writes).' : 'Plugins updated. Review API compatibility, then run cargo build/test and npm run build.');
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
+}

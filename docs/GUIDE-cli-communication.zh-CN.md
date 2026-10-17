@@ -149,7 +149,7 @@ TmuxDeck managed Codex 的 MCP 配置必须直接指向 bundled server：
 ```toml
 [mcp_servers.codex-intercom]
 command = "node"
-args = ["<managed-root>/0.12.0-connect.1/dist/codex-server.mjs"]
+args = ["<managed-root>/<version-from-plugins.lock.json>/dist/codex-server.mjs"]
 ```
 
 不要将 MCP server 配置成 `codex-launcher.mjs`。launcher 是 CLI 启动包装，不是 MCP server；它默认调用 CLI，可能依赖错误的 `/usr/local/bin/codex` 路径。

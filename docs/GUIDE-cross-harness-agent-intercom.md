@@ -159,7 +159,7 @@ After updating, restart ordinary Codex sessions and all `coi` workers.
 
 On macOS, select Claude Code in TmuxDeck's **Create Workspace** modal and choose **Install Managed Adapter**. TmuxDeck installs its pinned adapter from the app bundle without contacting npm or changing any global npm package. The same control becomes **Repair Managed Adapter** if health verification fails.
 
-The managed resource corresponds to `@ctliz/agent-intercom-claude@connect` (`0.13.0-connect.1`), bundled as `ctliz-agent-intercom-claude-0.13.0-connect.1.tgz` and published with source at <https://github.com/ctliz/agent-intercom-claude/releases/tag/v0.13.0-connect.1>, retaining original `@dataforxyz/agent-intercom-claude` provenance. It packages the Claude Monitor files required for `cci --tui --safe`. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
+The managed resource is a pinned npm release of `@ctliz/agent-intercom-claude`. Its exact version, tarball, integrity and source release link are generated in [`resources/README.md`](../src-tauri/resources/README.md) from [`plugins.lock.json`](../src-tauri/resources/plugins.lock.json), retaining original `@dataforxyz/agent-intercom-claude` provenance. It packages the Claude Monitor files required for `cci --tui --safe`. Its AGPL license and third-party notices are preserved in the installed directory; the exact artifact digest is recorded in `src-tauri/resources/README.md`.
 
 Installation verifies the pinned SHA-256, rejects links, devices, absolute paths and `..`, stages the replacement, validates the Claude plugin → Monitor → MCP/runtime chain, and rolls back if validation or config persistence fails. A healthy existing version remains in place after a failed repair.
 
@@ -469,9 +469,9 @@ Verified on this machine for v1.14.0:
 ```text
 Pi package source: npm:@ctliz/pi-intercom@0.12.1
 Pi package version: @ctliz/pi-intercom 0.12.1
-Claude package:     @ctliz/agent-intercom-claude@connect (0.13.0-connect.1, --tui --safe)
-Codex package:      @ctliz/agent-intercom-codex@connect (0.12.0-connect.1)
-OpenCode package:   @ctliz/agent-intercom-opencode@connect (0.12.0-connect.1)
+Claude package:     @ctliz/agent-intercom-claude (pinned in resources/plugins.lock.json, --tui --safe)
+Codex package:      @ctliz/agent-intercom-codex (pinned in resources/plugins.lock.json)
+OpenCode package:   @ctliz/agent-intercom-opencode (pinned in resources/plugins.lock.json)
 Core internal:      @ctliz/agent-intercom-core@0.2.0
 Grok / AGY:         manual bridge plugins; claude-intercom-mcp on PATH; TmuxDeck injects per-pane identity
 Protocol:           v4 (broker-enforced workspace scoping & Zero-Manual-Join Auto-Team)

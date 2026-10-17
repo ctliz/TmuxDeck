@@ -36,7 +36,9 @@
         "visible": false,
         "shadow": true,
         "windowEffects": {
-          "effects": ["popover"],
+          "effects": [
+            "popover"
+          ],
           "state": "active",
           "radius": 16
         }
@@ -59,10 +61,10 @@
     ],
     "resources": [
       "resources/ctliz-agent-intercom-core-0.2.0.tgz",
-      "resources/ctliz-agent-intercom-claude-0.13.0-connect.1.tgz",
-      "resources/ctliz-agent-intercom-codex-0.12.0-connect.1.tgz",
-      "resources/ctliz-agent-intercom-opencode-0.12.0-connect.1.tgz",
-      "resources/opencode-ai-plugin-1.18.18.tgz",
+      "resources/ctliz-agent-intercom-claude-0.16.0.tgz",
+      "resources/ctliz-agent-intercom-codex-0.13.3.tgz",
+      "resources/ctliz-agent-intercom-opencode-0.13.0.tgz",
+      "resources/opencode-ai-plugin-1.19.3.tgz",
       "resources/opencode-sdk-closure.tgz"
     ],
     "macOS": {

@@ -168,7 +168,7 @@ npm install -g opencode-ai
 | Agent | 适配器安装命令 | 激活 / MCP 注册 |
 | :--- | :--- | :--- |
 | **Pi** | `pi install npm:@ctliz/pi-intercom@0.12.1` | 启动自动加载；安装或更新后，所有已打开的 Pi 会话都需执行 `/reload`。独立 Pi 可用 `/intercom-join` 加入已有 TmuxDeck 工作区通话圈，不会成为 Team Worker。不要同时安装 git 源。 |
-| **Claude Code** | macOS 可在“创建工作区”弹窗安装 TmuxDeck 固定版本的托管适配器 (`0.13.0-connect.1`，npm 对应 `@ctliz/agent-intercom-claude@connect`)；不会修改全局 npm。 | 可选“使用托管 Claude”（以 `--tui --safe` 运行）或持久切换为“标准 Claude”。已有全局 `cci` 保持不变，仍可作为自定义命令使用。 |
+| **Claude Code** | macOS 可在“创建工作区”弹窗安装 TmuxDeck 固定版本的托管适配器（版本与摘要见 [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)）；不会修改全局 npm。 | 可选“使用托管 Claude”（以 `--tui --safe` 运行）或持久切换为“标准 Claude”。已有全局 `cci` 保持不变，仍可作为自定义命令使用。 |
 | **Codex** | `npm install -g @ctliz/agent-intercom-codex@connect` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @ctliz/agent-intercom-opencode@connect` | 在 `opencode.json` 与 `tui.json` 中配置 `plugin.mjs` 和 `tui.mjs`；`tui.mjs` 提供 `/intercom`、`/intercom-name` 和 `/intercom-id` |
 | **Grok** | 确认 `PATH` 中可执行 `claude-intercom-mcp`，再安装插件。 | 要加入 Auto-Team，MCP child 需要含具体身份/scope 的每 pane 配置；插件没有唤醒桥接，请轮询 `intercom_pending`。 |
@@ -185,7 +185,7 @@ npm install -g opencode-ai
 - **仅需对已安装的适配器协调升级：** 升级协议版本时，只需协调升级当前机器上已安装的 Agent 适配器即可。升级后在已打开的 Pi 会话中执行 `/reload` 并重启其他伴生适配器；无需安装未使用的 Agent 适配器。
 - **Orchestrator 部署模式：** Orchestrator 为可选的 Linux/systemd 生命周期管理产物，处于 Broker 兼容集之外；macOS 上直接省略。
 - **批量回复上下文：** 跨 provider/tool 循环保留回复上下文。同一发送者的普通消息批次默认回复最新消息；多个发送者共存时，需在 `intercom_reply({ to, message })` 中使用精确发送者名称或完整 Session ID。
-- **Claude Code 接入说明：** macOS 可直接在“创建工作区”弹窗离线安装或修复固定版本的 **托管 Claude Intercom** (`0.13.0-connect.1`)。安装器会校验内置资源 SHA-256、拒绝不安全归档项、验证 Claude plugin → Monitor → runtime 完整链路，且不修改全局 npm。每个新建的托管 pane 或 Ghostty native slot 都会显式使用安全模式 (`--tui --safe`) 启动 Claude，并生成密码学随机的 Intercom ID，该 ID 随现有 pane/slot 生命周期保留，并附带可读的工作区/分屏名称；它只是路由元数据，不是认证凭据。“使用标准 Claude”会持久保存；安装/修复或选择“使用托管 Claude”会切回托管模式。Windows/WSL 保持原标准 Claude 行为。已有全局 `cci` 不会被自动视为 Managed，也不会被修改或删除；确有需要可用自定义 Agent 命令启动。自定义命令不会被改写。
+- **Claude Code 接入说明：** macOS 可直接在“创建工作区”弹窗离线安装或修复固定版本的 **托管 Claude Intercom**（版本固定在 [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)）。安装器会校验内置资源 SHA-256、拒绝不安全归档项、验证 Claude plugin → Monitor → runtime 完整链路，且不修改全局 npm。每个新建的托管 pane 或 Ghostty native slot 都会显式使用安全模式 (`--tui --safe`) 启动 Claude，并生成密码学随机的 Intercom ID，该 ID 随现有 pane/slot 生命周期保留，并附带可读的工作区/分屏名称；它只是路由元数据，不是认证凭据。“使用标准 Claude”会持久保存；安装/修复或选择“使用托管 Claude”会切回托管模式。Windows/WSL 保持原标准 Claude 行为。已有全局 `cci` 不会被自动视为 Managed，也不会被修改或删除；确有需要可用自定义 Agent 命令启动。自定义命令不会被改写。
 - **OpenCode 接入说明：** 需要同时注册 `plugin.mjs`（服务端插件在 `opencode.json` 中）与 `tui.mjs`（TUI 插件在 `tui.json` 中）。
 - **Grok 与 AGY 接入说明：** 它们是经由 `claude-intercom-mcp` 桥接的外部手动安装插件，必须确保该命令在 `PATH` 中可用。两者没有唤醒桥接；Grok 要加入 Auto-Team 还需要含具体身份和 scope 的隔离每 pane MCP 配置，请主动调用 `intercom_pending` 检查任务。
 - **重命名 OpenCode Intercom 会话：** 执行 `/intercom-name`，或在命令面板选择 **Rename intercom session**；弹窗标题为 **Rename this Intercom session**。模型也可以调用 `intercom_set_name({ name: "<新名称>" })`。该操作只修改其他 Agent 可见的名称，不改变稳定的 Intercom Session ID。

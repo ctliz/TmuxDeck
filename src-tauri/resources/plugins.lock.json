@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "core": {
+      "name": "@ctliz/agent-intercom-core",
+      "version": "0.2.0",
+      "file": "ctliz-agent-intercom-core-0.2.0.tgz",
+      "size": 198861,
+      "sha256": "9b6c72d57a9d00679dbdedcd91a9121e1028d9e208decd3ad6f4b9ba3c204556",
+      "integrity": "sha512-bpifL9cc8cwMm74fpvjgRBarXMwn6BY4cST4ry6HrGtfpRTXyiJOtwfNnhORF6xTKwQNOWakxS1sZALczInvkQ==",
+      "tarball": "https://registry.npmjs.org/@ctliz/agent-intercom-core/-/agent-intercom-core-0.2.0.tgz",
+      "repository": "https://github.com/ctliz/agent-intercom-core",
+      "license": "AGPL-3.0-or-later",
+      "tree": {
+        "entries": 95,
+        "sha256": "ec03975afb6924b5e9363b88073ef37be24eaeb65f0bb5d7360ebce0dfce669a"
+      }
+    },
+    "claude": {
+      "name": "@ctliz/agent-intercom-claude",
+      "version": "0.16.0",
+      "file": "ctliz-agent-intercom-claude-0.16.0.tgz",
+      "size": 277811,
+      "sha256": "e6844bd63b0f99f4d62315bfdc1ab253dde367c45ba5ab55e993c48c0ee4c4be",
+      "integrity": "sha512-7p298kXahDMkzdMByT0qJDNP0HidY3zMEbgYTnkCblVmqyj1wGJgjvg4K8aEvM2Qrs+mmIB42fgidliHPQSteA==",
+      "tarball": "https://registry.npmjs.org/@ctliz/agent-intercom-claude/-/agent-intercom-claude-0.16.0.tgz",
+      "repository": "https://github.com/ctliz/agent-intercom-claude",
+      "license": "AGPL-3.0-or-later",
+      "immutable": {
+        ".claude-plugin/plugin.json": "1e6a20ae80b1d47679e4403c692f9557aa4d9763efe137aa2be062ef9df5c45c",
+        ".mcp.json": "244ec58410a70521c7c2623629d9f0772853b1d83cf7b9988592b7d0c0652b53",
+        "commands/intercom-create.md": "9e154c8934b0c665f3d0bb98f8c1618abf4ad0cedc3cce910cb95bf248cf930c",
+        "commands/intercom-id.md": "9555ec6464ff2c7bb5b762d876f0141a179c90fa7e16050757110eec3363a8a0",
+        "commands/intercom-join.md": "c0a22d5ac621c4b9aafbe99fa3e5a90d8dd7a04b330e6731916d481c7693ee43",
+        "commands/intercom.md": "0331c1b44a2bd4ef4d8332726d46a80934d2ae9c08e410b02d4249d387e8224f",
+        "dist/broker.mjs": "443859477239b1ff0d61f7f198a3c36f03b493156f7075ff102512be90ea7a86",
+        "dist/cci.mjs": "9e83e39a159b73be0a628b887900d16311f4f074e2ec91c608559098fc5f266b",
+        "dist/ccim.mjs": "b4b06c8d592e13690e167f46bc848580207547a54a6a8c4e5bd4adaca87412c2",
+        "dist/claude-server.mjs": "ce290374d5147d416ff5fa8ee9929f6ca2936daed51f60be3742609a435266c6",
+        "dist/inbox-monitor.mjs": "ada9837913f51d58649e5ba92472be67bcae8a07b55a7b2269b98133479c8e1d",
+        "dist/session-hook.mjs": "573c3641ca8b59489e3196967bb09a742f2fb31f30df0be1e2c875bbfca53d63",
+        "dist/worker-daemon.mjs": "a70b8049c1c2bacf755f5ff81fe38acd61ced13bcf4e4de843fbc85894afe0ee",
+        "hooks/hooks.json": "3d6d13207df4f1e2dd0fdca1aa56a4641cf11bb125def42c2d4ffc54cc8fe2f8",
+        "monitors/monitors.json": "4c756d2e6f1ed5b7b0c100c57d8b5c577d98a0c4737748366fc13394f885923a",
+        "skills/claude-intercom/SKILL.md": "ce95ad6fdfbaf37c3bef304020c70b0ef6f4dd2e9f85453bf87922b6ee765f9d"
+      }
+    },
+    "codex": {
+      "name": "@ctliz/agent-intercom-codex",
+      "version": "0.13.3",
+      "file": "ctliz-agent-intercom-codex-0.13.3.tgz",
+      "size": 1298456,
+      "sha256": "4b233d93d76f9ce744aecaa7ba5211a73278a88ee8df5a5fd1733067e70e0db2",
+      "integrity": "sha512-x0DfCk5/psKU1eqWLtq4P1nikCu+rU3n0dbyk5n/cv9SSS/jc6Hr70w0M+679TzLNm2WwU69lwHCJ4GD69tonQ==",
+      "tarball": "https://registry.npmjs.org/@ctliz/agent-intercom-codex/-/agent-intercom-codex-0.13.3.tgz",
+      "repository": "https://github.com/ctliz/agent-intercom-codex",
+      "license": "AGPL-3.0-or-later",
+      "immutable": {
+        "dist/bridge-daemon.mjs": "f01b3f16044e60575a4f5759d180a4d61b1ac218c0d3422297038e7fabdba7bc",
+        "dist/broker.mjs": "9c91ba8280c2cc6e339c583a8e070627ae1db8be019d4656b25ed4512c6bf44b",
+        "dist/build-info.json": "cfa53685064427f04d4289a1cd233b7d1784a130c00a9122d8a4c869cbbbcde1",
+        "dist/codex-server.mjs": "8940ff2956d8ae8c9fd81822de22fda7dae1658c7ad9702dfc53e21f231fc1c5",
+        "dist/coi.mjs": "d08367a04ec23236d8ca36b54134007edfbbf7887addcd3e8397c1368415b698"
+      }
+    },
+    "opencode": {
+      "name": "@ctliz/agent-intercom-opencode",
+      "version": "0.13.0",
+      "file": "ctliz-agent-intercom-opencode-0.13.0.tgz",
+      "size": 235160,
+      "sha256": "775d16cb299219c6149ca99785bbaaa959f108a7cc138a2f3deea2d0e8bf00bc",
+      "integrity": "sha512-i9b3h9VQQzWfPunHEck2ltxL0PhTPCY8riWsHsoXLiWy2+eyAs7Q0Ej6ySgftOA+avuO2fgaUZ1Myt/BcJnepQ==",
+      "tarball": "https://registry.npmjs.org/@ctliz/agent-intercom-opencode/-/agent-intercom-opencode-0.13.0.tgz",
+      "repository": "https://github.com/ctliz/agent-intercom-opencode",
+      "license": "AGPL-3.0-or-later",
+      "immutable": {
+        "dist/broker.mjs": "c51f805a355bb351068f45d564f1c0a0d6bad3d13a35a4a22eea1278c15702d4",
+        "dist/plugin.mjs": "db6224cbb0561adeadc04ee05c1e1a04f452801b63b8c296809938420dc7f416",
+        "dist/tui.mjs": "88325d734ae2a35caeb11ff6bc02d6d8dec8f6e0d0806320a8dcc22ec26a2cdc"
+      }
+    },
+    "sdk": {
+      "name": "@opencode-ai/plugin",
+      "version": "1.19.3",
+      "file": "opencode-ai-plugin-1.19.3.tgz",
+      "size": 11984,
+      "sha256": "3c749739f32a16b0fd3faaaa3d68aeb0d36d2d6d89a89798b4258f5b5d9c5123",
+      "integrity": "sha512-FBN2OREfg9xiIvrxrxjZt6CCg6kn8WzKdwsD/6+a10R/M4hrdRTounUgg0LUR4cOXcI/XMKPeIWdfdaXBdmZEw==",
+      "tarball": "https://registry.npmjs.org/@opencode-ai/plugin/-/plugin-1.19.3.tgz",
+      "repository": "https://github.com/anomalyco/opencode",
+      "license": "MIT"
+    }
+  },
+  "codexLauncher": {
+    "file": "codex-launcher.mjs",
+    "sha256": "227cf7789fe3b0838b220f7dba2b9c1b961a9d3cfafb7b2adb14b0794a134ee0"
+  },
+  "closure": {
+    "file": "opencode-sdk-closure.tgz",
+    "size": 10698650,
+    "sha256": "e02f8e4f2b77cfa0b4e068d2f65524c9a9e37348d216ca97ff2cc7c48e964296",
+    "integrity": "sha512-0bl2dipTP6+VB4kI5Lwyi8AVnMLJtm+HTnyqpj7ROpCxCHt+KaE14h3j1LhFIABk9FhITkgoNWKRGn6kO5+8Bw==",
+    "packages": {
+      "node_modules/@ai-sdk/provider": "3.0.8",
+      "node_modules/@ctliz/agent-intercom-core": "0.2.0",
+      "node_modules/@ctliz/agent-intercom-opencode": "0.13.0",
+      "node_modules/@opencode-ai/plugin": "1.19.3",
+      "node_modules/@opencode-ai/sdk": "1.19.3",
+      "node_modules/@standard-schema/spec": "1.1.0",
+      "node_modules/cross-spawn": "7.0.6",
+      "node_modules/effect": "4.0.0-beta.83",
+      "node_modules/fast-check": "4.10.2",
+      "node_modules/find-my-way-ts": "0.1.6",
+      "node_modules/ini": "7.0.0",
+      "node_modules/isexe": "2.0.0",
+      "node_modules/json-schema": "0.4.0",
+      "node_modules/kubernetes-types": "1.30.0",
+      "node_modules/msgpackr": "2.1.0",
+      "node_modules/multipasta": "0.2.8",
+      "node_modules/path-key": "3.1.1",
+      "node_modules/pure-rand": "8.4.2",
+      "node_modules/shebang-command": "2.0.0",
+      "node_modules/shebang-regex": "3.0.0",
+      "node_modules/toml": "4.3.0",
+      "node_modules/uuid": "14.0.3",
+      "node_modules/which": "2.0.2",
+      "node_modules/yaml": "2.9.1",
+      "node_modules/zod": "4.1.8"
+    }
+  }
+}

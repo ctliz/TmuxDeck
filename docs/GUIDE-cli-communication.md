@@ -149,7 +149,7 @@ The managed Codex configuration must invoke the bundled server directly:
 ```toml
 [mcp_servers.codex-intercom]
 command = "node"
-args = ["<managed-root>/0.12.0-connect.1/dist/codex-server.mjs"]
+args = ["<managed-root>/<version-from-plugins.lock.json>/dist/codex-server.mjs"]
 ```
 
 Do not configure `codex-launcher.mjs` as the MCP server. The launcher is a CLI wrapper, not an MCP server; it may try to execute an incorrect `/usr/local/bin/codex` path.

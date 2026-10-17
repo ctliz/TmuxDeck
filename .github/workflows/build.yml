@@ -39,6 +39,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify frozen plugin resources
+        if: runner.os == 'macOS'
+        run: node scripts/update-plugins --check --offline
+
       - name: Run Frontend Tests
         run: npm test
 

@@ -1,6 +1,20 @@
 # scripts
 
-One-off scripts for development and verification. Not part of the build, not shipped in release packages.
+Scripts for development and verification. Not shipped in release packages.
+
+## `update-plugins`
+
+Requires Node.js 24+, npm, Python 3 and tar. Operates only on bundled resources and a temporary npm prefix/cache; no global installations or user adapter configs are changed.
+
+```sh
+scripts/update-plugins                   # query npm latest, pack and regenerate
+scripts/update-plugins --check           # CI: compare npm latest + verify frozen/generated artifacts
+scripts/update-plugins --check --offline # verify the existing lock without network
+```
+
+`src-tauri/resources/plugins.lock.json` records versions, archive size/SHA-256/SHA-512 SRI, immutable file digests, Core tree digest, and the OpenCode dependency closure. The script generates `commands/plugins.generated.rs`, Tauri resource references and `resources/README.md`. Rust consumes the generated constants; JS package probes use the same target versions rather than hardcoded strings.
+
+The OpenCode closure is rebuilt when Core, the OpenCode adapter or SDK versions change. It omits optional native addons and npm `.bin` links. The app extracts this verified complete snapshot and promotes its package lock directly, so installation works with an empty npm cache. Required entrypoints are checked before accepting an upstream layout change; review upstream API/permission changes and run `cargo build`, `cargo test` and `npm run build` after every update. `--check` never rewrites the repository and exits nonzero for drift.
 
 ---
 

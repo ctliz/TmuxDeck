@@ -7,28 +7,18 @@ use std::time::{Duration, Instant};
 
 use crate::config::get_config_dir;
 
-pub const MANAGED_CLAUDE_VERSION: &str = "0.13.0-connect.1";
-pub const MANAGED_CLAUDE_RESOURCE: &str = "ctliz-agent-intercom-claude-0.13.0-connect.1.tgz";
-pub const MANAGED_CLAUDE_SHA256: &str =
-    "a766f4631d92df3dc26ee81f9bec06da38c3c09bae9ea4c6b0ef3975eeeb96ba";
-pub const MANAGED_ADAPTER_MARKER: &str = "0.13.0-connect.1";
+pub use crate::commands::adapter::{
+    CLAUDE_RESOURCE_NAME as MANAGED_CLAUDE_RESOURCE,
+    CLAUDE_RESOURCE_SHA256 as MANAGED_CLAUDE_SHA256,
+    CLAUDE_TARGET_VERSION as MANAGED_CLAUDE_VERSION,
+};
+pub const MANAGED_ADAPTER_MARKER: &str = MANAGED_CLAUDE_VERSION;
 
-const REQUIRED_FILES: &[&str] = &[
-    ".claude-plugin/plugin.json",
-    ".mcp.json",
-    "monitors/monitors.json",
-    "dist/inbox-monitor.mjs",
-    "dist/claude-server.mjs",
-    "dist/cci.mjs",
-];
+const REQUIRED_FILES: &[&str] = crate::commands::adapter::CLAUDE_REQUIRED_FILES;
 const HEALTH_CACHE_TTL: Duration = Duration::from_secs(5);
 static HEALTH_CACHE: OnceLock<Mutex<Option<(Instant, ManagedClaudeState)>>> = OnceLock::new();
 
-const RUNTIME_FILES: &[&str] = &[
-    "dist/inbox-monitor.mjs",
-    "dist/claude-server.mjs",
-    "dist/cci.mjs",
-];
+const RUNTIME_FILES: &[&str] = crate::commands::adapter::CLAUDE_RUNTIME_FILES;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -256,6 +246,7 @@ fn require_materialized_plugin_surface(root: &Path) -> Result<(), String> {
         ".claude-plugin/plugin.json",
         ".mcp.json",
         "monitors/monitors.json",
+        "hooks/hooks.json",
     ] {
         if !root.join(relative).is_file() {
             return Err(format!(
@@ -639,6 +630,7 @@ mod tests {
             ".claude-plugin/plugin.json",
             ".mcp.json",
             "monitors/monitors.json",
+            "hooks/hooks.json",
         ] {
             let path = root.join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();

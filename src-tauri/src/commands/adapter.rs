@@ -24,91 +24,7 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 // Immutable Constants & Resource Hashes
 // ============================================================================
 
-pub const CORE_RESOURCE_NAME: &str = "ctliz-agent-intercom-core-0.2.0.tgz";
-pub const CORE_RESOURCE_SHA256: &str =
-    "9b6c72d57a9d00679dbdedcd91a9121e1028d9e208decd3ad6f4b9ba3c204556";
-pub const CORE_TARGET_VERSION: &str = "0.2.0";
-pub const CORE_TREE_DIGEST_SHA256: &str =
-    "ec03975afb6924b5e9363b88073ef37be24eaeb65f0bb5d7360ebce0dfce669a";
-
-pub const CLAUDE_RESOURCE_NAME: &str = "ctliz-agent-intercom-claude-0.13.0-connect.1.tgz";
-pub const CLAUDE_RESOURCE_SHA256: &str =
-    "a766f4631d92df3dc26ee81f9bec06da38c3c09bae9ea4c6b0ef3975eeeb96ba";
-pub const CLAUDE_TARGET_VERSION: &str = "0.13.0-connect.1";
-pub const CLAUDE_IMMUTABLE_DIGESTS: &[(&str, &str)] = &[
-    (
-        "dist/cci.mjs",
-        "b1d8c9388a253e6e34e04cfabb86ac01f1ed478d18a51c9fd6dbe3e729c7fcf9",
-    ),
-    (
-        "dist/claude-server.mjs",
-        "b7c67830e0bc6446d56fd1e8291a6652f050ca50571c01497ca50e94b1a47d9d",
-    ),
-    (
-        "dist/inbox-monitor.mjs",
-        "37849f70a6b1aeb0d1a72611ba53107019a44fdb68e889003a64f41b895ae90f",
-    ),
-    (
-        "vendor/ctliz-agent-intercom-claude-0.13.0-connect.1.tgz",
-        CLAUDE_RESOURCE_SHA256,
-    ),
-    (
-        "vendor/ctliz-agent-intercom-core-0.2.0.tgz",
-        CORE_RESOURCE_SHA256,
-    ),
-];
-
-pub const CODEX_RESOURCE_NAME: &str = "ctliz-agent-intercom-codex-0.12.0-connect.1.tgz";
-pub const CODEX_RESOURCE_SHA256: &str =
-    "37b14553e00ed7b501cb6289319a01c1a65543c0e8fb6a87e9caf1c379ed0a14";
-pub const CODEX_TARGET_VERSION: &str = "0.12.0-connect.1";
-pub const CODEX_IMMUTABLE_DIGESTS: &[(&str, &str)] = &[
-    (
-        "dist/codex-server.mjs",
-        "fe29eb427a3d49eb9fb70e5fe04ac9af334ed27a10d989e681297ea9cf1dffe8",
-    ),
-    (
-        "dist/codex-launcher.mjs",
-        "227cf7789fe3b0838b220f7dba2b9c1b961a9d3cfafb7b2adb14b0794a134ee0",
-    ),
-    (
-        "vendor/ctliz-agent-intercom-codex-0.12.0-connect.1.tgz",
-        CODEX_RESOURCE_SHA256,
-    ),
-    (
-        "vendor/ctliz-agent-intercom-core-0.2.0.tgz",
-        CORE_RESOURCE_SHA256,
-    ),
-];
-
-pub const OPENCODE_RESOURCE_NAME: &str = "ctliz-agent-intercom-opencode-0.12.0-connect.1.tgz";
-pub const OPENCODE_RESOURCE_SHA256: &str =
-    "9756cc56a54313d606e655ae46af83bdd89a29178fb74f08144672a0fda008a3";
-pub const OPENCODE_TARGET_VERSION: &str = "0.12.0-connect.1";
-pub const OPENCODE_SDK_RESOURCE_NAME: &str = "opencode-ai-plugin-1.18.18.tgz";
-pub const OPENCODE_SDK_RESOURCE_SHA256: &str =
-    "26ac7cc2608fc63e063a0b08857c277b17d75043ad37125667275932f17b3d43";
-pub const OPENCODE_CLOSURE_RESOURCE_NAME: &str = "opencode-sdk-closure.tgz";
-pub const OPENCODE_CLOSURE_RESOURCE_SHA256: &str =
-    "b524560dd0a28dabf6ca9775215e68f6e28c36a7911e868493b302f1d5273e97";
-pub const OPENCODE_IMMUTABLE_DIGESTS: &[(&str, &str)] = &[
-    (
-        "dist/plugin.mjs",
-        "56bd73e2b8997e5a8b7e8d7e315c93a8d1193827ebb0c8dcea0b2851788d9791",
-    ),
-    (
-        "dist/tui.mjs",
-        "104ecf3dde0c938ca45b8863a562da8622ac7d7c415621137baf1af03c63ff24",
-    ),
-    (
-        "vendor/ctliz-agent-intercom-opencode-0.12.0-connect.1.tgz",
-        OPENCODE_RESOURCE_SHA256,
-    ),
-    (
-        "vendor/ctliz-agent-intercom-core-0.2.0.tgz",
-        CORE_RESOURCE_SHA256,
-    ),
-];
+include!("plugins.generated.rs");
 
 pub const PI_CANONICAL_GIT_TARGET: &str =
     "git:github.com/ctliz/agent-intercom-pi@v0.12.0-connect.1";
@@ -131,62 +47,7 @@ pub fn get_pi_agent_dir(home_dir: &Path) -> PathBuf {
     home_dir.join(".pi/agent")
 }
 
-pub const CODEX_LAUNCHER_BODY: &str = r#"#!/usr/bin/env node
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-
-const manifestPath = process.env.AGENT_INTERCOM_TEAM_MANIFEST;
-if (!manifestPath) {
-  process.stderr.write("LAUNCHER_ERROR: AGENT_INTERCOM_TEAM_MANIFEST environment variable not set\n");
-  process.exit(1);
-}
-
-let manifest;
-try {
-  manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-} catch (e) {
-  process.stderr.write("LAUNCHER_ERROR: Failed to read team manifest: " + e.message + "\n");
-  process.exit(1);
-}
-
-const mySessionId = process.env.AGENT_INTERCOM_SESSION_ID;
-if (!mySessionId) {
-  process.stderr.write("LAUNCHER_ERROR: AGENT_INTERCOM_SESSION_ID not set\n");
-  process.exit(1);
-}
-
-const member = (manifest.members || []).find(m => m.sessionId === mySessionId);
-if (!member) {
-  process.stderr.write("LAUNCHER_ERROR: Session ID not found in manifest members\n");
-  process.exit(1);
-}
-
-const envRole = process.env.AGENT_INTERCOM_ROLE;
-if (envRole && envRole !== member.role) {
-  process.stderr.write("LAUNCHER_ERROR: AGENT_INTERCOM_ROLE mismatch\n");
-  process.exit(1);
-}
-
-if (member.role === "worker") {
-  const managerTarget = process.env.AGENT_INTERCOM_MANAGER_TARGET;
-  if (!managerTarget || managerTarget !== manifest.leadId) {
-    process.stderr.write("LAUNCHER_ERROR: AGENT_INTERCOM_MANAGER_TARGET mismatch for worker\n");
-    process.exit(1);
-  }
-}
-
-const argv = process.argv.slice(2);
-const codexBin = process.env.CODEX_REAL_BIN || "/usr/local/bin/codex";
-
-try {
-  execFileSync(codexBin, argv, { stdio: "inherit", env: process.env });
-} catch (e) {
-  if (e.status !== undefined) {
-    process.exit(e.status);
-  }
-  process.exit(1);
-}
-"#;
+pub const CODEX_LAUNCHER_BODY: &str = include_str!("../../resources/codex-launcher.mjs");
 
 // ============================================================================
 // Public Serde Types & Domain Model
@@ -408,7 +269,7 @@ pub struct RealCommandRunner;
 
 fn materialize_claude_plugin_surface(root: &Path) -> Result<(), AdapterError> {
     let package_root = root.join("node_modules/@ctliz/agent-intercom-claude");
-    for relative in [".claude-plugin", "monitors", "commands", "skills"] {
+    for relative in [".claude-plugin", "monitors", "commands", "skills", "hooks"] {
         let source = package_root.join(relative);
         let destination = root.join(relative);
         if !source.is_dir() {
@@ -1489,7 +1350,7 @@ pub fn verify_core_package_tree_integrity(core_dir: &Path) -> Result<bool, Adapt
 
     walk_dir(core_dir, core_dir, &mut entries)?;
 
-    if entries.len() != 95 {
+    if entries.len() != CORE_TREE_ENTRIES {
         return Ok(false);
     }
 
@@ -1728,6 +1589,15 @@ pub fn update_codex_config_toml(
         .map_err(|_| AdapterError::Config)
 }
 
+fn immutable_runtime_matches(root: &Path, digests: &[(&str, &str)]) -> bool {
+    digests.iter().filter(|(relative, _)| {
+        // Vendor archives and the TmuxDeck launcher are only present in managed roots.
+        !relative.starts_with("vendor/") && *relative != "dist/codex-launcher.mjs"
+    }).all(|(relative, digest)| {
+        file_sha256(&root.join(relative)).is_ok_and(|actual| actual == *digest)
+    })
+}
+
 pub fn verify_codex_global_package_identity(
     runner: &dyn CommandRunner,
     home_dir: &Path,
@@ -1751,7 +1621,7 @@ try {
   }
   if (!pkgRoot) process.exit(1);
   const pkg = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
-  if (pkg.name !== "@ctliz/agent-intercom-codex" || pkg.version !== "0.12.0-connect.1") {
+  if (pkg.name !== "@ctliz/agent-intercom-codex" || pkg.version !== "__TARGET_VERSION__") {
     process.exit(1);
   }
   // Validate canonical binary mapping
@@ -1770,10 +1640,11 @@ try {
   process.exit(1);
 }
 "#;
+    let script = script.replace("__TARGET_VERSION__", CODEX_TARGET_VERSION);
     let out = runner
         .run_command(
             "node",
-            &["--input-type=module", "-e", script],
+            &["--input-type=module", "-e", &script],
             home_dir,
             None,
         )
@@ -1795,13 +1666,7 @@ try {
         return None;
     }
 
-    let server_f = pkg_root.join("dist/codex-server.mjs");
-    if !server_f.is_file() {
-        return None;
-    }
-    if file_sha256(&server_f).unwrap_or_default()
-        != "fe29eb427a3d49eb9fb70e5fe04ac9af334ed27a10d989e681297ea9cf1dffe8"
-    {
+    if !immutable_runtime_matches(pkg_root, CODEX_IMMUTABLE_DIGESTS) {
         return None;
     }
 
@@ -2048,7 +1913,7 @@ try {
   }
   if (!pkgRoot) process.exit(1);
   const pkg = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
-  if (pkg.name !== "@ctliz/agent-intercom-opencode" || pkg.version !== "0.12.0-connect.1") {
+  if (pkg.name !== "@ctliz/agent-intercom-opencode" || pkg.version !== "__TARGET_VERSION__") {
     process.exit(1);
   }
   process.stdout.write("VALID_GLOBAL_PACKAGE:" + pkgRoot);
@@ -2056,10 +1921,11 @@ try {
   process.exit(1);
 }
 "#;
+    let script = script.replace("__TARGET_VERSION__", OPENCODE_TARGET_VERSION);
     let out = runner
         .run_command(
             "node",
-            &["--input-type=module", "-e", script],
+            &["--input-type=module", "-e", &script],
             opencode_config_dir,
             None,
         )
@@ -2081,19 +1947,7 @@ try {
         return None;
     }
 
-    let plugin_f = pkg_root.join("dist/plugin.mjs");
-    let tui_f = pkg_root.join("dist/tui.mjs");
-    if !plugin_f.is_file() || !tui_f.is_file() {
-        return None;
-    }
-    if file_sha256(&plugin_f).unwrap_or_default()
-        != "56bd73e2b8997e5a8b7e8d7e315c93a8d1193827ebb0c8dcea0b2851788d9791"
-    {
-        return None;
-    }
-    if file_sha256(&tui_f).unwrap_or_default()
-        != "104ecf3dde0c938ca45b8863a562da8622ac7d7c415621137baf1af03c63ff24"
-    {
+    if !immutable_runtime_matches(pkg_root, OPENCODE_IMMUTABLE_DIGESTS) {
         return None;
     }
 
@@ -2339,36 +2193,8 @@ pub fn verify_managed_root_integrity(
     .into_iter()
     .collect();
     if harness == "opencode" {
-        for key in [
-            "node_modules/@ai-sdk/provider",
-            "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64",
-            "node_modules/@opencode-ai/plugin",
-            "node_modules/@opencode-ai/sdk",
-            "node_modules/@standard-schema/spec",
-            "node_modules/cross-spawn",
-            "node_modules/detect-libc",
-            "node_modules/effect",
-            "node_modules/fast-check",
-            "node_modules/find-my-way-ts",
-            "node_modules/ini",
-            "node_modules/isexe",
-            "node_modules/json-schema",
-            "node_modules/kubernetes-types",
-            "node_modules/msgpackr",
-            "node_modules/msgpackr-extract",
-            "node_modules/multipasta",
-            "node_modules/node-gyp-build-optional-packages",
-            "node_modules/path-key",
-            "node_modules/pure-rand",
-            "node_modules/shebang-command",
-            "node_modules/shebang-regex",
-            "node_modules/toml",
-            "node_modules/uuid",
-            "node_modules/which",
-            "node_modules/yaml",
-            "node_modules/zod",
-        ] {
-            expected_package_keys.insert(key.to_string());
+        for key in OPENCODE_CLOSURE_PACKAGES {
+            expected_package_keys.insert((*key).to_string());
         }
     }
     let actual_package_keys: BTreeSet<String> = packages.keys().cloned().collect();
@@ -3777,6 +3603,27 @@ pub fn build_managed_root_staging(
         if closure_out.status != 0 {
             return Err(AdapterError::Install);
         }
+        // The verified closure already contains the exact adapter, SDK and
+        // Core packages. Reinstalling them makes npm fetch registry tarballs
+        // even with node_modules populated (e.g. to rebuild missing bin shims).
+        // Promote its installed-package lock instead; no npm cache is needed.
+        let lock_bytes = fs::read(staging_dir.join("node_modules/.package-lock.json"))
+            .map_err(|_| AdapterError::Install)?;
+        let mut lock: serde_json::Value =
+            serde_json::from_slice(&lock_bytes).map_err(|_| AdapterError::Install)?;
+        lock["name"] = pkg_json["name"].clone();
+        lock["version"] = pkg_json["version"].clone();
+        lock["requires"] = serde_json::Value::Bool(true);
+        lock.get_mut("packages")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or(AdapterError::Install)?
+            .insert(String::new(), pkg_json.clone());
+        atomic_write_file(
+            &staging_dir.join("package-lock.json"),
+            &serde_json::to_vec_pretty(&lock).map_err(|_| AdapterError::Install)?,
+            0o600,
+            ctx.injected_fail(),
+        )?;
     }
 
     let mut npm_arg_values = vec![
@@ -3803,11 +3650,13 @@ pub fn build_managed_root_staging(
     }
     let npm_args: Vec<&str> = npm_arg_values.iter().map(String::as_str).collect();
 
-    let out = ctx
-        .runner
-        .run_command("npm", &npm_args, staging_dir, None)?;
-    if out.status != 0 {
-        return Err(AdapterError::Install);
+    if !needs_opencode_sdk {
+        let out = ctx
+            .runner
+            .run_command("npm", &npm_args, staging_dir, None)?;
+        if out.status != 0 {
+            return Err(AdapterError::Install);
+        }
     }
 
     let lock_file = staging_dir.join("package-lock.json");
@@ -4146,8 +3995,8 @@ pub mod tests {
             host_display_name: "Claude Code".to_string(),
             adapter_kind: CommunicationAdapterKind::Claude,
             state: AdapterHealthState::Healthy,
-            target_version: "0.13.0-connect.1".to_string(),
-            installed_version: Some("0.13.0-connect.1".to_string()),
+            target_version: CLAUDE_TARGET_VERSION.to_string(),
+            installed_version: Some(CLAUDE_TARGET_VERSION.to_string()),
             source_kind: AdapterSourceKind::Bundled,
             package_name: Some(CanonicalAdapterPackage::Claude),
             config_change_kind: ConfigChangeKind::AppPrivateManaged,
@@ -4443,7 +4292,10 @@ pub mod tests {
     #[test]
     fn test_11_app_private_health_requires_exact_package_core_sdk_marker_config_identity() {
         let dir = tempdir().unwrap();
-        let root = dir.path().join("managed/claude-intercom/0.13.0-connect.1");
+        let root = dir
+            .path()
+            .join("managed/claude-intercom")
+            .join(CLAUDE_TARGET_VERSION);
         fs::create_dir_all(&root).unwrap();
 
         assert!(!verify_managed_root_integrity(
@@ -4475,10 +4327,17 @@ pub mod tests {
 
     #[test]
     fn test_12_resource_sha256_verification() {
-        assert_eq!(CORE_RESOURCE_SHA256.len(), 64);
-        assert_eq!(CLAUDE_RESOURCE_SHA256.len(), 64);
-        assert_eq!(CODEX_RESOURCE_SHA256.len(), 64);
-        assert_eq!(OPENCODE_RESOURCE_SHA256.len(), 64);
+        let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+        for (name, digest) in [
+            (CORE_RESOURCE_NAME, CORE_RESOURCE_SHA256),
+            (CLAUDE_RESOURCE_NAME, CLAUDE_RESOURCE_SHA256),
+            (CODEX_RESOURCE_NAME, CODEX_RESOURCE_SHA256),
+            (OPENCODE_RESOURCE_NAME, OPENCODE_RESOURCE_SHA256),
+            (OPENCODE_SDK_RESOURCE_NAME, OPENCODE_SDK_RESOURCE_SHA256),
+            (OPENCODE_CLOSURE_RESOURCE_NAME, OPENCODE_CLOSURE_RESOURCE_SHA256),
+        ] {
+            assert_eq!(file_sha256(&resources.join(name)).unwrap(), digest, "resource mismatch: {name}");
+        }
     }
 
     #[test]
@@ -4759,11 +4618,28 @@ pub mod tests {
         assert!(staging_dir.join(".claude-plugin/plugin.json").is_file());
         assert!(staging_dir.join(".mcp.json").is_file());
         assert!(staging_dir.join("monitors/monitors.json").is_file());
+        assert!(staging_dir.join("hooks/hooks.json").is_file());
+        assert!(staging_dir.join("dist/session-hook.mjs").is_file());
+        for relative in ["hooks/hooks.json", "dist/session-hook.mjs"] {
+            let path = staging_dir.join(relative);
+            let original = fs::read(&path).unwrap();
+            fs::write(&path, b"tampered").unwrap();
+            assert!(!verify_managed_root_integrity(
+                &staging_dir,
+                "claude",
+                CLAUDE_TARGET_VERSION,
+                CLAUDE_IMMUTABLE_DIGESTS,
+                "@ctliz/agent-intercom-claude",
+                CLAUDE_RESOURCE_NAME,
+                CLAUDE_RESOURCE_SHA256,
+            ), "tampered lifecycle file accepted: {relative}");
+            fs::write(&path, original).unwrap();
+        }
         let lock = fs::read_to_string(staging_dir.join("package-lock.json")).unwrap();
         assert!(!lock.contains("/tmp/") && !lock.contains("/Users/"));
 
         // The OpenCode recipe is statically pinned to the local SDK tarball.
-        assert_eq!(OPENCODE_SDK_RESOURCE_NAME, "opencode-ai-plugin-1.18.18.tgz");
+        assert_eq!(OPENCODE_SDK_RESOURCE_NAME, format!("opencode-ai-plugin-{}.tgz", OPENCODE_SDK_TARGET_VERSION));
         assert_eq!(OPENCODE_SDK_RESOURCE_SHA256.len(), 64);
 
         let marker_path = staging_dir.join("tmuxdeck-managed.json");
@@ -4878,6 +4754,22 @@ pub mod tests {
         assert!(opencode_stage
             .join("node_modules/@opencode-ai/sdk")
             .is_dir());
+        let imports = Command::new("node")
+            .args(["--input-type=module", "-e", r#"
+                import assert from 'node:assert/strict';
+                import { readFileSync } from 'node:fs';
+                const plugin = await import('./dist/plugin.mjs');
+                const tui = await import('./dist/tui.mjs');
+                await import('@opencode-ai/plugin');
+                await import('@opencode-ai/sdk');
+                assert.equal(typeof plugin.default, 'function');
+                assert.equal(typeof tui.default, 'object');
+                assert.equal(JSON.parse(readFileSync('node_modules/@opencode-ai/sdk/package.json')).version, process.argv[1]);
+            "#, OPENCODE_SDK_TARGET_VERSION])
+            .current_dir(&opencode_stage)
+            .output()
+            .unwrap();
+        assert!(imports.status.success(), "OpenCode offline imports failed: {}", String::from_utf8_lossy(&imports.stderr));
     }
 
     #[test]
