@@ -1,7 +1,7 @@
 {
   "name": "tmuxdeck",
   "private": true,
-  "version": "1.14.17",
+  "version": "1.14.18",
   "type": "module",
   "scripts": {
     "dev": "vite",

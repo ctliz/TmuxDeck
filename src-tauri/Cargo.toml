@@ -1,6 +1,6 @@
 [package]
 name = "tmuxdeck"
-version = "1.14.17"
+version = "1.14.18"
 description = "A desktop control surface for tmux workspaces and AI coding agents"
 authors = ["ctliz"]
 edition = "2021"

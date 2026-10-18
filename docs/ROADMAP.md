@@ -5,7 +5,7 @@
 
 ## Current status
 
-- **Latest release:** v1.14.17 — signed/notarized macOS-only shipping, desktop CSP, tray capability split, pairing-token hardening
+- **Latest release:** v1.14.18 — agent-intercom plugin bumps with `scripts/update-plugins` automation, test-gated releases, private attach-script temp files
 - **Supported binary:** macOS Apple Silicon `.dmg` (Developer ID + notarization). Windows installers paused. Intel Mac from source only.
 - **Test suite:** 220+ backend tests passing + 2 on-device ignored, and 50+ frontend tests passing; physical-phone LAN acceptance remains pending
 - **Quality baseline:** tmux no-server error handled (ERR_TMUX_NO_SERVER bilingual friendly prompt)
