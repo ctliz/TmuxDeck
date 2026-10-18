@@ -26,6 +26,8 @@ const specs = {
   opencode: '@ctliz/agent-intercom-opencode',
   sdk: '@opencode-ai/plugin',
 };
+// Recommended extensions are checked but never packed into the app.
+const recommendedSpecs = { pi: '@ctliz/pi-intercom' };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tmuxdeck-plugins-'));
 const run = (cmd, args, cwd = tmp) => execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 const npm = args => run('npm', args);
@@ -164,8 +166,11 @@ function generateReadme(lock) {
   for (const p of Object.values(lock.packages)) {
     lines.push(`## ${p.name}`, '', `- File: \`${p.file}\``, `- Version: \`${p.version}\``, `- Size: \`${p.size}\` bytes`, `- SHA-256: \`${p.sha256}\``, `- SHA-512 SRI: \`${p.integrity}\``, `- npm tarball: <${p.tarball}>`, `- Repository: <${p.repository}>`, `- Source offer / release: <${p.repository}/releases/tag/v${p.version}>`, `- License: \`${p.license}\``, '');
   }
+  for (const p of Object.values(lock.recommended)) {
+    lines.push(`## Recommended: ${p.name} (not bundled)`, '', `- Version: \`${p.version}\``, `- Install: \`pi install npm:${p.name}@${p.version}\``, `- npm: <https://www.npmjs.com/package/${p.name}>`, `- SHA-512 SRI: \`${p.integrity}\``, '- Checked against npm latest by `scripts/update-plugins --check`; no tarball is bundled and no user installation is modified.', '');
+  }
   const c = lock.closure;
-  lines.push('## OpenCode Offline Dependency Closure', '', `- File: \`${c.file}\``, `- Size: \`${c.size}\` bytes`, `- SHA-256: \`${c.sha256}\``, `- SHA-512 SRI: \`${c.integrity}\``, `- Contents: node_modules for Core, OpenCode adapter, @opencode-ai/plugin ${lock.packages.sdk.version}, @opencode-ai/sdk ${lock.packages.sdk.version} and their dependencies (${Object.keys(c.packages).length} packages).`, '- Built with `--ignore-scripts --omit=optional`; optional native addons and .bin symlinks are excluded for notarization and portability.', '- The app installs OpenCode directly from the verified closure, without registry resolution or a populated npm cache.', '- Exact transitive package versions are recorded in plugins.lock.json; the existing closure is reused when direct package versions are unchanged.', '', '## Integrity and maintenance', '', '- Run `scripts/update-plugins` to query npm latest, npm pack, verify registry SHA-512 SRI, rebuild the SDK closure if needed, and generate Rust constants, Tauri resource references and this file.', '- Run `scripts/update-plugins --check` in CI to check registry versions and local/generated integrity without writing to the repository.', '- Use `scripts/update-plugins --check --offline` to verify only the frozen local artifacts and generated references.', '- New/renamed dist files, Claude hooks, monitors, commands and skills are included in immutable digests automatically. Required entrypoints fail closed if removed upstream; review API changes before accepting an upgrade.', '- The TmuxDeck-specific Codex launcher is resources/codex-launcher.mjs (not part of the upstream npm package); its digest is generated alongside upstream digests.', '- Pi is not bundled and is outside this updater. Existing Pi adapter settings are unchanged.', '- AGPL source/provenance and license files remain inside the original ctliz npm archives; SDK license is MIT.', '');
+  lines.push('## OpenCode Offline Dependency Closure', '', `- File: \`${c.file}\``, `- Size: \`${c.size}\` bytes`, `- SHA-256: \`${c.sha256}\``, `- SHA-512 SRI: \`${c.integrity}\``, `- Contents: node_modules for Core, OpenCode adapter, @opencode-ai/plugin ${lock.packages.sdk.version}, @opencode-ai/sdk ${lock.packages.sdk.version} and their dependencies (${Object.keys(c.packages).length} packages).`, '- Built with `--ignore-scripts --omit=optional`; optional native addons and .bin symlinks are excluded for notarization and portability.', '- The app installs OpenCode directly from the verified closure, without registry resolution or a populated npm cache.', '- Exact transitive package versions are recorded in plugins.lock.json; the existing closure is reused when direct package versions are unchanged.', '', '## Integrity and maintenance', '', '- Run `scripts/update-plugins` to query npm latest, npm pack, verify registry SHA-512 SRI, rebuild the SDK closure if needed, and generate Rust constants, Tauri resource references and this file.', '- Run `scripts/update-plugins --check` in CI to check registry versions and local/generated integrity without writing to the repository.', '- Use `scripts/update-plugins --check --offline` to verify only the frozen local artifacts and generated references.', '- New/renamed dist files, Claude hooks, monitors, commands and skills are included in immutable digests automatically. Required entrypoints fail closed if removed upstream; review API changes before accepting an upgrade.', '- The TmuxDeck-specific Codex launcher is resources/codex-launcher.mjs (not part of the upstream npm package); its digest is generated alongside upstream digests.', '- Pi is a recommended, non-bundled extension tracked by this updater. Existing Pi adapter settings are unchanged.', '- AGPL source/provenance and license files remain inside the original ctliz npm archives; SDK license is MIT.', '');
   return lines.join('\n');
 }
 
@@ -204,9 +209,18 @@ try {
     packages[id] = p;
     console.log(`${name} ${p.version}: ${p.sha256}`);
   }
+  const recommended = {};
+  for (const [id, name] of Object.entries(recommendedSpecs)) {
+    const old = previous?.recommended?.[id];
+    const meta = offline ? null : JSON.parse(npm(['view', name + '@latest', '--json']));
+    if (!meta && !old) throw new Error(`Missing recommended lock entry: ${name}; run scripts/update-plugins`);
+    if (check && meta && old?.version !== meta.version) throw new Error(`${name} (recommended, not bundled): locked ${old?.version ?? 'missing'}, npm latest ${meta.version}`);
+    recommended[id] = meta ? { name, version: meta.version, bundled: false, integrity: meta.dist.integrity } : old;
+    console.log(`${name} ${recommended[id].version}: recommended (not bundled)`);
+  }
   const closureChanged = !previous || ['core', 'opencode', 'sdk'].some(id => previous.packages[id].version !== packages[id].version);
   if (!check && closureChanged) buildClosure(packages);
-  const lock = { schemaVersion: 1, packages, codexLauncher: { file: 'codex-launcher.mjs', sha256: shaFile(path.join(resources, 'codex-launcher.mjs')) }, closure: closureInfo(packages) };
+  const lock = { schemaVersion: 1, packages, recommended, codexLauncher: { file: 'codex-launcher.mjs', sha256: shaFile(path.join(resources, 'codex-launcher.mjs')) }, closure: closureInfo(packages) };
   if (!check && previous && !closureChanged && lock.closure.sha256 !== previous.closure.sha256) throw new Error('Existing closure changed unexpectedly');
   output(lockPath, json(lock));
   output(path.join(root, 'src-tauri/src/commands/plugins.generated.rs'), generateRust(lock));

@@ -91,6 +91,14 @@
       "license": "MIT"
     }
   },
+  "recommended": {
+    "pi": {
+      "name": "@ctliz/pi-intercom",
+      "version": "0.14.0",
+      "bundled": false,
+      "integrity": "sha512-DOMgNoouw0r8DH54ha2dDP3yS7cGLtDUJgGrO04CNlTGeAKafqSWsmGAsmndRTg/dCbtTpeCRQ+t0xtZb/eCjw=="
+    }
+  },
   "codexLauncher": {
     "file": "codex-launcher.mjs",
     "sha256": "227cf7789fe3b0838b220f7dba2b9c1b961a9d3cfafb7b2adb14b0794a134ee0"

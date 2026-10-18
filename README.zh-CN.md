@@ -105,7 +105,7 @@ flowchart LR
 
 ## Agent 之间已建立通信。你才是唯一的缺失参与者。
 
-AI Coding Agent 正在形成它们自己的协作层 — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) 为 Pi、Codex、Claude Code、OpenCode、Grok 和 Agy 提供本地共享 Broker，使它们可以互相发现和发消息。对于 Pi，TmuxDeck 推荐官方 npm 包 [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom)。不要同时再装旧的 `git:github.com/ctliz/agent-intercom-pi`；两份插件会注册同一套工具，Pi 启动即退出。
+AI Coding Agent 正在形成它们自己的协作层 — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) 为 Pi、Codex、Claude Code、OpenCode、Grok 和 Agy 提供本地共享 Broker，使它们可以互相发现和发消息。对于 Pi，TmuxDeck 推荐官方 npm 包 [`@ctliz/pi-intercom`](https://www.npmjs.com/package/@ctliz/pi-intercom)（推荐版本见 [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)）。不要同时再装旧的 `git:github.com/ctliz/agent-intercom-pi`；两份插件会注册同一套工具，Pi 启动即退出。
 
 但这个总线此前唯独缺少**人类接口**。
 
@@ -167,7 +167,7 @@ npm install -g opencode-ai
 
 | Agent | 适配器安装命令 | 激活 / MCP 注册 |
 | :--- | :--- | :--- |
-| **Pi** | `pi install npm:@ctliz/pi-intercom@0.12.1` | 启动自动加载；安装或更新后，所有已打开的 Pi 会话都需执行 `/reload`。独立 Pi 可用 `/intercom-join` 加入已有 TmuxDeck 工作区通话圈，不会成为 Team Worker。不要同时安装 git 源。 |
+| **Pi** | `pi install npm:@ctliz/pi-intercom@0.14.0`（推荐版本见 [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)） | 启动自动加载；安装或更新后，所有已打开的 Pi 会话都需执行 `/reload`。独立 Pi 可用 `/intercom-join` 加入已有 TmuxDeck 工作区通话圈，不会成为 Team Worker。不要同时安装 git 源。 |
 | **Claude Code** | macOS 可在“创建工作区”弹窗安装 TmuxDeck 固定版本的托管适配器（版本与摘要见 [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)）；不会修改全局 npm。 | 可选“使用托管 Claude”（以 `--tui --safe` 运行）或持久切换为“标准 Claude”。已有全局 `cci` 保持不变，仍可作为自定义命令使用。 |
 | **Codex** | `npm install -g @ctliz/agent-intercom-codex@connect` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @ctliz/agent-intercom-opencode@connect` | 在 `opencode.json` 与 `tui.json` 中配置 `plugin.mjs` 和 `tui.mjs`；`tui.mjs` 提供 `/intercom`、`/intercom-name` 和 `/intercom-id` |

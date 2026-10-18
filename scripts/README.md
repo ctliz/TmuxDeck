@@ -12,7 +12,7 @@ scripts/update-plugins --check           # CI: compare npm latest + verify froze
 scripts/update-plugins --check --offline # verify the existing lock without network
 ```
 
-`src-tauri/resources/plugins.lock.json` records versions, archive size/SHA-256/SHA-512 SRI, immutable file digests, Core tree digest, and the OpenCode dependency closure. The script generates `commands/plugins.generated.rs`, Tauri resource references and `resources/README.md`. Rust consumes the generated constants; JS package probes use the same target versions rather than hardcoded strings.
+`src-tauri/resources/plugins.lock.json` records versions, archive size/SHA-256/SHA-512 SRI, immutable file digests, Core tree digest, and the OpenCode dependency closure. Its `recommended.pi` entry tracks npm latest for `@ctliz/pi-intercom`; `--check` reports version drift, but Pi is never packed into the app or installed automatically. The script generates `commands/plugins.generated.rs`, Tauri resource references and `resources/README.md`. Rust consumes the generated constants; JS package probes use the same target versions rather than hardcoded strings.
 
 The OpenCode closure is rebuilt when Core, the OpenCode adapter or SDK versions change. It omits optional native addons and npm `.bin` links. The app extracts this verified complete snapshot and promotes its package lock directly, so installation works with an empty npm cache. Required entrypoints are checked before accepting an upstream layout change; review upstream API/permission changes and run `cargo build`, `cargo test` and `npm run build` after every update. `--check` never rewrites the repository and exits nonzero for drift.
 

@@ -65,7 +65,7 @@ Two changes:
 
 ### Why there is no quoting to worry about
 
-All terminals execute the same intermediate script `/tmp/tmuxdeck-<session>.sh`, which contains `exec tmux attach-session -t '<name>'`. Because the shell handles quoting inside the script, each terminal launch only needs to pass a script path. Do not build attach commands as inline strings when adding a terminal; follow this pattern.
+Each terminal launch gets a randomly named `attach-<random>.sh` script in `$TMPDIR/tmuxdeck-<uid>/` (0700 directory and script). Creation is exclusive and rejects symlinks; old scripts are removed after seven days. The script guards `tmux has-session` and falls back to a shell if the session is gone. Because the shell handles quoting inside the script, each terminal launch only needs to pass a script path. Do not build attach commands as inline strings when adding a terminal; follow this pattern.
 
 ## Adding an agent
 

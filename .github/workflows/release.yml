@@ -124,6 +124,14 @@ jobs:
           workspaces: ./src-tauri -> target
       - name: Install dependencies
         run: npm ci
+      - name: Run frontend tests
+        run: npm test
+      - name: Check types and build frontend
+        run: npm run build
+      - name: Run Rust tests
+        env:
+          TERM: xterm-256color
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

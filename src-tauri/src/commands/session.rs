@@ -15,28 +15,111 @@ use crate::tmux::{
     is_session_attached, is_session_missing_err, run_tmux, sanitize_session_name,
 };
 
-/// 写出防御版 attach 脚本（has-session 守卫 + shell 降级）。
-/// 脚本文件内容是运行时读取的——即使旧 Ghostty 窗口的 command 快照
-/// 指向此路径，重写后也能优雅降级，不再弹 "failed to launch" 窗口。
-fn write_attach_script(sanitized_name: &str) -> Result<String, String> {
-    let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
-    let script_path = format!("/tmp/tmuxdeck-{}.sh", sanitized_name);
-    let script_content = format!(
-        "#!/bin/bash\nif '{}' has-session -t '{}' 2>/dev/null; then\n  exec '{}' attach-session -t '{}'\nelse\n  echo \"Session '{}' no longer exists. Starting a shell instead.\"\n  exec \"$SHELL\"\nfi\n",
-        tmux, sanitized_name, tmux, sanitized_name, sanitized_name
-    );
-    std::fs::write(&script_path, script_content)
-        .map_err(|e| format!("ERR_SCRIPT_WRITE_FAILED|{}", e))?;
-    #[cfg(unix)]
+// Attach scripts can be inherited by terminal splits, so keep them for seven
+// days. Never rewrite the predictable /tmp paths used by older versions.
+#[cfg(unix)]
+const ATTACH_SCRIPT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+#[cfg(unix)]
+fn private_attach_dir(base: &std::path::Path, uid: u32) -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let dir = base.join(format!("tmuxdeck-{uid}"));
+    match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = std::fs::symlink_metadata(&dir)?;
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.permissions().mode() & 0o777 != 0o700
     {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(&script_path) {
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            let _ = std::fs::set_permissions(&script_path, perms);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "unsafe attach-script directory",
+        ));
+    }
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn cleanup_attach_scripts(
+    dir: &std::path::Path,
+    now: std::time::SystemTime,
+) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(id) = name
+            .strip_prefix("attach-")
+            .and_then(|s| s.strip_suffix(".sh"))
+        else {
+            continue;
+        };
+        if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        if metadata.is_file()
+            && metadata.uid() == unsafe { libc::geteuid() }
+            && metadata
+                .modified()
+                .ok()
+                .and_then(|mtime| now.duration_since(mtime).ok())
+                .is_some_and(|age| age > ATTACH_SCRIPT_MAX_AGE)
+        {
+            // unlink does not follow symlinks; never inspect or remove targets.
+            let _ = std::fs::remove_file(entry.path());
         }
     }
-    Ok(script_path)
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_attach_script(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    if let Err(error) = file.write_all(content.as_bytes()) {
+        let _ = std::fs::remove_file(path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_attach_script_in(
+    base: &std::path::Path,
+    tmux: &str,
+    name: &str,
+) -> std::io::Result<String> {
+    let dir = private_attach_dir(base, unsafe { libc::geteuid() })?;
+    cleanup_attach_scripts(&dir, std::time::SystemTime::now())?;
+    let mut random = [0u8; 16];
+    getrandom::getrandom(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
+    let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let path = dir.join(format!("attach-{id}.sh"));
+    let tmux = shell_single_quote(tmux);
+    let name = shell_single_quote(name);
+    let content = format!(
+        "#!/bin/bash\nif {tmux} has-session -t {name} 2>/dev/null; then\n  exec {tmux} attach-session -t {name}\nelse\n  printf '%s\\n' 'Session no longer exists. Starting a shell instead.'\n  exec \"${{SHELL:-/bin/sh}}\"\nfi\n"
+    );
+    create_attach_script(&path, &content)?;
+    path.into_os_string()
+        .into_string()
+        .map_err(|_| std::io::Error::other("non-UTF-8 attach-script path"))
+}
+
+#[cfg(unix)]
+fn write_attach_script(sanitized_name: &str) -> Result<String, String> {
+    let tmux = check_tmux_installed().ok_or_else(|| "ERR_TMUX_NOT_FOUND".to_string())?;
+    write_attach_script_in(&std::env::temp_dir(), &tmux, sanitized_name)
+        .map_err(|error| format!("ERR_SCRIPT_WRITE_FAILED|{error}"))
 }
 
 #[tauri::command]
@@ -60,11 +143,8 @@ pub fn open_session(name: String, terminal_id: String) -> Result<(), String> {
             // session 已消失：不要继续生成脚本启动终端——attach 必败，
             // 脚本 39ms 退出会让 Ghostty 弹 "failed to launch" 窗口。
             if is_session_missing_err(&err_msg) {
-                // 自愈：仍把脚本文件重写为防御版（has-session 守卫 + shell 降级）。
-                // 遗留 Ghostty 窗口的 surface command 是创建时的脚本路径快照，
-                // 但脚本内容运行时读取——重写后旧窗口按 Cmd+D split 继承的也是
-                // 防御脚本，attach 失败时优雅降级而非弹 "failed to launch" 窗口。
-                let _ = write_attach_script(&sanitized_name);
+                // Existing randomized scripts already guard has-session and
+                // fall back to a shell. Do not touch legacy shared /tmp paths.
                 return Err("ERR_SESSION_NOT_FOUND".to_string());
             }
         }
@@ -1091,6 +1171,126 @@ pub fn rename_session(old_name: String, new_name: String) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    struct AttachTestDir(std::path::PathBuf);
+
+    #[cfg(unix)]
+    impl AttachTestDir {
+        fn new() -> Self {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut bytes = [0u8; 16];
+            getrandom::getrandom(&mut bytes).unwrap();
+            let id: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let path = std::env::temp_dir().join(format!("tmuxdeck-attach-test-{id}"));
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&path)
+                .unwrap();
+            Self(path)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for AttachTestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_scripts_are_private_random_and_shell_safe() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let base = AttachTestDir::new();
+        let first = write_attach_script_in(&base.0, "/opt/tmux's/bin/tmux", "alpha").unwrap();
+        let second = write_attach_script_in(&base.0, "/opt/tmux's/bin/tmux", "alpha").unwrap();
+        assert_ne!(first, second);
+        let file = std::fs::metadata(&first).unwrap();
+        assert_eq!(file.permissions().mode() & 0o777, 0o700);
+        assert_eq!(file.uid(), unsafe { libc::geteuid() });
+        let parent = std::path::Path::new(&first).parent().unwrap();
+        assert_eq!(
+            std::fs::metadata(parent).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let content = std::fs::read_to_string(first).unwrap();
+        assert!(content.contains("'/opt/tmux'\\''s/bin/tmux' has-session"));
+        assert!(content.contains("exec \"${SHELL:-/bin/sh}\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_directory_rejects_symlinks_wrong_owner_and_permissions() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let base = AttachTestDir::new();
+        let uid = unsafe { libc::geteuid() };
+        let dir = base.0.join(format!("tmuxdeck-{uid}"));
+        symlink(&base.0, &dir).unwrap();
+        assert!(private_attach_dir(&base.0, uid).is_err());
+        std::fs::remove_file(&dir).unwrap();
+        std::fs::write(&dir, "not a directory").unwrap();
+        assert!(private_attach_dir(&base.0, uid).is_err());
+        std::fs::remove_file(&dir).unwrap();
+        let dir = private_attach_dir(&base.0, uid).unwrap();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(private_attach_dir(&base.0, uid).is_err());
+        // Creating a directory for another uid does not make it trusted.
+        assert!(private_attach_dir(&base.0, uid.wrapping_add(1)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_creation_never_overwrites_existing_files_or_symlinks() {
+        use std::os::unix::fs::symlink;
+        let base = AttachTestDir::new();
+        let target = base.0.join("target");
+        std::fs::write(&target, "keep").unwrap();
+        assert!(create_attach_script(&target, "overwrite").is_err());
+        let link = base.0.join("link");
+        symlink(&target, &link).unwrap();
+        assert!(create_attach_script(&link, "overwrite").is_err());
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_cleanup_only_removes_old_owned_scripts() {
+        use std::os::unix::fs::symlink;
+        let base = AttachTestDir::new();
+        let dir = private_attach_dir(&base.0, unsafe { libc::geteuid() }).unwrap();
+        let old = dir.join(format!("attach-{}.sh", "a".repeat(32)));
+        let fresh = dir.join(format!("attach-{}.sh", "b".repeat(32)));
+        let unrelated = dir.join("unrelated.sh");
+        let link = dir.join(format!("attach-{}.sh", "c".repeat(32)));
+        create_attach_script(&old, "old").unwrap();
+        create_attach_script(&fresh, "fresh").unwrap();
+        create_attach_script(&unrelated, "keep").unwrap();
+        let now = std::time::SystemTime::now();
+        let times = std::fs::FileTimes::new()
+            .set_modified(now - ATTACH_SCRIPT_MAX_AGE - std::time::Duration::from_secs(60));
+        for file in [&old, &unrelated] {
+            std::fs::File::options()
+                .write(true)
+                .open(file)
+                .unwrap()
+                .set_times(times)
+                .unwrap();
+        }
+        symlink(&unrelated, &link).unwrap();
+        cleanup_attach_scripts(&dir, now).unwrap();
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(unrelated.exists());
+        assert!(std::fs::symlink_metadata(link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
 
     #[test]
     fn resolve_agent_uses_detected_shell_and_agent_paths() {

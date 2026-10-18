@@ -64,6 +64,14 @@ These npm artifacts are used for optional app-private managed adapters. Installa
 - Source offer / release: <https://github.com/anomalyco/opencode/releases/tag/v1.19.3>
 - License: `MIT`
 
+## Recommended: @ctliz/pi-intercom (not bundled)
+
+- Version: `0.14.0`
+- Install: `pi install npm:@ctliz/pi-intercom@0.14.0`
+- npm: <https://www.npmjs.com/package/@ctliz/pi-intercom>
+- SHA-512 SRI: `sha512-DOMgNoouw0r8DH54ha2dDP3yS7cGLtDUJgGrO04CNlTGeAKafqSWsmGAsmndRTg/dCbtTpeCRQ+t0xtZb/eCjw==`
+- Checked against npm latest by `scripts/update-plugins --check`; no tarball is bundled and no user installation is modified.
+
 ## OpenCode Offline Dependency Closure
 
 - File: `opencode-sdk-closure.tgz`
@@ -82,5 +90,5 @@ These npm artifacts are used for optional app-private managed adapters. Installa
 - Use `scripts/update-plugins --check --offline` to verify only the frozen local artifacts and generated references.
 - New/renamed dist files, Claude hooks, monitors, commands and skills are included in immutable digests automatically. Required entrypoints fail closed if removed upstream; review API changes before accepting an upgrade.
 - The TmuxDeck-specific Codex launcher is resources/codex-launcher.mjs (not part of the upstream npm package); its digest is generated alongside upstream digests.
-- Pi is not bundled and is outside this updater. Existing Pi adapter settings are unchanged.
+- Pi is a recommended, non-bundled extension tracked by this updater. Existing Pi adapter settings are unchanged.
 - AGPL source/provenance and license files remain inside the original ctliz npm archives; SDK license is MIT.

@@ -105,7 +105,7 @@ flowchart LR
 
 ## Agents already talk to each other. You were the missing participant.
 
-Coding agents are growing their own coordination layer — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) gives Pi, Codex, Claude Code, OpenCode, Grok, and Agy sessions a shared local broker so they can find and message each other. For Pi, TmuxDeck recommends the official npm package [`@ctliz/pi-intercom@0.12.1`](https://www.npmjs.com/package/@ctliz/pi-intercom). Do not also install the older `git:github.com/ctliz/agent-intercom-pi` source; two copies register the same tools and Pi exits on launch.
+Coding agents are growing their own coordination layer — [Agent Intercom](https://github.com/ctliz/agent-intercom-pi) gives Pi, Codex, Claude Code, OpenCode, Grok, and Agy sessions a shared local broker so they can find and message each other. For Pi, TmuxDeck recommends the official npm package [`@ctliz/pi-intercom`](https://www.npmjs.com/package/@ctliz/pi-intercom) (recommended version in [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)). Do not also install the older `git:github.com/ctliz/agent-intercom-pi` source; two copies register the same tools and Pi exits on launch.
 
 What that bus has no adapter for is **the human**.
 
@@ -171,7 +171,7 @@ Enable cross-harness discovery, live status, and direct messaging across agent s
 
 | Agent | Adapter Installation | Registration / Activation |
 | :--- | :--- | :--- |
-| **Pi** | `pi install npm:@ctliz/pi-intercom@0.12.1` | Automatic on start; run `/reload` in every open Pi session after install/update. A standalone Pi can join an existing TmuxDeck workspace circle with `/intercom-join` without becoming a Team Worker. Do not install the git source at the same time. |
+| **Pi** | `pi install npm:@ctliz/pi-intercom@0.14.0` (recommended version in [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)) | Automatic on start; run `/reload` in every open Pi session after install/update. A standalone Pi can join an existing TmuxDeck workspace circle with `/intercom-join` without becoming a Team Worker. Do not install the git source at the same time. |
 | **Claude Code** | On macOS, install TmuxDeck's pinned Managed Adapter from the Create Workspace modal (exact version and integrity in [`plugins.lock.json`](src-tauri/resources/plugins.lock.json)); global npm is not changed. | Choose **Use Managed** (runs with `--tui --safe`) or persistently switch to **Standard Claude**. A global `cci` is left untouched and may still be used as a custom command. |
 | **Codex** | `npm install -g @ctliz/agent-intercom-codex@connect` | `codex mcp add codex-intercom -- codex-intercom-mcp` |
 | **OpenCode** | `cd ~/.config/opencode && npm install @ctliz/agent-intercom-opencode@connect` | Register `plugin.mjs` & `tui.mjs` in `opencode.json` & `tui.json`; `tui.mjs` adds `/intercom`, `/intercom-name`, and `/intercom-id` |

@@ -1,5 +1,5 @@
 {
-  "name": "tauri-app",
+  "name": "tmuxdeck",
   "private": true,
   "version": "1.14.17",
   "type": "module",
